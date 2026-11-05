@@ -353,6 +353,10 @@ func stat_level(id: String) -> int:
 	return GameState.stat_progress(int(stat_burned.get(id, 0)))["level"]
 
 
+func stat_eff(id: String) -> float:
+	return GameState.stat_eff(id, stat_level(id))
+
+
 func stat_room(id: String) -> int:
 	return maxi(0, GameState.stat_total_cost() - int(stat_burned.get(id, 0)))
 
@@ -368,17 +372,17 @@ func burn_into_stat(id: String, amount: int) -> int:
 
 
 func _apply_stats() -> void:
-	var new_max := base_max_hp + 15.0 * stat_level("endurance") + (60.0 if has_perk("titan") else 0.0)
+	var new_max := base_max_hp + 15.0 * stat_eff("endurance") + (60.0 if has_perk("titan") else 0.0)
 	if new_max > max_hp:
 		hp += new_max - max_hp
 	max_hp = new_max
 	hp = minf(hp, max_hp)
-	GameState.points_mult = (1.0 + 0.06 * stat_level("fortune")) * (1.2 if has_perk("banker") else 1.0)
+	GameState.points_mult = (1.0 + 0.06 * stat_eff("fortune")) * (1.2 if has_perk("banker") else 1.0)
 	hp_changed.emit(hp, max_hp, overshield)
 
 
 func dmg_mult() -> float:
-	var m := (1.0 + 0.08 * stat_level("strength")) * (1.06 if GameState.has_unlock("damage") else 1.0)
+	var m := (1.0 + 0.08 * stat_eff("strength")) * (1.06 if GameState.has_unlock("damage") else 1.0)
 	if has_perk("hollow"):
 		m *= 1.15
 	if has_perk("mastery"):
@@ -387,19 +391,19 @@ func dmg_mult() -> float:
 
 
 func speed_mult() -> float:
-	return (1.0 + 0.04 * stat_level("speed")) * (1.3 if adrenaline_timer > 0.0 else 1.0)
+	return (1.0 + 0.04 * stat_eff("speed")) * (1.3 if adrenaline_timer > 0.0 else 1.0)
 
 
 func dex_mult() -> float:
-	return (1.0 + 0.07 * stat_level("dexterity")) * (1.25 if has_perk("hands") else 1.0) * (1.2 if adrenaline_timer > 0.0 else 1.0)
+	return (1.0 + 0.07 * stat_eff("dexterity")) * (1.25 if has_perk("hands") else 1.0) * (1.2 if adrenaline_timer > 0.0 else 1.0)
 
 
 func stamina_duration() -> float:
-	return 3.4 * (1.0 + 0.2 * stat_level("stamina"))
+	return 3.4 * (1.0 + 0.2 * stat_eff("stamina"))
 
 
 func stamina_recover_time() -> float:
-	return 2.6 / (1.0 + 0.12 * stat_level("stamina"))
+	return 2.6 / (1.0 + 0.12 * stat_eff("stamina"))
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +500,7 @@ func _update_timers(delta: float) -> void:
 			_reload_step()
 
 	# Health regen
-	var vit := stat_level("vitality")
+	var vit := stat_eff("vitality")
 	if regen_delay_timer > 0.0:
 		regen_delay_timer -= delta
 	elif hp < max_hp and not is_downed:
@@ -799,7 +803,7 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 			GameState.play_sfx("dry_fire", -4.0, 1.0)
 		return
 
-	var rate_mult := 1.0 + 0.04 * stat_level("reflexes")
+	var rate_mult := 1.0 + 0.04 * stat_eff("reflexes")
 	if stim_timer > 0.0:
 		rate_mult *= 1.35
 	if pap_timer > 0.0:
@@ -1407,7 +1411,7 @@ func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
 	if is_dead or is_downed or revive_invuln > 0.0:
 		return
-	var dmg := amount * (1.0 - 0.025 * stat_level("endurance"))
+	var dmg := amount * (1.0 - minf(0.6, 0.025 * stat_eff("endurance")))
 	if is_monster_form:
 		dmg *= 0.60
 	if stim_timer > 0.0:
@@ -1415,7 +1419,7 @@ func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
 	if has_perk("kevlar"):
 		dmg *= 0.85
 
-	regen_delay_timer = maxf(1.6, 3.8 - 0.22 * stat_level("vitality"))
+	regen_delay_timer = maxf(1.2, 3.8 - 0.22 * stat_eff("vitality"))
 	add_camera_shake(0.22)
 	hurt_roll = randf_range(-1.0, 1.0) * deg_to_rad(4.0)
 	damaged.emit(_from_pos)
@@ -1569,13 +1573,18 @@ func refill_all_ammo() -> void:
 # Returns the weapon's stats with any forge upgrade applied.
 func get_weapon_cfg(w_id: String) -> Dictionary:
 	var base: Dictionary = GameState.WEAPONS[w_id]
-	if not upgraded.has(w_id):
+	if not upgraded.has(w_id) and mag_lv == 0 and reserve_lv == 0:
 		return base
 	var cfg := base.duplicate()
+	var mk := 1.5 if upgraded.has(w_id) else 1.0
+	var rk := 2.0 if upgraded.has(w_id) else 1.0
+	# Supply Depot ammo upgrades: each level adds +50% of the base size
+	cfg["mag_size"] = int(ceil(float(base["mag_size"]) * mk * (1.0 + 0.5 * float(mag_lv))))
+	cfg["reserve_max"] = int(ceil(float(base["reserve_max"]) * rk * (1.0 + 0.5 * float(reserve_lv))))
+	if not upgraded.has(w_id):
+		return cfg
 	cfg["name"] = "%s  MK-II" % base["name"]
 	cfg["damage"] = float(base["damage"]) * 2.1
-	cfg["mag_size"] = int(ceil(float(base["mag_size"]) * 1.5))
-	cfg["reserve_max"] = int(base["reserve_max"]) * 2
 	cfg["reload_time"] = float(base["reload_time"]) * 0.85
 	cfg["penetration"] = int(base.get("penetration", 0)) + 1
 	return cfg
@@ -2186,7 +2195,7 @@ func export_state() -> Dictionary:
 		"kills": GameState.total_kills, "headshots": GameState.headshots, "bosses": GameState.bosses_slain,
 		"weapons": Array(weapons_owned), "slot": active_slot, "mag": mag_ammo.duplicate(),
 		"reserve": reserve_ammo.duplicate(), "upgraded": upgraded.duplicate(), "stats": stat_burned.duplicate(),
-		"revives": revives, "grenades": grenades, "c4": c4_count, "mines": mines, "perks": perks.duplicate(),
+		"revives": revives, "grenades": grenades, "c4": c4_count, "mines": mines, "perks": perks.duplicate(), "mag_lv": mag_lv, "reserve_lv": reserve_lv,
 		"skill1": borrowed_skill, "skill1_cd": borrowed_cd_max, "skill2": borrowed_skill2, "skill2_cd": borrowed_cd_max2,
 	}
 
@@ -2214,6 +2223,8 @@ func import_state(d: Dictionary) -> void:
 	c4_count = int(d.get("c4", 0))
 	mines = int(d.get("mines", 0))
 	perks = d.get("perks", {})
+	mag_lv = int(d.get("mag_lv", 0))
+	reserve_lv = int(d.get("reserve_lv", 0))
 	borrowed_skill = String(d.get("skill1", ""))
 	borrowed_cd_max = float(d.get("skill1_cd", 0.0))
 	borrowed_skill2 = String(d.get("skill2", ""))
@@ -2236,6 +2247,8 @@ var c4_count: int = 0
 # Supply Depot perks (permanent for the run) and timed boosts
 var perks: Dictionary = {}
 var adrenaline_timer: float = 0.0
+var mag_lv: int = 0 # Supply Depot: bigger magazines
+var reserve_lv: int = 0 # Supply Depot: more spare ammo
 var last_stand_cd: float = 0.0
 
 

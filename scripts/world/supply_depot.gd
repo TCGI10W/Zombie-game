@@ -19,6 +19,8 @@ const ITEMS := [
 	{"id": "c4", "cat": "EQUIPMENT", "icon": "▤", "name": "C4 CHARGES x2", "desc": "Tap [T] to toss and stick, hold [T] to detonate.", "base": 1500, "step": 500},
 	{"id": "revive", "cat": "EQUIPMENT", "icon": "✚", "name": "SECOND WIND CHARGE", "desc": "Get back up by yourself (hold up to 3).", "base": 3500, "step": 1500},
 	{"id": "relic", "cat": "EQUIPMENT", "icon": "◆", "name": "RELIC CACHE", "desc": "A random relic: stats or another operator's skill.", "base": 5000, "step": 2500},
+	{"id": "magup", "cat": "EQUIPMENT", "icon": "▥", "name": "EXTENDED MAGS", "desc": "+50% magazine size on every gun. No level cap.", "base": 2500, "step": 0, "levels": true},
+	{"id": "ammoup", "cat": "EQUIPMENT", "icon": "▦", "name": "AMMO BELT", "desc": "+50% max spare ammo on every gun. No level cap.", "base": 1500, "step": 0, "levels": true},
 	# SUPPLIES (instant or timed)
 	{"id": "medkit", "cat": "SUPPLIES", "icon": "✚", "name": "FIELD MEDKIT", "desc": "Instantly restore all your health.", "base": 800, "step": 200},
 	{"id": "adrenaline", "cat": "SUPPLIES", "icon": "⚡", "name": "ADRENALINE SHOT", "desc": "30s: +30% move speed, +20% fire rate and reload speed.", "base": 2500, "step": 500},
@@ -109,7 +111,27 @@ func price(id: String) -> int:
 	var it := item(id)
 	if it.is_empty():
 		return 0
+	if id == "magup" and is_instance_valid(_player):
+		var l := int(_player.mag_lv)
+		return 2500 + 2500 * l + 500 * l * l
+	if id == "ammoup" and is_instance_valid(_player):
+		var l2 := int(_player.reserve_lv)
+		return 1500 + 1500 * l2 + 300 * l2 * l2
 	return int(it["base"]) + int(it["step"]) * int(_bought.get(id, 0))
+
+
+# Live text for the level-up items: what the current gun goes from -> to.
+func _level_desc(id: String) -> String:
+	var w_id: String = _player.get_current_weapon_id()
+	var base: Dictionary = GameState.WEAPONS[w_id]
+	var up: bool = _player.upgraded.has(w_id)
+	if id == "magup":
+		var lv := int(_player.mag_lv)
+		var b := float(base["mag_size"]) * (1.5 if up else 1.0)
+		return "LV %d → %d  •  +50%% mag size on every gun.\n%s mag: %d → %d" % [lv, lv + 1, base["name"], int(ceil(b * (1.0 + 0.5 * lv))), int(ceil(b * (1.0 + 0.5 * (lv + 1))))]
+	var lv2 := int(_player.reserve_lv)
+	var b2 := float(base["reserve_max"]) * (2.0 if up else 1.0)
+	return "LV %d → %d  •  +50%% max spare ammo on every gun.\n%s spare: %d → %d" % [lv2, lv2 + 1, base["name"], int(ceil(b2 * (1.0 + 0.5 * lv2))), int(ceil(b2 * (1.0 + 0.5 * (lv2 + 1))))]
 
 
 func get_prompt(_p: Node3D) -> String:
@@ -283,6 +305,7 @@ func _make_card(it: Dictionary) -> Control:
 	v.add_child(_label("%s  •  %s" % [TIER_NAMES[t], kind], 11, Color(col, 0.9)))
 	v.add_child(_label(String(it["name"]), 18, Color(0.95, 0.96, 0.97)))
 	var desc := _label(String(it["desc"]), 13, Color(0.66, 0.72, 0.77))
+	desc.name = "Desc"
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(desc)
@@ -358,6 +381,8 @@ func _refresh() -> void:
 		var pl := card.find_child("Price", true, false) as Label
 		var b := card.find_child("Buy", true, false) as Button
 		pl.text = "%s PTS" % fmt(cost)
+		if item(id).get("levels", false):
+			(card.find_child("Desc", true, false) as Label).text = _level_desc(id)
 		pl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.3) if GameState.points >= cost else Color(1.0, 0.4, 0.35))
 		if note != "":
 			b.text = note
@@ -424,6 +449,20 @@ func _buy(id: String) -> void:
 		"mines":
 			_player.mines = mini(4, int(_player.mines) + 2)
 			_player.status_banner_requested.emit("MINES x%d — PRESS [B] TO DROP ONE" % _player.mines, Color(1.0, 0.6, 0.3))
+		"magup":
+			_player.mag_lv += 1
+			_player._emit_ammo()
+			GameState.play_sfx("mag_in", 0.0, 0.9)
+			_player.status_banner_requested.emit("EXTENDED MAGS LV %d — RELOAD TO FILL THE BIGGER MAG" % _player.mag_lv, Color(0.55, 0.9, 1.0))
+		"ammoup":
+			_player.reserve_lv += 1
+			for w in _player.weapons_owned:
+				var cfg: Dictionary = _player.get_weapon_cfg(w)
+				var gain := int(ceil(float(GameState.WEAPONS[w]["reserve_max"]) * 0.5))
+				_player.reserve_ammo[w] = mini(int(cfg["reserve_max"]), int(_player.reserve_ammo.get(w, 0)) + gain)
+			_player._emit_ammo()
+			GameState.play_sfx("mag_in", 0.0, 0.8)
+			_player.status_banner_requested.emit("AMMO BELT LV %d — MORE SPARE AMMO" % _player.reserve_lv, Color(0.55, 0.9, 1.0))
 		"relic":
 			var wm := get_tree().current_scene.get_node_or_null("WaveManager")
 			if wm:

@@ -226,7 +226,7 @@ func _burn(id: String, requested: int) -> void:
 
 
 func _refresh() -> void:
-	_points_lbl.text = "%d PTS" % GameState.points
+	_points_lbl.text = "%s PTS" % preload("res://scripts/world/supply_depot.gd").fmt(GameState.points)
 	_points_lbl.add_theme_color_override("font_color", Color(0.98, 0.8, 0.3))
 	for st in GameState.STATS:
 		var id: String = st["id"]
@@ -249,21 +249,22 @@ func _refresh() -> void:
 func _effect_text(id: String, lv: int) -> String:
 	if lv == 0:
 		return "no bonus yet"
+	var e := GameState.stat_eff(id, lv)
 	match id:
 		"strength":
-			return "+%d%% damage" % (8 * lv)
+			return "+%d%% damage" % roundi(8.0 * e)
 		"speed":
-			return "+%d%% move speed" % (4 * lv)
+			return "+%d%% move speed" % roundi(4.0 * e)
 		"endurance":
-			return "+%d HP, %.1f%% resist" % [15 * lv, 2.5 * lv]
+			return "+%d HP, %.1f%% resist" % [roundi(15.0 * e), minf(60.0, 2.5 * e)]
 		"stamina":
-			return "%.1fs sprint" % (3.4 * (1.0 + 0.2 * lv))
+			return "%.1fs sprint" % (3.4 * (1.0 + 0.2 * e))
 		"dexterity":
-			return "+%d%% handling speed" % (7 * lv)
+			return "+%d%% handling speed" % roundi(7.0 * e)
 		"reflexes":
-			return "+%d%% fire rate" % (4 * lv)
+			return "+%d%% fire rate" % roundi(4.0 * e)
 		"vitality":
-			return "+%d%% regen, %.1fs delay" % [15 * lv, maxf(1.6, 3.8 - 0.22 * lv)]
+			return "+%d%% regen, %.1fs delay" % [roundi(15.0 * e), maxf(1.2, 3.8 - 0.22 * e)]
 		"fortune":
-			return "+%d%% points" % (6 * lv)
+			return "+%d%% points" % roundi(6.0 * e)
 	return ""

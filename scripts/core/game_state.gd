@@ -171,17 +171,28 @@ const WEAPONS := {
 
 # Upgradeable stats bought at the Augment Furnace. Points burned into a stat
 # fill its bar; each level costs more than the last.
-const STAT_MAX_LEVEL := 10
-const STAT_LEVEL_COSTS := [500, 750, 1000, 1500, 2000, 2750, 3500, 4500, 6000, 8000]
+const STAT_MAX_LEVEL := 30
+
+
+# Cost of going from level `lv` to `lv + 1`. Cheap early, steeper late.
+static func stat_level_cost(lv: int) -> int:
+	return 300 + 150 * lv + 12 * lv * lv
+
+
+# Levels past 10 count for half (speed for a quarter) so maxed stats stay sane.
+static func stat_eff(id: String, lv: int) -> float:
+	if lv <= 10:
+		return float(lv)
+	return 10.0 + float(lv - 10) * (0.25 if id == "speed" else 0.5)
 const STATS := [
-	{"id": "strength", "name": "STRENGTH", "color": Color(1.0, 0.36, 0.28), "per_level": "+8% weapon, knife & grenade damage"},
-	{"id": "speed", "name": "SPEED", "color": Color(0.35, 0.85, 1.0), "per_level": "+4% movement speed"},
-	{"id": "endurance", "name": "ENDURANCE", "color": Color(1.0, 0.62, 0.25), "per_level": "+15 max health & +2.5% damage resistance"},
-	{"id": "stamina", "name": "STAMINA", "color": Color(1.0, 0.9, 0.35), "per_level": "+20% sprint time & +12% faster recovery"},
-	{"id": "dexterity", "name": "DEXTERITY", "color": Color(0.55, 1.0, 0.5), "per_level": "+7% reload, weapon swap & aim speed"},
-	{"id": "reflexes", "name": "REFLEXES", "color": Color(0.85, 0.5, 1.0), "per_level": "+4% fire rate"},
-	{"id": "vitality", "name": "VITALITY", "color": Color(1.0, 0.4, 0.6), "per_level": "+15% health regen & regen starts sooner"},
-	{"id": "fortune", "name": "FORTUNE", "color": Color(1.0, 0.82, 0.3), "per_level": "+6% points earned"},
+	{"id": "strength", "name": "STRENGTH", "color": Color(1.0, 0.36, 0.28), "per_level": "+8% weapon, knife & grenade damage (½ after LV 10)"},
+	{"id": "speed", "name": "SPEED", "color": Color(0.35, 0.85, 1.0), "per_level": "+4% movement speed (¼ after LV 10)"},
+	{"id": "endurance", "name": "ENDURANCE", "color": Color(1.0, 0.62, 0.25), "per_level": "+15 max health & +2.5% damage resistance (½ after LV 10)"},
+	{"id": "stamina", "name": "STAMINA", "color": Color(1.0, 0.9, 0.35), "per_level": "+20% sprint time & +12% faster recovery (½ after LV 10)"},
+	{"id": "dexterity", "name": "DEXTERITY", "color": Color(0.55, 1.0, 0.5), "per_level": "+7% reload, weapon swap & aim speed (½ after LV 10)"},
+	{"id": "reflexes", "name": "REFLEXES", "color": Color(0.85, 0.5, 1.0), "per_level": "+4% fire rate (½ after LV 10)"},
+	{"id": "vitality", "name": "VITALITY", "color": Color(1.0, 0.4, 0.6), "per_level": "+15% health regen & regen starts sooner (½ after LV 10)"},
+	{"id": "fortune", "name": "FORTUNE", "color": Color(1.0, 0.82, 0.3), "per_level": "+6% points earned (½ after LV 10)"},
 ]
 
 
@@ -189,17 +200,17 @@ const STATS := [
 func stat_progress(burned: int) -> Dictionary:
 	var level := 0
 	var rem := burned
-	while level < STAT_MAX_LEVEL and rem >= STAT_LEVEL_COSTS[level]:
-		rem -= STAT_LEVEL_COSTS[level]
+	while level < STAT_MAX_LEVEL and rem >= stat_level_cost(level):
+		rem -= stat_level_cost(level)
 		level += 1
-	var need: int = 0 if level >= STAT_MAX_LEVEL else STAT_LEVEL_COSTS[level]
+	var need: int = 0 if level >= STAT_MAX_LEVEL else stat_level_cost(level)
 	return {"level": level, "into": rem if level < STAT_MAX_LEVEL else 0, "need": need}
 
 
 func stat_total_cost() -> int:
 	var total := 0
-	for c in STAT_LEVEL_COSTS:
-		total += c
+	for lv in range(STAT_MAX_LEVEL):
+		total += stat_level_cost(lv)
 	return total
 
 
