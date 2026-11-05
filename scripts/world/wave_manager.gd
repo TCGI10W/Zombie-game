@@ -95,7 +95,7 @@ func _c_round(round_num: int) -> void:
 func _present_round(round_num: int) -> void:
 	GameState.current_round = round_num
 	GameState.round_changed.emit(round_num)
-	hound_round = round_num >= 5 and round_num % 5 == 0
+	hound_round = false # hound raids removed
 	if hound_round:
 		GameState.play_sfx("hound_round_sting", 0.0, 1.0)
 		GameState.play_sfx("hound_howl", -5.0, randf_range(0.95, 1.05))
@@ -710,11 +710,7 @@ func _process_exfil(delta: float) -> void:
 		spawn_timer = maxf(0.35, 0.95 - float(GameState.current_round) * 0.03) / sqrt(float(Net.player_count()))
 		_spawn_regular_zombie(GameState.current_round + 1)
 	if GameState.current_round >= 5:
-		hound_timer -= delta
-		if hound_timer <= 0.0:
-			hound_timer = randf_range(6.0, 10.0)
-			if _count_alive("hound") < 4 + Net.player_count():
-				_spawn_hound(GameState.current_round)
+		pass # no hounds any more
 
 	exfil_timer -= delta
 	if exfil_state == 1:

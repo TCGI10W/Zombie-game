@@ -255,7 +255,7 @@ func _build_menu_ui() -> void:
 
 	var controls_lbl := Label.new()
 	controls_lbl.text = "[WASD] Move • [Shift] Sprint • [C] Crouch / Slide (while sprinting) • [Space] Jump • [LMB] Fire • [RMB] Aim • [R] Reload • [V] Knife • [G] Grenade • [1/2] Swap • [Q]/[F] Operator skills • [E] Buy / hold to rebuild windows • [ESC] Pause
-Burn points at the AUGMENT FURNACE to level up Strength, Speed, Endurance, Stamina and more. Open doors to reach the Mystery Crate, turn on the GENERATOR to power the Weapon Forge, electric trap and field radio. Buy a SECOND WIND to get back up once when you go down. Every 5th round the hounds come with the lightning. From round 8, use the radio between rounds to call the extraction chopper and escape... or hunt the three glowing skulls."
+Burn points at the AUGMENT FURNACE to level up Strength, Speed, Endurance, Stamina and more. Open doors to reach the Mystery Crate, turn on the GENERATOR to power the Weapon Forge, electric trap and field radio. Buy a SECOND WIND to get back up once when you go down. From round 8, use the radio between rounds to call the extraction chopper and escape... or hunt the three glowing skulls."
 	controls_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	controls_lbl.add_theme_font_size_override("font_size", 12)
 	controls_lbl.add_theme_color_override("font_color", Color(0.68, 0.76, 0.85))

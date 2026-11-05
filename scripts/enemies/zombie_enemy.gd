@@ -207,7 +207,8 @@ func _build_body(model_path: String, accent_color: Color) -> void:
 		visual_root.add_child(inst)
 		if not is_boss:
 			rig = ZombieRigScript.new()
-			if not rig.bind(inst):
+			var proxies := SkinRigAdapter.attach(inst)
+			if not rig.bind(proxies if proxies else inst):
 				rig = null
 		if rig:
 			if is_crawler:

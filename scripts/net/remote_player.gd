@@ -70,7 +70,8 @@ func _ready() -> void:
 		var inst: Node3D = (load(MODEL) as PackedScene).instantiate()
 		model.add_child(inst)
 		rig = ZombieRigScript.new()
-		if rig.bind(inst):
+		var proxies := SkinRigAdapter.attach(inst)
+		if rig.bind(proxies if proxies else inst):
 			rig.limp = 0.0
 			rig.hunch = 0.0
 			rig.arm_style = 2
