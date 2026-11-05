@@ -29,6 +29,7 @@ var sfx_volume: float = 1.0
 var invert_y: bool = false
 var fullscreen: bool = false
 var show_crosshair: bool = true
+var damage_numbers: bool = true
 var game_mode: String = "casual" # "casual" (ends at round 20) or "infinite"
 var best_round_infinite: int = 0
 var fov_setting: float = 80.0
@@ -301,6 +302,7 @@ func load_save() -> void:
 		invert_y = bool(cfg.get_value("settings", "invert_y", false))
 		fullscreen = bool(cfg.get_value("settings", "fullscreen", false))
 		show_crosshair = bool(cfg.get_value("settings", "show_crosshair", true))
+		damage_numbers = bool(cfg.get_value("settings", "damage_numbers", true))
 		game_mode = String(cfg.get_value("settings", "game_mode", "casual"))
 		best_round_infinite = int(cfg.get_value("records", "best_round_infinite", 0))
 		fov_setting = float(cfg.get_value("settings", "fov", 80.0))
@@ -325,6 +327,7 @@ func write_save() -> void:
 	cfg.set_value("settings", "invert_y", invert_y)
 	cfg.set_value("settings", "fullscreen", fullscreen)
 	cfg.set_value("settings", "show_crosshair", show_crosshair)
+	cfg.set_value("settings", "damage_numbers", damage_numbers)
 	cfg.set_value("settings", "game_mode", game_mode)
 	cfg.set_value("records", "best_round_infinite", best_round_infinite)
 	cfg.set_value("settings", "fov", fov_setting)
@@ -419,7 +422,7 @@ func _preload_audio() -> void:
 		"slide", "player_step_1", "player_step_2", "shell_insert",
 		"flesh_hit", "hit_flesh", "headshot_ding", "ricochet", "gore_splat", "shell_tink", "zombie_death", "pump_rack", "bolt_cycle",
 		"mag_out", "mag_in", "power_on", "trap_zap", "electrocute", "skull_shatter",
-		"heartbeat",
+		"heartbeat", "hit_tick", "kill_confirm", "low_ammo_tick", "streak_sting",
 		"hound_growl", "hound_bark", "hound_howl", "hound_bite", "hound_death", "hound_round_sting",
 		"lightning_strike", "thunder_far", "bloater_pop", "player_cough", "player_downed", "second_wind",
 		"heli_loop", "flare_ignite", "flare_burn", "radio_call", "radio_beep", "exfil_siren", "exfil_success",

@@ -17,6 +17,7 @@ var base_speed: float = 3.2
 var base_damage: float = 22.0
 var point_reward: int = 60
 var model_scale: float = 1.0
+var _pre_hit_hp: float = 0.0
 var is_sprinter: bool = false
 var is_crawler: bool = false
 var is_bloater: bool = false
@@ -1079,6 +1080,7 @@ func _animate_stunned(delta: float) -> void:
 func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armor: bool = false, kind: String = "bullet") -> Dictionary:
 	if is_dead:
 		return {"dealt": 0.0, "headshot": false, "killed": false}
+	_pre_hit_hp = hp
 	last_damage_kind = kind
 	last_hit_point = hit_pos if hit_pos != Vector3.ZERO else global_position + Vector3(0, 1.1 * model_scale, 0)
 
@@ -1139,6 +1141,8 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 
 # Flash, blood, flesh sound and the rig's flinch for a hit (no HP change).
 func _hit_feedback(hit_pos: Vector3, dmg: float, is_headshot: bool, kind: String) -> void:
+	if net_puppet or not Net.is_online() or _net_attacker == Net.my_id():
+		FX.damage_number(self, hit_pos if hit_pos != Vector3.ZERO else global_position + Vector3(0, 1.6 * model_scale, 0), minf(dmg, _pre_hit_hp), is_headshot, hp <= 0.0)
 	_set_flash(true)
 	hit_flash_timer = 0.07
 	if hit_pos != Vector3.ZERO:

@@ -46,6 +46,8 @@ func _ready() -> void:
 		GameState.show_fps = on)
 	_toggle("SHOW CROSSHAIR", GameState.show_crosshair, func(on: bool):
 		GameState.show_crosshair = on)
+	_toggle("DAMAGE NUMBERS", GameState.damage_numbers, func(on: bool):
+		GameState.damage_numbers = on)
 
 
 func _row(label: String) -> HBoxContainer:

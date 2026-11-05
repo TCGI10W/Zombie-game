@@ -80,6 +80,55 @@ func _scene() -> Node:
 	return get_tree().current_scene
 
 
+var _dmg_nums: Dictionary = {} # target instance id -> {label, value, t}
+
+
+func damage_number(target: Node3D, pos: Vector3, amount: float, headshot: bool, killed: bool) -> void:
+	if not GameState.damage_numbers or amount <= 0.0 or _scene() == null:
+		return
+	var key := target.get_instance_id()
+	var now := Time.get_ticks_msec() / 1000.0
+	var e: Dictionary = _dmg_nums.get(key, {})
+	var lbl: Label3D = e.get("label") if not e.is_empty() else null
+	if lbl != null and is_instance_valid(lbl) and now - float(e["t"]) < 0.12:
+		amount += float(e["value"])
+	else:
+		lbl = Label3D.new()
+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lbl.no_depth_test = true
+		lbl.fixed_size = true
+		lbl.pixel_size = 0.0011
+		lbl.outline_size = 9
+		lbl.outline_modulate = Color(0, 0, 0, 0.85)
+		lbl.render_priority = 10
+		_scene().add_child(lbl)
+		lbl.global_position = pos + Vector3(randf_range(-0.25, 0.25), 0.25, randf_range(-0.25, 0.25))
+	_dmg_nums[key] = {"label": lbl, "value": amount, "t": now}
+	lbl.text = str(roundi(amount))
+	var col := Color(1, 1, 1)
+	var fs := 30
+	if headshot:
+		col = Color(1.0, 0.85, 0.25)
+		fs = 36
+	if killed:
+		col = Color(1.0, 0.32, 0.22) if not headshot else Color(1.0, 0.6, 0.15)
+		fs += 8
+	lbl.modulate = col
+	lbl.font_size = fs
+	lbl.scale = Vector3.ONE * 1.5
+	var start := lbl.global_position
+	var tw := lbl.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(lbl, "scale", Vector3.ONE, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl, "global_position", start + Vector3(0, 0.7, 0), 0.75).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl, "modulate:a", 0.0, 0.35).set_delay(0.45)
+	tw.chain().tween_callback(lbl.queue_free)
+	if _dmg_nums.size() > 64:
+		for k in _dmg_nums.keys():
+			if not is_instance_valid(_dmg_nums[k]["label"]):
+				_dmg_nums.erase(k)
+
+
 func _push(list: Array[Node3D], node: Node3D, cap: int) -> void:
 	list.append(node)
 	while list.size() > cap:

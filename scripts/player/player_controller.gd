@@ -9,6 +9,7 @@ signal interact_prompt_changed(prompt_text: String)
 signal player_died()
 signal damaged(from_pos: Vector3)
 signal stats_changed()
+signal kill_streak(count: int)
 signal downed_changed(is_downed: bool)
 
 const FragGrenadeScript := preload("res://scripts/player/frag_grenade.gd")
@@ -814,8 +815,14 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 		rate_mult *= 1.15
 
 	fire_cooldown = float(w_cfg["fire_rate"]) / rate_mult
+	_last_shot_heavy = float(w_cfg.get("damage", 0.0)) >= 150.0 or String(w_cfg.get("class", "")) in ["sniper", "shotgun"]
 	if pap_timer <= 0.0:
 		mag_ammo[w_id] = maxi(0, cur_mag - 1)
+		var left: int = int(mag_ammo[w_id])
+		var low_at: int = maxi(2, ceili(float(w_cfg["mag_size"]) * 0.25))
+		if left <= low_at:
+			# Dry clicks that climb in pitch as the mag runs out
+			GameState.play_sfx("low_ammo_tick", -8.0 + 3.0 * (1.0 - float(left) / float(low_at)), 1.0 + 0.5 * (1.0 - float(left) / float(low_at)))
 	_emit_ammo()
 
 	var pitch_s := randf_range(0.95, 1.05)
@@ -1396,6 +1403,16 @@ func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 	var pts := z.point_reward + (40 if was_headshot else 0)
 	GameState.add_points(pts)
 	GameState.total_kills += 1
+	var now := Time.get_ticks_msec() / 1000.0
+	_streak = _streak + 1 if now - _streak_t < 1.6 else 1
+	_streak_t = now
+	if _streak >= 2:
+		GameState.add_points(25 * (_streak - 1))
+		kill_streak.emit(_streak)
+	if z.is_boss:
+		hit_stop(0.14, 0.1)
+	elif _streak >= 3 or (was_headshot and _last_shot_heavy):
+		hit_stop(0.05, 0.2)
 	if has_perk("vampire") and not is_dead and not is_downed:
 		hp = minf(max_hp, hp + 4.0)
 		hp_changed.emit(hp, max_hp, overshield)
@@ -2250,6 +2267,23 @@ var adrenaline_timer: float = 0.0
 var mag_lv: int = 0 # Supply Depot: bigger magazines
 var reserve_lv: int = 0 # Supply Depot: more spare ammo
 var last_stand_cd: float = 0.0
+
+
+var _streak: int = 0
+var _streak_t: float = -10.0
+var _last_shot_heavy: bool = false
+var _hit_stop_on: bool = false
+
+
+# A tiny slow-motion beat on big kills. Solo only (co-op can't slow the world).
+func hit_stop(dur: float, scale: float) -> void:
+	if Net.is_online() or _hit_stop_on:
+		return
+	_hit_stop_on = true
+	Engine.time_scale = scale
+	await get_tree().create_timer(dur, true, false, true).timeout
+	Engine.time_scale = 1.0
+	_hit_stop_on = false
 
 
 func has_perk(id: String) -> bool:

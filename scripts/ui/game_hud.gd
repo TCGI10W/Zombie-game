@@ -21,6 +21,8 @@ var banner_timer: float = 0.0
 # Center Crosshair & Prompts
 var crosshair_root: Control
 var hit_canvas: Control
+var streak_lbl: Label
+var _tick_cd: float = 0.0
 var hitmarker_timer: float = 0.0
 var hitmarker_color: Color = Color.WHITE
 var hitmarker_big: bool = false
@@ -408,6 +410,21 @@ func _build_ui() -> void:
 	hit_canvas.draw.connect(_draw_hitmarker)
 	crosshair_root.add_child(hit_canvas)
 
+	streak_lbl = Label.new()
+	streak_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	streak_lbl.set_anchors_preset(Control.PRESET_CENTER)
+	streak_lbl.offset_left = -300
+	streak_lbl.offset_right = 300
+	streak_lbl.offset_top = 46
+	streak_lbl.offset_bottom = 96
+	streak_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	streak_lbl.add_theme_font_size_override("font_size", 26)
+	streak_lbl.add_theme_constant_override("outline_size", 8)
+	streak_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	streak_lbl.pivot_offset = Vector2(300, 25)
+	streak_lbl.modulate.a = 0.0
+	root.add_child(streak_lbl)
+
 	dmg_canvas = Control.new()
 	dmg_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 	dmg_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -715,6 +732,7 @@ func _connect_signals() -> void:
 	player.hp_changed.connect(_on_hp_changed)
 	player.ammo_changed.connect(_on_ammo_changed)
 	player.hitmarker_triggered.connect(_on_hitmarker)
+	player.kill_streak.connect(_on_kill_streak)
 	player.status_banner_requested.connect(_show_banner)
 	player.interact_prompt_changed.connect(func(txt: String): interact_lbl.text = txt)
 	player.player_died.connect(_on_player_died)
@@ -791,6 +809,7 @@ func _process(delta: float) -> void:
 		borrowed_lbl.text = "\n".join(lines)
 		borrowed_lbl.offset_top = -300 - 24 * maxi(0, lines.size() - 1)
 		borrowed_lbl.add_theme_color_override("font_color", Color(0.75, 0.5, 1.0))
+	_tick_cd = maxf(0.0, _tick_cd - delta)
 	if hitmarker_timer > 0.0:
 		hitmarker_timer -= delta
 		hit_canvas.queue_redraw()
@@ -1145,6 +1164,29 @@ func _on_hitmarker(is_hs: bool, is_kill: bool, is_ability: bool) -> void:
 	else:
 		hitmarker_color = Color.WHITE
 	hit_canvas.queue_redraw()
+	if is_kill:
+		GameState.play_sfx("kill_confirm", -5.0 if is_hs else -7.0, randf_range(0.95, 1.05))
+	elif _tick_cd <= 0.0:
+		_tick_cd = 0.04
+		GameState.play_sfx("hit_tick", -10.0, randf_range(0.95, 1.08) * (1.2 if is_hs else 1.0))
+
+
+const STREAK_NAMES := {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUAD KILL", 5: "RAMPAGE"}
+
+
+func _on_kill_streak(count: int) -> void:
+	var name: String = STREAK_NAMES.get(count, "UNSTOPPABLE")
+	streak_lbl.text = "%s  x%d   +%d" % [name, count, 25 * (count - 1)]
+	var t := clampf(float(count - 2) / 6.0, 0.0, 1.0)
+	streak_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.25, 0.2), t))
+	streak_lbl.scale = Vector2.ONE * 1.35
+	streak_lbl.modulate.a = 1.0
+	var tw := streak_lbl.create_tween()
+	tw.tween_property(streak_lbl, "scale", Vector2.ONE, 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(1.1)
+	tw.tween_property(streak_lbl, "modulate:a", 0.0, 0.4)
+	if count == 3 or count == 5 or count % 5 == 0:
+		GameState.play_sfx("streak_sting", -6.0, 1.0 + 0.04 * float(mini(count, 10)))
 
 
 func _show_banner(txt: String, col: Color) -> void:
