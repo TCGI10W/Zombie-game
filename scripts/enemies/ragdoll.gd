@@ -41,8 +41,23 @@ var _frozen: bool = false
 var _shock: float = 0.0
 
 
+static var _spawn_frame: int = -1
+static var _spawned_this_frame: int = 0
+
+
+# At most 2 new ragdolls per frame so a big blast doesn't stall one frame;
+# the rest play the normal death animation.
 static func can_spawn() -> bool:
-	return active_count < MAX_ACTIVE
+	if active_count >= MAX_ACTIVE:
+		return false
+	var f := Engine.get_physics_frames()
+	if f != _spawn_frame:
+		_spawn_frame = f
+		_spawned_this_frame = 0
+	if _spawned_this_frame >= 2:
+		return false
+	_spawned_this_frame += 1
+	return true
 
 
 func _enter_tree() -> void:

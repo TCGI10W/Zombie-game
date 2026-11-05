@@ -63,9 +63,35 @@ func _setup(s: Skeleton3D) -> void:
 			_order.append(i)
 
 
+var _skip: int = 0
+var _last_phys: int = -1
+
+
 func _process(_delta: float) -> void:
-	if not is_instance_valid(skel):
+	if not is_instance_valid(skel) or not skel.is_visible_in_tree():
+		return # hidden (dead, sunk): nothing to draw
+	# The rig and ragdoll move the joints in physics steps (60/s); copying them
+	# again on frames in between (144 Hz screens) is wasted work.
+	var pf := Engine.get_physics_frames()
+	if pf == _last_phys:
 		return
+	_last_phys = pf
+	# Far away or behind the camera: update the pose less often
+	var cam := get_viewport().get_camera_3d()
+	if cam:
+		var to := skel.global_position - cam.global_position
+		var d2 := to.length_squared()
+		var every := 1
+		if d2 > 900.0:
+			every = 3
+		elif d2 > 225.0:
+			every = 2
+		if d2 > 16.0 and to.dot(-cam.global_basis.z) < 0.0:
+			every = 4
+		_skip += 1
+		if _skip < every:
+			return
+		_skip = 0
 	var inv := skel.global_transform.affine_inverse()
 	for i in _order:
 		var px := _proxies[i]
