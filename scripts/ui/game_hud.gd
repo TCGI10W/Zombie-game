@@ -81,9 +81,27 @@ var downed_sub: Label
 var downed_bar: ProgressBar
 
 
+var borrowed_lbl: Label
+
+
 func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	player = p_player
 	wave_mgr = p_wave
+	borrowed_lbl = Label.new()
+	borrowed_lbl.anchor_left = 1.0
+	borrowed_lbl.anchor_right = 1.0
+	borrowed_lbl.anchor_top = 1.0
+	borrowed_lbl.anchor_bottom = 1.0
+	borrowed_lbl.offset_left = -560
+	borrowed_lbl.offset_right = -30
+	borrowed_lbl.offset_top = -300
+	borrowed_lbl.offset_bottom = -270
+	borrowed_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	borrowed_lbl.add_theme_font_size_override("font_size", 17)
+	borrowed_lbl.add_theme_constant_override("outline_size", 6)
+	borrowed_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	borrowed_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(borrowed_lbl)
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("hud")
 	_build_ui()
@@ -753,6 +771,14 @@ func _toggle_pause() -> void:
 
 
 func _process(delta: float) -> void:
+	if borrowed_lbl and is_instance_valid(player):
+		if player.borrowed_skill == "":
+			borrowed_lbl.text = ""
+		else:
+			var sk_name: String = PlayerController.BORROWED_SKILLS[player.borrowed_skill]["name"]
+			var ready := player.borrowed_cd <= 0.0
+			borrowed_lbl.text = "[X] %s — %s" % [sk_name, "READY" if ready else "%ds" % int(ceil(player.borrowed_cd))]
+			borrowed_lbl.add_theme_color_override("font_color", Color(0.75, 0.5, 1.0) if ready else Color(0.6, 0.6, 0.65))
 	if hitmarker_timer > 0.0:
 		hitmarker_timer -= delta
 		hit_canvas.queue_redraw()
@@ -1127,6 +1153,7 @@ func _on_player_died() -> void:
 	# Let the death camera fall before the screen comes up.
 	await get_tree().create_timer(1.1).timeout
 	modal_overlay.visible = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE # co-op deaths keep the mouse captured for spectating
 	resume_btn.visible = false
 	settings_box.visible = false
 	modal_title.text = "YOUR SQUAD WAS OVERRUN" if Net.is_online() else "YOU WERE OVERRUN"

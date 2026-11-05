@@ -175,6 +175,11 @@ var nearby_station: Node = null
 
 func _ready() -> void:
 	add_to_group("player")
+	if not InputMap.has_action("borrowed_skill"):
+		InputMap.add_action("borrowed_skill")
+		var ev := InputEventKey.new()
+		ev.physical_keycode = KEY_X
+		InputMap.action_add_event("borrowed_skill", ev)
 	add_to_group("net_players")
 	collision_layer = 2
 	collision_mask = 1 | 4 | 16 # World + Enemies + Window blockers
@@ -391,6 +396,7 @@ func _update_timers(delta: float) -> void:
 	grenade_cd = maxf(0.0, grenade_cd - delta)
 	_hurt_sfx_cd = maxf(0.0, _hurt_sfx_cd - delta)
 	revive_invuln = maxf(0.0, revive_invuln - delta)
+	borrowed_cd = maxf(0.0, borrowed_cd - delta)
 	if is_downed:
 		if self_reviving:
 			downed_timer -= delta
@@ -706,6 +712,8 @@ func _handle_combat_inputs(delta: float) -> void:
 		_trigger_skill_q()
 	if Input.is_action_just_pressed("skill_2") and not is_downed:
 		_trigger_skill_f()
+	if Input.is_action_just_pressed("borrowed_skill") and not is_downed:
+		_use_borrowed_skill()
 
 
 func _can_shoot() -> bool:
@@ -1991,3 +1999,70 @@ func net_respawn(pos: Vector3) -> void:
 	status_banner_requested.emit("BACK IN THE FIGHT!", Color(0.4, 1.0, 0.6))
 	downed_changed.emit(false)
 	hp_changed.emit(hp, max_hp, overshield)
+
+
+# ---------------------------------------------------------------------------
+# BOSS RELICS
+# ---------------------------------------------------------------------------
+# Skills of the other operators a relic can lend you (used with [X]).
+const BORROWED_SKILLS := {
+	"feral_slash": {"name": "FERAL LUNGE SLASH", "owner": "ravager", "cd": 8.0},
+	"pain_dart": {"name": "PAIN DRUG DART", "owner": "alchemist", "cd": 14.0},
+	"stim": {"name": "ADRENALINE STIM", "owner": "alchemist", "cd": 45.0},
+	"tesla": {"name": "TESLA CHARGE", "owner": "warden", "cd": 12.0},
+	"overcharge": {"name": "ARC OVERCHARGE", "owner": "warden", "cd": 40.0},
+}
+var borrowed_skill: String = ""
+var borrowed_cd: float = 0.0
+var borrowed_cd_max: float = 0.0
+
+
+# Raise a stat by whole levels (as if that many points went into the furnace).
+func grant_stat_levels(id: String, levels: int) -> int:
+	var gained := 0
+	for i in range(levels):
+		var prog: Dictionary = GameState.stat_progress(int(stat_burned.get(id, 0)))
+		if int(prog["level"]) >= GameState.STAT_MAX_LEVEL:
+			break
+		gained += burn_into_stat(id, int(prog["need"]) - int(prog["into"]))
+	return gained
+
+
+func can_borrow(skill_id: String) -> bool:
+	return BORROWED_SKILLS.has(skill_id) and BORROWED_SKILLS[skill_id]["owner"] != char_id
+
+
+func grant_borrowed_skill(skill_id: String, cd_mult: float) -> void:
+	borrowed_skill = skill_id
+	borrowed_cd_max = float(BORROWED_SKILLS[skill_id]["cd"]) * cd_mult
+	borrowed_cd = 0.0
+	stats_changed.emit()
+
+
+func _use_borrowed_skill() -> void:
+	if borrowed_skill == "" or borrowed_cd > 0.0 or is_monster_form:
+		return
+	borrowed_cd = borrowed_cd_max
+	match borrowed_skill:
+		"feral_slash":
+			_perform_human_feral_slash()
+		"pain_dart":
+			pain_drug_charges = maxi(pain_drug_charges, 1)
+			_fire_pain_drug_dart()
+		"stim":
+			stim_timer = 10.0
+			hp = max_hp
+			overshield = 50.0
+			hp_changed.emit(hp, max_hp, overshield)
+			GameState.play_sfx("pain_drug", 0.0, 1.25)
+			status_banner_requested.emit("ADRENALINE STIM! FULL HP +50 SHIELD", Color(0.16, 0.96, 0.80))
+		"tesla":
+			_fire_tesla_charge()
+		"overcharge":
+			pap_timer = 12.0
+			is_reloading = false
+			var w_id := get_current_weapon_id()
+			mag_ammo[w_id] = get_weapon_cfg(w_id)["mag_size"]
+			_emit_ammo()
+			GameState.play_sfx("buy_ching", 0.0, 0.85)
+			status_banner_requested.emit("ARC OVERCHARGE! 2.2x DAMAGE & INFINITE CLIP (12s)!", Color(0.92, 0.38, 1.0))

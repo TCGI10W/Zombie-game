@@ -225,7 +225,7 @@ func _send_state() -> void:
 	_r_state.rpc(b.data_array)
 
 
-@rpc("any_peer", "call_remote", "unreliable_ordered", 1)
+@rpc("any_peer", "call_remote", "unreliable")
 func _r_state(data: PackedByteArray) -> void:
 	var av: RemotePlayer = avatars.get(multiplayer.get_remote_sender_id())
 	if av == null or data.size() < 36:
@@ -255,7 +255,7 @@ func local_shot(w_id: String, end_pt: Vector3) -> void:
 		_fire_pts.append(end_pt)
 
 
-@rpc("any_peer", "call_remote", "unreliable", 2)
+@rpc("any_peer", "call_remote", "unreliable")
 func _r_fire(widx: int, pts: PackedVector3Array) -> void:
 	var av: RemotePlayer = avatars.get(multiplayer.get_remote_sender_id())
 	if av and widx < weapon_keys.size():
@@ -335,7 +335,7 @@ func _send_snapshot() -> void:
 	_c_snap.rpc(b.data_array)
 
 
-@rpc("authority", "call_remote", "unreliable_ordered", 3)
+@rpc("authority", "call_remote", "unreliable")
 func _c_snap(data: PackedByteArray) -> void:
 	var b := StreamPeerBuffer.new()
 	b.data_array = data
@@ -377,7 +377,7 @@ func zombie_hit(z: ZombieEnemy, pos: Vector3, dmg: float, origin: int) -> void:
 	_hit_count += 1
 
 
-@rpc("authority", "call_remote", "unreliable", 2)
+@rpc("authority", "call_remote", "unreliable")
 func _c_hits(data: PackedByteArray) -> void:
 	var b := StreamPeerBuffer.new()
 	b.data_array = data
@@ -490,7 +490,7 @@ func send_revive(peer: int) -> void:
 	_r_revive.rpc_id(peer)
 
 
-@rpc("any_peer", "call_remote", "unreliable", 2)
+@rpc("any_peer", "call_remote", "unreliable")
 func _r_revive_progress(progress: float) -> void:
 	revive_in = progress
 	revive_by = Net.player_name(multiplayer.get_remote_sender_id())

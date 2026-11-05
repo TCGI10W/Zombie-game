@@ -10,10 +10,11 @@ signal powerup_collected(kind: String)
 signal exfil_won()
 
 const PowerUpScript := preload("res://scripts/world/power_up.gd")
+const RelicScript := preload("res://scripts/world/boss_relic.gd")
+const BOSS_RELIC_CHANCE := 0.25
 const HeliScript := preload("res://scripts/world/extraction_heli.gd")
 const MAX_DROPS_PER_ROUND := 4
 const MAX_ALIVE := 20
-const DROP_WEIGHTS := {"max_ammo": 28, "double_points": 26, "insta_kill": 22, "nuke": 12, "carpenter": 8, "fire_sale": 6}
 
 var arena: BunkerArena
 var player: PlayerController
@@ -401,44 +402,13 @@ func _on_enemy_died(enemy: ZombieEnemy, _was_headshot: bool) -> void:
 	alive_enemies = maxi(0, alive_enemies - 1)
 	_emit_wave_status()
 
-	if enemy is HoundEnemy:
-		# The last hound of a raid always leaves a Max Ammo behind
-		if hound_round and hounds_to_spawn <= 0 and alive_enemies <= 0:
-			_spawn_powerup("max_ammo", enemy.global_position)
-	elif not enemy.is_boss and not _nuking:
-		# Zombies killed outside drop their power-up just inside the window
-		var drop_pos := enemy.global_position
-		if enemy.is_outside():
-			drop_pos = enemy.entry_window.inside_pos()
-		_maybe_drop_powerup(drop_pos)
-
 	if enemy.is_boss:
 		active_boss = null
+		if randf() < BOSS_RELIC_CHANCE:
+			_spawn_powerup(_roll_relic(), enemy.global_position)
 		if Net.is_online():
 			_c_boss_down.rpc(enemy.display_name)
 		_boss_down(enemy.display_name)
-
-
-# A power-up every 10-17 kills, capped per round.
-func _maybe_drop_powerup(pos: Vector3) -> void:
-	kills_until_drop -= 1
-	if kills_until_drop > 0 or drops_this_round >= MAX_DROPS_PER_ROUND:
-		return
-	kills_until_drop = randi_range(10, 17)
-	drops_this_round += 1
-
-	var total := 0
-	for k in DROP_WEIGHTS:
-		total += DROP_WEIGHTS[k]
-	var roll := randi() % total
-	var kind := "max_ammo"
-	for k in DROP_WEIGHTS:
-		roll -= DROP_WEIGHTS[k]
-		if roll < 0:
-			kind = k
-			break
-
-	_spawn_powerup(kind, pos)
 
 
 var _next_powerup_id: int = 1
@@ -463,7 +433,7 @@ func _c_powerup(id: int, kind: String, pos: Vector3) -> void:
 
 
 func _make_powerup(id: int, kind: String, pos: Vector3) -> void:
-	var pu: Area3D = PowerUpScript.new()
+	var pu: Area3D = RelicScript.new() if kind.begins_with("relic:") else PowerUpScript.new()
 	pu.kind = kind
 	pu.set_meta("pu_id", id)
 	pu.add_to_group("net_powerups")
@@ -481,7 +451,7 @@ func _make_powerup(id: int, kind: String, pos: Vector3) -> void:
 
 func _request_powerup(id: int) -> void:
 	if Net.is_host():
-		_grant_powerup(id)
+		_grant_powerup(id, Net.my_id())
 	else:
 		_s_powerup.rpc_id(1, id)
 
@@ -489,29 +459,82 @@ func _request_powerup(id: int) -> void:
 @rpc("any_peer", "call_remote", "reliable")
 func _s_powerup(id: int) -> void:
 	if Net.is_host():
-		_grant_powerup(id)
+		_grant_powerup(id, multiplayer.get_remote_sender_id())
 
 
-func _grant_powerup(id: int) -> void:
+func _grant_powerup(id: int, collector: int) -> void:
 	if _powerups_taken.has(id) or not _powerup_kinds.has(id):
 		return
 	_powerups_taken[id] = true
 	var kind: String = _powerup_kinds[id]
 	if Net.is_online():
-		_c_powerup_taken.rpc(id, kind)
-	_powerup_taken(id, kind)
+		_c_powerup_taken.rpc(id, kind, collector)
+	_powerup_taken(id, kind, collector)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _c_powerup_taken(id: int, kind: String) -> void:
-	_powerup_taken(id, kind)
+func _c_powerup_taken(id: int, kind: String, collector: int) -> void:
+	_powerup_taken(id, kind, collector)
 
 
-func _powerup_taken(id: int, kind: String) -> void:
+func _powerup_taken(id: int, kind: String, collector: int) -> void:
 	for pu in get_tree().get_nodes_in_group("net_powerups"):
 		if int(pu.get_meta("pu_id", -1)) == id:
 			pu.queue_free()
+	if kind.begins_with("relic:"):
+		if collector == Net.my_id():
+			_apply_relic(kind)
+		else:
+			var r := RelicScript.rarity_of(kind)
+			player.status_banner_requested.emit("%s FOUND A %s RELIC: %s" % [Net.player_name(collector), RelicScript.RARITY_NAMES[r], RelicScript.describe(kind)], RelicScript.RARITY_COLORS[r])
+		return
 	_on_powerup_collected(kind)
+
+
+# Host: rarity 55% common, 28% rare, 13% epic, 4% legendary. Epic and
+# legendary relics can hold another operator's skill instead of stat levels.
+func _roll_relic() -> String:
+	var roll := randf() * 100.0
+	var rarity := 0 if roll < 55.0 else (1 if roll < 83.0 else (2 if roll < 96.0 else 3))
+	if rarity >= 2 and randf() < 0.4:
+		var skills: Array = PlayerController.BORROWED_SKILLS.keys()
+		return "relic:%d:skill:%s:%d" % [rarity, skills[randi() % skills.size()], 60 if rarity == 3 else 100]
+	var stat: String = GameState.STATS[randi() % GameState.STATS.size()]["id"]
+	return "relic:%d:stat:%s:%d" % [rarity, stat, [1, 2, 3, 5][rarity]]
+
+
+# This machine's player picked up a relic.
+func _apply_relic(kind: String) -> void:
+	var p := kind.split(":")
+	var r := RelicScript.rarity_of(kind)
+	var col: Color = RelicScript.RARITY_COLORS[r]
+	var levels: int = [1, 2, 3, 5][r]
+	GameState.play_sfx("level_up", 0.0, 1.0 + 0.08 * float(r))
+	GameState.play_sfx("buy_ching", -2.0, 1.3)
+	if p[2] == "skill" and player.can_borrow(p[3]):
+		player.grant_borrowed_skill(p[3], float(p[4]) / 100.0)
+		player.status_banner_requested.emit("%s RELIC! NEW SKILL [X]: %s" % [RelicScript.RARITY_NAMES[r], PlayerController.BORROWED_SKILLS[p[3]]["name"]], col)
+		return
+	# A stat relic (or a skill you already have): levels into a stat that isn't maxed
+	var stat_id: String = p[3] if p[2] == "stat" else ""
+	if p[2] == "stat":
+		levels = int(p[4])
+	var open_stats: Array = []
+	for s in GameState.STATS:
+		if player.stat_level(s["id"]) < GameState.STAT_MAX_LEVEL:
+			open_stats.append(s["id"])
+	if stat_id == "" or not stat_id in open_stats:
+		if open_stats.is_empty():
+			GameState.add_points(1000 * (r + 1))
+			player.status_banner_requested.emit("%s RELIC! ALL STATS MAXED — +%d POINTS" % [RelicScript.RARITY_NAMES[r], 1000 * (r + 1)], col)
+			return
+		stat_id = open_stats[randi() % open_stats.size()]
+	var gained: int = player.grant_stat_levels(stat_id, levels)
+	var stat_name := stat_id.to_upper()
+	for s in GameState.STATS:
+		if s["id"] == stat_id:
+			stat_name = s["name"]
+	player.status_banner_requested.emit("%s RELIC! +%d %s" % [RelicScript.RARITY_NAMES[r], gained, stat_name], col)
 
 
 @rpc("authority", "call_remote", "reliable")
