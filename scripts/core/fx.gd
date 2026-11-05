@@ -5,7 +5,8 @@ extends Node
 
 const MAX_BLOOD := 48
 const MAX_HOLES := 60
-const MAX_GORE := 40
+const MAX_GORE := 24
+const MAX_PUFFS := 24
 const MAX_CASINGS := 30
 
 var _blood: Array[Node3D] = []
@@ -233,9 +234,40 @@ func blood_spray(pos: Vector3, dir: Vector3, amount: int = 10) -> void:
 	_puff(pos, dir, _mat_spray, amount, 0.45, 3.2, 0.06, Vector3(0, -9.0, 0))
 
 
+var _gore_meshes: Dictionary = {}
+var _quads: Dictionary = {}
+var _puff_curve: Curve
+var _puffs: Array[Node3D] = []
+
+
+func _gore_mesh(bone: bool) -> Mesh:
+	if not _gore_meshes.has(bone):
+		if bone:
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.12
+			cm.bottom_radius = 0.2
+			cm.height = 2.2
+			cm.radial_segments = 5
+			cm.rings = 1
+			_gore_meshes[bone] = cm
+		else:
+			var sm := SphereMesh.new()
+			sm.radius = 0.6
+			sm.height = 1.2
+			sm.radial_segments = 7
+			sm.rings = 4
+			_gore_meshes[bone] = sm
+	return _gore_meshes[bone]
+
+
 func _puff(pos: Vector3, dir: Vector3, mat: Material, amount: int, life: float, speed: float, size: float, grav: Vector3 = Vector3(0, 0.6, 0)) -> void:
 	if _scene() == null:
 		return
+	for i in range(_puffs.size() - 1, -1, -1):
+		if not is_instance_valid(_puffs[i]):
+			_puffs.remove_at(i)
+	if _puffs.size() >= MAX_PUFFS:
+		return # plenty of particles on screen already
 	var p := CPUParticles3D.new()
 	p.one_shot = true
 	p.explosiveness = 0.95
@@ -248,14 +280,19 @@ func _puff(pos: Vector3, dir: Vector3, mat: Material, amount: int, life: float, 
 	p.initial_velocity_max = speed
 	p.scale_amount_min = 0.6
 	p.scale_amount_max = 1.6
-	var curve := Curve.new()
-	curve.add_point(Vector2(0, 0.6))
-	curve.add_point(Vector2(1, 1.4))
-	p.scale_amount_curve = curve
-	var q := QuadMesh.new()
-	q.size = Vector2(size, size)
-	q.material = mat
-	p.mesh = q
+	if _puff_curve == null:
+		_puff_curve = Curve.new()
+		_puff_curve.add_point(Vector2(0, 0.6))
+		_puff_curve.add_point(Vector2(1, 1.4))
+	p.scale_amount_curve = _puff_curve
+	var qkey := "%d:%.3f" % [mat.get_instance_id(), size]
+	if not _quads.has(qkey):
+		var q := QuadMesh.new()
+		q.size = Vector2(size, size)
+		q.material = mat
+		_quads[qkey] = q
+	p.mesh = _quads[qkey]
+	_puffs.append(p)
 	_scene().add_child(p)
 	p.global_position = pos
 	p.emitting = true
@@ -319,9 +356,23 @@ func _mat_bone_chunk() -> StandardMaterial3D:
 
 
 # Flesh and bone chunks that bounce around and fade.
+var _gore_frame: int = -1
+var _gore_budget: int = 0
+
+
 func gore_burst(pos: Vector3, amount: int = 6, force: float = 4.0) -> void:
 	var sc := _scene()
 	if sc == null:
+		return
+	# Big blasts kill many at once: share a per-frame chunk budget between them
+	var f := Engine.get_process_frames()
+	if f != _gore_frame:
+		_gore_frame = f
+		_gore_budget = 16
+	amount = mini(amount, _gore_budget)
+	_gore_budget -= amount
+	if amount <= 0:
+		blood_spray(pos, Vector3.UP, 12)
 		return
 	for i in range(amount):
 		var rb := RigidBody3D.new()
@@ -335,25 +386,15 @@ func gore_burst(pos: Vector3, amount: int = 6, force: float = 4.0) -> void:
 		cs.shape = sph
 		rb.add_child(cs)
 		var mi := MeshInstance3D.new()
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# Shared unit meshes, sized per chunk with scale (no new mesh per chunk)
 		if i % 4 == 3:
-			# Bone splinter
-			var cm := CylinderMesh.new()
-			cm.top_radius = s * 0.12
-			cm.bottom_radius = s * 0.2
-			cm.height = s * 2.2
-			cm.radial_segments = 5
-			cm.rings = 1
-			mi.mesh = cm
+			mi.mesh = _gore_mesh(true)
+			mi.scale = Vector3.ONE * s
 			mi.material_override = _mat_bone_chunk()
 		else:
-			# Irregular wet meat
-			var sm := SphereMesh.new()
-			sm.radius = s * 0.6
-			sm.height = s * 1.2
-			sm.radial_segments = 7
-			sm.rings = 4
-			mi.mesh = sm
-			mi.scale = Vector3(randf_range(0.7, 1.3), randf_range(0.45, 0.8), randf_range(0.8, 1.5))
+			mi.mesh = _gore_mesh(false)
+			mi.scale = Vector3(randf_range(0.7, 1.3), randf_range(0.45, 0.8), randf_range(0.8, 1.5)) * s
 			mi.material_override = _mat_gore if i % 3 != 0 else _mat_gore2
 		rb.add_child(mi)
 		sc.add_child(rb)
@@ -361,8 +402,8 @@ func gore_burst(pos: Vector3, amount: int = 6, force: float = 4.0) -> void:
 		rb.linear_velocity = Vector3(randf_range(-1, 1), randf_range(0.3, 0.9), randf_range(-1, 1)).normalized() * force * randf_range(0.45, 0.9)
 		rb.angular_velocity = Vector3(randf_range(-10, 10), randf_range(-10, 10), randf_range(-10, 10))
 		var tw := rb.create_tween()
-		tw.tween_interval(5.0)
-		tw.tween_property(rb, "scale", Vector3.ONE * 0.01, 0.6)
+		tw.tween_interval(2.6)
+		tw.tween_property(rb, "scale", Vector3.ONE * 0.01, 0.5)
 		tw.tween_callback(rb.queue_free)
 		_push(_gore, rb, MAX_GORE)
 	blood_spray(pos, Vector3.UP, 16)

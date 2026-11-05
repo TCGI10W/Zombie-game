@@ -6,6 +6,9 @@ const RADIUS := 6.5
 const DAMAGE := 460.0
 
 var thrower: Node = null
+# Shared by every explosion (no new mesh/material per blast)
+static var _ball_mesh: SphereMesh
+static var _smoke_quad: QuadMesh
 var _fuse: float = FUSE
 var radius: float = RADIUS
 var damage: float = DAMAGE
@@ -100,10 +103,12 @@ func _spawn_fx(center: Vector3) -> void:
 	ftw.tween_callback(flash.queue_free)
 
 	var ball := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 1.0
-	sm.height = 2.0
-	ball.mesh = sm
+	if _ball_mesh == null:
+		_ball_mesh = SphereMesh.new()
+		_ball_mesh.radius = 1.0
+		_ball_mesh.height = 2.0
+	ball.mesh = _ball_mesh
+	ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	ball.material_override = MaterialLib.get_emissive(Color(1.0, 0.55, 0.15), 6.0, 0.8)
 	scene.add_child(ball)
 	ball.global_position = center + Vector3(0, 0.4, 0)
@@ -125,17 +130,19 @@ func _spawn_fx(center: Vector3) -> void:
 	smoke.initial_velocity_max = 5.0
 	smoke.scale_amount_min = 3.0
 	smoke.scale_amount_max = 6.0
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.4, 0.4)
-	var qm := StandardMaterial3D.new()
-	qm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	qm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	qm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	qm.albedo_color = Color(0.25, 0.22, 0.2, 0.55)
-	if ResourceLoader.exists("res://assets/textures/soft_particle.png"):
-		qm.albedo_texture = load("res://assets/textures/soft_particle.png")
-	quad.material = qm
-	smoke.mesh = quad
+	if _smoke_quad == null:
+		_smoke_quad = QuadMesh.new()
+		_smoke_quad.size = Vector2(0.4, 0.4)
+		var qm := StandardMaterial3D.new()
+		qm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		qm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		qm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		qm.albedo_color = Color(0.25, 0.22, 0.2, 0.55)
+		if ResourceLoader.exists("res://assets/textures/soft_particle.png"):
+			qm.albedo_texture = load("res://assets/textures/soft_particle.png")
+		_smoke_quad.material = qm
+	smoke.mesh = _smoke_quad
+	smoke.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	scene.add_child(smoke)
 	smoke.global_position = center + Vector3(0, 0.3, 0)
 	smoke.emitting = true
