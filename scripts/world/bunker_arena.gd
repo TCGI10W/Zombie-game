@@ -19,7 +19,6 @@ const ZoneDoorScript := preload("res://scripts/world/zone_door.gd")
 const CrateScript := preload("res://scripts/world/mystery_crate.gd")
 const FurnaceScript := preload("res://scripts/world/augment_furnace.gd")
 const GeneratorScript := preload("res://scripts/world/power_generator.gd")
-const TrapScript := preload("res://scripts/world/electric_trap.gd")
 const SkullScript := preload("res://scripts/world/secret_skull.gd")
 const SecondWindScript := preload("res://scripts/world/second_wind_station.gd")
 const RadioScript := preload("res://scripts/world/exfil_radio.gd")
@@ -514,13 +513,6 @@ func _dress_map() -> void:
 	_prop("prop_tire_stack", Vector3(28.6, 0, -3.6), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
 	_prop("prop_tire_stack", Vector3(13.4, 0, -1.2), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
 
-	var trap: Node3D = TrapScript.new()
-	trap.zone_center = Vector3(12.0, 0, 3.0)
-	trap.zone_yaw = deg_to_rad(90.0)
-	trap.zone_width = DOOR_W
-	trap.position = Vector3(11.68, 1.4, 6.3)
-	trap.rotation_degrees.y = -90.0
-	add_child(trap)
 
 	# --- Outside: dead trees, radio tower, wire, wrecks, rubble, lamp posts ---
 	var trees := [Vector3(-36, 0, 24), Vector3(-25, 0, 26), Vector3(12, 0, 27), Vector3(33, 0, 24), Vector3(38, 0, -12),

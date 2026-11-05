@@ -161,6 +161,10 @@ func build(nodes: Dictionary, root_basis: Basis, scale_f: float, base_vel: Vecto
 			cj.global_transform = Transform3D(_basis_along_x(dir2, up), anchor)
 		joint.node_a = joint.get_path_to(bodies[seg[1]])
 		joint.node_b = joint.get_path_to(bodies[nm])
+		# Remember the anchor on both bodies to hold the joint together
+		var pb: RigidBody3D = bodies[seg[1]]
+		var cb: RigidBody3D = bodies[nm]
+		_links.append([pb, cb, pb.global_transform.affine_inverse() * anchor, cb.global_transform.affine_inverse() * anchor])
 
 	# The killing blow: push the body part nearest the hit
 	if impulse != Vector3.ZERO:
@@ -172,10 +176,16 @@ func build(nodes: Dictionary, root_basis: Basis, scale_f: float, base_vel: Vecto
 			if d < best_d:
 				best_d = d
 				best = b
+		# Most of the shove moves the whole body; only a part twists the hit limb,
+		# so big hits don't tear the joints apart
+		var total_mass := 0.0
+		for nm4 in bodies:
+			total_mass += (bodies[nm4] as RigidBody3D).mass
+		for nm4 in bodies:
+			var bb4: RigidBody3D = bodies[nm4]
+			bb4.apply_central_impulse(impulse * 0.75 * bb4.mass / maxf(total_mass, 0.1))
 		if best:
-			best.apply_impulse(impulse, hit_point - best.global_position)
-		if bodies.has("Spine"):
-			(bodies["Spine"] as RigidBody3D).apply_central_impulse(impulse * 0.35)
+			best.apply_impulse(impulse * 0.25, hit_point - best.global_position)
 	if blast_center != Vector3.INF and blast_force > 0.0:
 		for nm3 in bodies:
 			var b2: RigidBody3D = bodies[nm3]
@@ -189,6 +199,7 @@ func build(nodes: Dictionary, root_basis: Basis, scale_f: float, base_vel: Vecto
 
 func _physics_process(delta: float) -> void:
 	_t += delta
+	_hold_joints()
 	# Safety: never let a solver hiccup fling a body across the map
 	for nm0 in bodies:
 		var bb: RigidBody3D = bodies[nm0]
@@ -235,3 +246,25 @@ static func _basis_along_x(dir: Vector3, hint: Vector3) -> Basis:
 	var z := x.cross(h).normalized()
 	var y := z.cross(x).normalized()
 	return Basis(x, y, z)
+
+
+var _links: Array = [] # [parent body, child body, anchor in parent, anchor in child]
+
+
+# The physics joints are soft; on big hits they stretch, which tears a
+# skinned body into long shards. Pull every child body back onto its joint
+# each step (parents first) and share velocity across the joint.
+func _hold_joints() -> void:
+	if _frozen:
+		return
+	for l in _links:
+		var pb: RigidBody3D = l[0]
+		var cb: RigidBody3D = l[1]
+		if not is_instance_valid(pb) or not is_instance_valid(cb):
+			continue
+		var ap: Vector3 = pb.global_transform * (l[2] as Vector3)
+		var ac: Vector3 = cb.global_transform * (l[3] as Vector3)
+		var gap := ap - ac
+		if gap.length() > 0.02:
+			cb.global_position += gap
+			cb.linear_velocity = cb.linear_velocity.lerp(pb.linear_velocity, 0.5)

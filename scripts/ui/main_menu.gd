@@ -210,7 +210,7 @@ func _build_ui() -> void:
 	_nav_button(rail, "options", "OPTIONS", "AUDIO, CONTROLS, VIDEO", func(): _show_page("options"))
 	_nav_button(rail, "quit", "QUIT", "", func(): get_tree().quit())
 
-	var foot := _label("[WASD] MOVE   [SHIFT] SPRINT   [C] CROUCH/SLIDE   [SPACE] JUMP   [LMB/RMB] FIRE/AIM   [R] RELOAD   [V] KNIFE   [G] GRENADE   [Q]/[F] SKILLS   [X]/[Z] RELIC SKILLS   [E] USE   [ESC] PAUSE", 11, Color(0.55, 0.58, 0.63))
+	var foot := _label("[WASD] MOVE   [SHIFT] SPRINT   [C] CROUCH/SLIDE   [SPACE] JUMP   [LMB/RMB] FIRE/AIM   [R] RELOAD   [V] KNIFE   [G] GRENADE   [Q]/[F] SKILLS   [X]/[Z] RELIC SKILLS   [T] C4   [B] MINE   [E] USE   [ESC] PAUSE", 11, Color(0.55, 0.58, 0.63))
 	foot.anchor_top = 1.0
 	foot.anchor_bottom = 1.0
 	foot.offset_left = 56

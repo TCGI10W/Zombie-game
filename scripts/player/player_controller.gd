@@ -180,6 +180,12 @@ func _ready() -> void:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = KEY_X
 		InputMap.action_add_event("borrowed_skill", ev)
+	for pair in [["throw_c4", KEY_T], ["place_mine", KEY_B]]:
+		if not InputMap.has_action(pair[0]):
+			InputMap.add_action(pair[0])
+			var ek := InputEventKey.new()
+			ek.physical_keycode = pair[1]
+			InputMap.action_add_event(pair[0], ek)
 	if not InputMap.has_action("borrowed_skill_2"):
 		InputMap.add_action("borrowed_skill_2")
 		var ev2 := InputEventKey.new()
@@ -729,6 +735,19 @@ func _handle_combat_inputs(delta: float) -> void:
 		_trigger_skill_q()
 	if Input.is_action_just_pressed("skill_2") and not is_downed:
 		_trigger_skill_f()
+	# Explosives: tap [T] to toss C4, hold [T] to set it all off; [B] drops a mine
+	if Input.is_action_pressed("throw_c4") and not is_downed:
+		_c4_hold_t += delta
+		if _c4_hold_t >= 0.4 and not _c4_fired:
+			_c4_fired = true
+			_detonate_c4()
+	elif _c4_hold_t > 0.0:
+		if not _c4_fired and c4_count > 0:
+			_throw_charge("c4")
+		_c4_hold_t = 0.0
+		_c4_fired = false
+	if Input.is_action_just_pressed("place_mine") and mines > 0 and not is_downed:
+		_throw_charge("mine")
 	if pending_skill_t > 0.0:
 		if Input.is_action_just_pressed("borrowed_skill"):
 			_place_pending_skill(1)
@@ -2143,7 +2162,7 @@ func export_state() -> Dictionary:
 		"kills": GameState.total_kills, "headshots": GameState.headshots, "bosses": GameState.bosses_slain,
 		"weapons": Array(weapons_owned), "slot": active_slot, "mag": mag_ammo.duplicate(),
 		"reserve": reserve_ammo.duplicate(), "upgraded": upgraded.duplicate(), "stats": stat_burned.duplicate(),
-		"revives": revives, "grenades": grenades,
+		"revives": revives, "grenades": grenades, "c4": c4_count, "mines": mines,
 		"skill1": borrowed_skill, "skill1_cd": borrowed_cd_max, "skill2": borrowed_skill2, "skill2_cd": borrowed_cd_max2,
 	}
 
@@ -2168,6 +2187,8 @@ func import_state(d: Dictionary) -> void:
 	stat_burned = d.get("stats", stat_burned)
 	revives = int(d.get("revives", revives))
 	grenades = int(d.get("grenades", grenades))
+	c4_count = int(d.get("c4", 0))
+	mines = int(d.get("mines", 0))
 	borrowed_skill = String(d.get("skill1", ""))
 	borrowed_cd_max = float(d.get("skill1_cd", 0.0))
 	borrowed_skill2 = String(d.get("skill2", ""))
@@ -2180,3 +2201,51 @@ func import_state(d: Dictionary) -> void:
 	stats_changed.emit()
 	hp_changed.emit(hp, max_hp, overshield)
 	status_banner_requested.emit("RUN RESTORED — YOUR LOADOUT IS BACK", Color(0.55, 0.9, 1.0))
+
+
+# ---------------------------------------------------------------------------
+# EXPLOSIVES (Supply Depot)
+# ---------------------------------------------------------------------------
+const ExplosiveScript := preload("res://scripts/player/explosive_charge.gd")
+var c4_count: int = 0
+var mines: int = 0
+var _c4_hold_t: float = 0.0
+var _c4_fired: bool = false
+
+
+func placed_c4() -> int:
+	var n := 0
+	for c in get_tree().get_nodes_in_group("placed_charges"):
+		if c.thrower == self and c.mode == "c4":
+			n += 1
+	return n
+
+
+func _throw_charge(mode: String) -> void:
+	var g: RigidBody3D = ExplosiveScript.new()
+	g.mode = mode
+	g.thrower = self
+	get_tree().current_scene.add_child(g)
+	var fwd := -camera.global_transform.basis.z
+	if mode == "c4":
+		c4_count -= 1
+		g.global_position = camera.global_position + fwd * 0.5
+		g.linear_velocity = fwd * 9.0 + Vector3.UP * 2.0 + Vector3(velocity.x, 0, velocity.z) * 0.5
+		GameState.play_sfx("grenade_pin", -4.0, 1.3)
+	else:
+		mines -= 1
+		var flat := Vector3(fwd.x, 0, fwd.z).normalized()
+		g.global_position = Vector3(global_position.x, 0.04, global_position.z) + flat * 0.9
+		GameState.play_sfx("mag_in", -2.0, 0.8)
+		status_banner_requested.emit("MINE ARMING...", Color(1.0, 0.6, 0.3))
+	stats_changed.emit()
+
+
+func _detonate_c4() -> void:
+	var any := false
+	for c in get_tree().get_nodes_in_group("placed_charges"):
+		if c.thrower == self and c.mode == "c4":
+			c.detonate()
+			any = true
+	if any:
+		GameState.play_sfx("radio_beep", -2.0, 1.4)

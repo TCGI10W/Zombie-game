@@ -7,6 +7,8 @@ const ITEMS := [
 	{"id": "grenades", "name": "FRAG GRENADES x3", "desc": "Refill your grenade belt", "base": 750, "step": 0},
 	{"id": "plate", "name": "ARMOR PLATE", "desc": "+60 shield on top of your health (max 150)", "base": 1000, "step": 400},
 	{"id": "revive", "name": "SECOND WIND CHARGE", "desc": "Get back up by yourself (hold up to 3)", "base": 3500, "step": 1500},
+	{"id": "c4", "name": "C4 CHARGES x2", "desc": "[T] toss & stick, hold [T] to detonate (huge blast)", "base": 1500, "step": 500},
+	{"id": "mines", "name": "PROXIMITY MINES x2", "desc": "[B] drop one; it arms and blows when zombies step close", "base": 1200, "step": 400},
 	{"id": "relic", "name": "RELIC CACHE", "desc": "A random relic: stats or another operator's skill", "base": 5000, "step": 2500},
 ]
 
@@ -78,8 +80,8 @@ func _open(p: Node3D) -> void:
 	panel.set_anchors_preset(Control.PRESET_CENTER)
 	panel.offset_left = -330
 	panel.offset_right = 330
-	panel.offset_top = -230
-	panel.offset_bottom = 230
+	panel.offset_top = -300
+	panel.offset_bottom = 300
 	_layer.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 8)
@@ -122,6 +124,10 @@ func _refresh() -> void:
 					note = "   (FULL)"
 				elif id == "plate" and float(_player.overshield) >= 150.0:
 					note = "   (FULL)"
+				elif id == "c4" and int(_player.c4_count) >= 4:
+					note = "   (FULL)"
+				elif id == "mines" and int(_player.mines) >= 4:
+					note = "   (FULL)"
 				b.text = "  %s  —  %d PTS%s\n  %s" % [it["name"], price(id), note, it["desc"]]
 				b.disabled = note != "" or GameState.points < price(id)
 
@@ -142,6 +148,12 @@ func _buy(id: String) -> void:
 			_player.revives = mini(3, int(_player.revives) + 1)
 			_player.stats_changed.emit()
 			_player.status_banner_requested.emit("SECOND WIND CHARGES: %d" % _player.revives, Color(0.4, 1.0, 0.6))
+		"c4":
+			_player.c4_count = mini(4, int(_player.c4_count) + 2)
+			_player.status_banner_requested.emit("C4 x%d — TAP [T] TO THROW, HOLD [T] TO DETONATE" % _player.c4_count, Color(1.0, 0.6, 0.3))
+		"mines":
+			_player.mines = mini(4, int(_player.mines) + 2)
+			_player.status_banner_requested.emit("MINES x%d — PRESS [B] TO DROP ONE" % _player.mines, Color(1.0, 0.6, 0.3))
 		"relic":
 			var wm := get_tree().current_scene.get_node_or_null("WaveManager")
 			if wm:

@@ -1,6 +1,6 @@
 extends Node3D
 # Motor-pool generator. Turning it on restores the lights in the bunker and
-# lab, and powers the Weapon Forge and the electric trap.
+# lab, and powers the Weapon Forge and the field radio.
 
 var interact_radius: float = 3.2
 var _lever: Node3D
@@ -94,5 +94,5 @@ func _start(player: Node3D) -> void:
 	tw.tween_callback(func():
 		get_tree().call_group("arena", "set_power", true)
 		if is_instance_valid(player):
-			player.status_banner_requested.emit("POWER RESTORED — WEAPON FORGE & ELECTRIC TRAP ONLINE", Color(0.4, 1.0, 0.5))
+			player.status_banner_requested.emit("POWER RESTORED — WEAPON FORGE & FIELD RADIO ONLINE", Color(0.4, 1.0, 0.5))
 	)

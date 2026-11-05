@@ -510,6 +510,23 @@ func _c_boss_fx(id: int, kind: String, on: bool, pos: Vector3, amount: float) ->
 		z.net_boss_fx(kind, on, pos, amount)
 
 
+# Explosions (grenades, C4, mines) show up on everyone's screen.
+func broadcast_explosion(pos: Vector3) -> void:
+	_r_explosion.rpc(pos)
+
+
+@rpc("any_peer", "call_remote", "unreliable")
+func _r_explosion(pos: Vector3) -> void:
+	var fx: Node3D = (load("res://scripts/player/frag_grenade.gd") as GDScript).new()
+	fx.set_physics_process(false)
+	get_parent().add_child(fx)
+	fx.global_position = pos
+	fx.visible = false
+	GameState.play_sfx("grenade_explode", 0.0, randf_range(0.92, 1.05))
+	fx._spawn_fx(pos)
+	fx.queue_free()
+
+
 # Client -> host: our predicted hit. The host trusts the shooter.
 func forward_damage(z: ZombieEnemy, raw: float, pos: Vector3, ignore_armor: bool, kind: String, killed: bool, headshot: bool) -> void:
 	_s_damage.rpc_id(1, z.net_id, raw, pos, ignore_armor, kind, killed, headshot)
@@ -656,27 +673,57 @@ func _game_over(_any_extracted: bool) -> void:
 var _dead_t: float = 0.0
 
 
+var _spec_idx: int = 0
+var _spec_target: RemotePlayer = null
+
+
+# While dead: see the game through a living teammate's eyes until the next
+# round. Your own gun, HUD and body are hidden; click to switch teammate.
 func _update_spectate() -> void:
-	if not player.is_dead or game_over:
+	var hud := get_parent().get_node_or_null("GameHUD") as CanvasLayer
+	var spectating := player.is_dead and not game_over and not player.extracted
+	if not spectating:
 		_dead_t = 0.0
+		_set_spec_target(null)
+		if hud and not hud.visible:
+			hud.visible = true
 		return
 	_dead_t += get_process_delta_time()
-	if _dead_t < 2.2:
+	player.gun_rig.visible = false
+	if _dead_t < 1.6:
 		return # let the death camera play out
-	player.camera.rotation.z = lerpf(player.camera.rotation.z, 0.0, 0.1)
-	player.head_pivot.position.y = lerpf(player.head_pivot.position.y, player._head_rest_y, 0.1)
-	var target: RemotePlayer = null
+	var alive: Array = []
 	for av in avatars.values():
 		if is_instance_valid(av) and not av.is_dead and not av.extracted:
-			target = av
-			break
-	if target == null:
+			alive.append(av)
+	if alive.is_empty():
+		_set_spec_target(null)
 		return
-	var back := target.global_basis.z
-	player.global_position = player.global_position.lerp(target.global_position + back * 2.6 + Vector3(0, 0.35, 0), 0.15)
-	player.rotation.y = lerp_angle(player.rotation.y, target.rotation.y, 0.2)
-	player.head_pivot.rotation.x = lerpf(player.head_pivot.rotation.x, -0.22, 0.2)
-	_center_lbl.text = "YOU DIED — SPECTATING %s\nYOU'LL RESPAWN NEXT ROUND IF THE SQUAD HOLDS" % target.display_name
+	if Input.is_action_just_pressed("fire"):
+		_spec_idx += 1
+	var target: RemotePlayer = alive[_spec_idx % alive.size()]
+	_set_spec_target(target)
+	if hud:
+		hud.visible = false
+	# First person from the teammate's head
+	player.camera.rotation = Vector3.ZERO
+	player.camera.position = Vector3.ZERO
+	player.head_pivot.position.y = player._head_rest_y - (0.25 if target.crouching else 0.0)
+	player.global_position = target.global_position
+	player.rotation.y = target.rotation.y
+	player.head_pivot.rotation.x = target.pitch
+	_center_lbl.text = "SPECTATING %s   •   CLICK TO SWITCH
+YOU RESPAWN NEXT ROUND IF THE SQUAD HOLDS" % target.display_name
+
+
+func _set_spec_target(t: RemotePlayer) -> void:
+	if _spec_target == t:
+		return
+	if is_instance_valid(_spec_target):
+		_spec_target.spectated = false
+	_spec_target = t
+	if is_instance_valid(t):
+		t.spectated = true
 
 
 # ---------------------------------------------------------------------------

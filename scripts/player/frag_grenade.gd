@@ -7,6 +7,8 @@ const DAMAGE := 460.0
 
 var thrower: Node = null
 var _fuse: float = FUSE
+var radius: float = RADIUS
+var damage: float = DAMAGE
 
 
 func _ready() -> void:
@@ -60,9 +62,9 @@ func _explode() -> void:
 		if z == null or z.is_dead:
 			continue
 		var d := z.global_position.distance_to(center)
-		if d > RADIUS:
+		if d > radius:
 			continue
-		var dmg := DAMAGE * mult * (1.0 - 0.6 * d / RADIUS)
+		var dmg := damage * mult * (1.0 - 0.6 * d / radius)
 		var res := z.take_damage(dmg, z.global_position + Vector3(0, 1.0, 0), false, "explosive")
 		if res["dealt"] > 0.0:
 			any_hit = true
@@ -78,6 +80,9 @@ func _explode() -> void:
 			thrower.add_camera_shake(clampf(0.6 - pd * 0.04, 0.1, 0.6))
 
 	_spawn_fx(center)
+	var ng := get_tree().get_first_node_in_group("net_game")
+	if ng and Net.is_online():
+		ng.broadcast_explosion(center)
 	queue_free()
 
 

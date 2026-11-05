@@ -19,6 +19,7 @@ var buffer := NetBuffer.new()
 # Mirrored state (from the teammate's own machine)
 var is_downed: bool = false
 var is_dead: bool = false
+var spectated: bool = false # this machine is watching through their eyes
 var extracted: bool = false
 var self_reviving: bool = false
 var crouching: bool = false
@@ -233,7 +234,7 @@ func _tracer(a: Vector3, b: Vector3) -> void:
 # ZOMBIE-FACING API (host side)
 # ---------------------------------------------------------------------------
 func is_valid_target() -> bool:
-	return not is_dead and not is_downed and not extracted and visible
+	return not is_dead and not is_downed and not extracted
 
 
 func take_damage(amount: float, from_pos: Vector3 = Vector3.ZERO) -> void:
@@ -301,7 +302,8 @@ func _process(delta: float) -> void:
 		_revive_hold_t -= delta
 		if _revive_hold_t <= 0.0:
 			revive_progress = 0.0
-	visible = not extracted
+	# Dead teammates vanish; the one we're watching through is hidden too
+	visible = not extracted and not is_dead and not spectated
 	if not buffer.has_data():
 		return
 	var s: Array = buffer.sample(Net.host_time() - maxf(0.0, _arrival_lag) - 0.08)

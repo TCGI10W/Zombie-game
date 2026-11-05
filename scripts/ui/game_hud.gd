@@ -783,6 +783,9 @@ func _process(delta: float) -> void:
 			if slot[0] != "":
 				var sk_name: String = PlayerController.BORROWED_SKILLS[slot[0]]["name"]
 				lines.append("[%s] %s — %s" % [slot[2], sk_name, "READY" if slot[1] <= 0.0 else "%ds" % int(ceil(slot[1]))])
+		var placed: int = player.placed_c4()
+		if player.c4_count > 0 or player.mines > 0 or placed > 0:
+			lines.append("[T] C4 x%d%s   [B] MINES x%d" % [player.c4_count, ("  (HOLD T: BOOM x%d)" % placed) if placed > 0 else "", player.mines])
 		if player.pending_skill_t > 0.0:
 			lines.append("NEW: %s — PRESS [X]%s TO SWAP (%ds)" % [PlayerController.BORROWED_SKILLS[player.pending_skill]["name"], "/[Z]" if GameState.has_unlock("skill_slot") else "", int(ceil(player.pending_skill_t))])
 		borrowed_lbl.text = "\n".join(lines)
