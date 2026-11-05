@@ -54,20 +54,6 @@ func _ready() -> void:
 		add_child(ng)
 		ng.setup(player, wave_mgr, arena, enemies_container)
 
-	# Looping ambient soundtrack
-	var music := AudioStreamPlayer.new()
-	music.name = "Music"
-	music.bus = &"Music"
-	var stream := GameState.get_sfx_stream("ambient_loop")
-	if stream is AudioStreamWAV:
-		var wav: AudioStreamWAV = (stream as AudioStreamWAV).duplicate()
-		wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
-		wav.loop_begin = 0
-		wav.loop_end = int(wav.get_length() * float(wav.mix_rate))
-		music.stream = wav
-	music.volume_db = -10.5
-	add_child(music)
-	music.play()
 
 	# Camera finishing pass (grain, vignette, grade) under the HUD
 	if true:

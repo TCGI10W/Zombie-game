@@ -308,16 +308,11 @@ func skull_found() -> void:
 		if player:
 			player.status_banner_requested.emit("SOMETHING STIRS... (%d / 3)" % skulls_found, Color(0.4, 1.0, 0.55))
 		return
-	if _song_player == null:
-		_song_player = AudioStreamPlayer.new()
-		_song_player.volume_db = -3.0
-		add_child(_song_player)
-	_song_player.stream = GameState.get_sfx_stream("easter_song")
-	_song_player.play()
+	GameState.play_sfx("level_up", 0.0, 0.8)
 	GameState.add_points(2500)
 	if player:
 		player.refill_all_ammo()
-		player.status_banner_requested.emit("SECRET SONG UNLOCKED! +2500 POINTS & MAX AMMO", Color(0.4, 1.0, 0.55))
+		player.status_banner_requested.emit("SECRET UNLOCKED! +2500 POINTS & MAX AMMO", Color(0.4, 1.0, 0.55))
 
 
 # ---------------------------------------------------------------------------

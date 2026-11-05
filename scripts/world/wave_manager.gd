@@ -113,7 +113,7 @@ func _present_round(round_num: int) -> void:
 		weather.set_storm(hound_round)
 	var boss_cfg := GameState.get_boss_config(round_num)
 	round_started.emit(round_num, boss_cfg)
-	if round_num == GameState.FINAL_ROUND:
+	if round_num == GameState.FINAL_ROUND and GameState.game_mode == "casual":
 		player.status_banner_requested.emit("FINAL ROUND! KILL THE PROGENITOR TO END THE OUTBREAK", Color(1.0, 0.82, 0.25))
 	var ng := _ng()
 	if ng:
@@ -919,7 +919,7 @@ func world_state() -> Dictionary:
 			doors.append(String(n.zone_id))
 		if "_running" in n and n._running:
 			power = true
-	return {"run_id": GameState.run_id, "round": GameState.current_round, "difficulty": GameState.difficulty,
+	return {"run_id": GameState.run_id, "round": GameState.current_round, "difficulty": GameState.difficulty, "mode": GameState.game_mode,
 		"doors": doors, "power": power, "players": Net.player_count()}
 
 

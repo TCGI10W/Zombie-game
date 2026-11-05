@@ -25,7 +25,12 @@ var best_exfil_round: int = 0
 var mouse_sens_mult: float = 1.0
 var points_mult: float = 1.0 # Fortune stat bonus, set by the player
 var master_volume: float = 0.8
-var music_volume: float = 0.8
+var sfx_volume: float = 1.0
+var invert_y: bool = false
+var fullscreen: bool = false
+var show_crosshair: bool = true
+var game_mode: String = "casual" # "casual" (ends at round 20) or "infinite"
+var best_round_infinite: int = 0
 var fov_setting: float = 80.0
 var post_fx_enabled: bool = true
 var graphics_quality: int = 2 # 0 low, 1 medium, 2 high
@@ -210,6 +215,7 @@ func _ready() -> void:
 	_setup_audio_buses()
 	_preload_audio()
 	load_save()
+	apply_graphics.call_deferred()
 
 
 func _process(delta: float) -> void:
@@ -280,7 +286,12 @@ func load_save() -> void:
 		best_exfil_round = int(cfg.get_value("records", "best_exfil_round", 0))
 		mouse_sens_mult = float(cfg.get_value("settings", "mouse_sens_mult", 1.0))
 		master_volume = float(cfg.get_value("settings", "master_volume", 0.8))
-		music_volume = float(cfg.get_value("settings", "music_volume", 0.8))
+		sfx_volume = float(cfg.get_value("settings", "sfx_volume", 1.0))
+		invert_y = bool(cfg.get_value("settings", "invert_y", false))
+		fullscreen = bool(cfg.get_value("settings", "fullscreen", false))
+		show_crosshair = bool(cfg.get_value("settings", "show_crosshair", true))
+		game_mode = String(cfg.get_value("settings", "game_mode", "casual"))
+		best_round_infinite = int(cfg.get_value("records", "best_round_infinite", 0))
 		fov_setting = float(cfg.get_value("settings", "fov", 80.0))
 		post_fx_enabled = bool(cfg.get_value("settings", "post_fx", true))
 		graphics_quality = int(cfg.get_value("settings", "graphics", 2))
@@ -299,7 +310,12 @@ func write_save() -> void:
 	cfg.set_value("records", "best_exfil_round", best_exfil_round)
 	cfg.set_value("settings", "mouse_sens_mult", mouse_sens_mult)
 	cfg.set_value("settings", "master_volume", master_volume)
-	cfg.set_value("settings", "music_volume", music_volume)
+	cfg.set_value("settings", "sfx_volume", sfx_volume)
+	cfg.set_value("settings", "invert_y", invert_y)
+	cfg.set_value("settings", "fullscreen", fullscreen)
+	cfg.set_value("settings", "show_crosshair", show_crosshair)
+	cfg.set_value("settings", "game_mode", game_mode)
+	cfg.set_value("records", "best_round_infinite", best_round_infinite)
 	cfg.set_value("settings", "fov", fov_setting)
 	cfg.set_value("settings", "post_fx", post_fx_enabled)
 	cfg.set_value("settings", "graphics", graphics_quality)
@@ -313,15 +329,21 @@ func write_save() -> void:
 func apply_volume() -> void:
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.0001, master_volume)))
 	AudioServer.set_bus_mute(0, master_volume <= 0.001)
+	for bus in ["SFX", "Zombies"]:
+		var bi := AudioServer.get_bus_index(bus)
+		if bi >= 0:
+			AudioServer.set_bus_volume_db(bi, linear_to_db(maxf(0.0001, sfx_volume)))
+			AudioServer.set_bus_mute(bi, sfx_volume <= 0.001)
 	var mb := AudioServer.get_bus_index("Music")
 	if mb >= 0:
-		AudioServer.set_bus_volume_db(mb, linear_to_db(maxf(0.0001, music_volume)))
-		AudioServer.set_bus_mute(mb, music_volume <= 0.001)
+		AudioServer.set_bus_mute(mb, true) # no music in this game
 
 
 # Saves progress for this run. Returns true if this run beat the best round
 # that was on record when the run started.
 func record_run() -> bool:
+	if game_mode == "infinite":
+		best_round_infinite = maxi(best_round_infinite, current_round)
 	best_round = maxi(best_round, current_round)
 	best_kills = maxi(best_kills, total_kills)
 	write_save()
@@ -385,8 +407,8 @@ func _preload_audio() -> void:
 		"board_repair", "board_tear", "door_open", "player_hurt", "weapon_swap",
 		"slide", "player_step_1", "player_step_2", "shell_insert",
 		"flesh_hit", "hit_flesh", "headshot_ding", "ricochet", "gore_splat", "shell_tink", "zombie_death", "pump_rack", "bolt_cycle",
-		"mag_out", "mag_in", "power_on", "trap_zap", "electrocute", "skull_shatter", "easter_song",
-		"ambient_loop", "heartbeat",
+		"mag_out", "mag_in", "power_on", "trap_zap", "electrocute", "skull_shatter",
+		"heartbeat",
 		"hound_growl", "hound_bark", "hound_howl", "hound_bite", "hound_death", "hound_round_sting",
 		"lightning_strike", "thunder_far", "bloater_pop", "player_cough", "player_downed", "second_wind",
 		"heli_loop", "flare_ignite", "flare_burn", "radio_call", "radio_beep", "exfil_siren", "exfil_success",
@@ -473,7 +495,7 @@ func spend_points(cost: int) -> bool:
 
 
 func get_boss_config(round_num: int) -> Dictionary:
-	if round_num == FINAL_ROUND:
+	if round_num == FINAL_ROUND and game_mode == "casual":
 		var c: Dictionary = _boss_config(4 + 15).duplicate()
 		c["name"] = "THE PROGENITOR — FINAL BOSS"
 		c["subtitle"] = "PATIENT ZERO OF NACHT-7 // KILL IT TO END THE OUTBREAK"
@@ -581,6 +603,9 @@ func to_roman(n: int) -> String:
 # Graphics presets for weaker PCs. Low frame rates are what make aiming feel
 # laggy, so Low drops the expensive screen effects and renders 3D at 75%.
 func apply_graphics() -> void:
+	var want_mode := DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else DisplayServer.WINDOW_MODE_WINDOWED
+	if DisplayServer.window_get_mode() != want_mode and DisplayServer.get_name() != "headless":
+		DisplayServer.window_set_mode(want_mode)
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if vsync_on else DisplayServer.VSYNC_DISABLED)
 	var vp := get_viewport()
 	if vp == null:
@@ -680,7 +705,7 @@ func finish_run(outcome: String) -> String:
 		record_run()
 		write_save()
 	var after := career_level()
-	var lines := "SCORE: %d   (%s)\n+%d XP   •   CAREER LEVEL %d   (%d / %d XP)" % [score, DIFFICULTY_NAMES[difficulty], gained, after, career_xp, xp_for_level(after + 1)]
+	var lines := ("CASUAL" if game_mode == "casual" else "INFINITE") + " MODE\nSCORE: %d   (%s)\n+%d XP   •   CAREER LEVEL %d   (%d / %d XP)" % [score, DIFFICULTY_NAMES[difficulty], gained, after, career_xp, xp_for_level(after + 1)]
 	for u in META_UNLOCKS:
 		if int(u["level"]) > before and int(u["level"]) <= after:
 			lines += "\n★ UNLOCKED: %s" % u["text"]

@@ -312,7 +312,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			zoom_scale = lerpf(1.0, camera.fov / base_fov, 0.85)
 		var sens := MOUSE_SENS * GameState.mouse_sens_mult * zoom_scale
 		rotate_y(-event.relative.x * sens)
-		head_pivot.rotation.x = clampf(head_pivot.rotation.x - event.relative.y * sens, deg_to_rad(-86.0), deg_to_rad(86.0))
+		var dy: float = -event.relative.y if GameState.invert_y else event.relative.y
+		head_pivot.rotation.x = clampf(head_pivot.rotation.x - dy * sens, deg_to_rad(-86.0), deg_to_rad(86.0))
 		sway += Vector2(event.relative.x, event.relative.y) * 0.0009
 		# The gun lags behind fast turns and swings back into place
 		var lag := 0.0016 * (0.35 if is_ads else 1.0)

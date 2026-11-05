@@ -1,22 +1,50 @@
 extends Node3D
+# Main menu: the outpost as a slowly drifting 3D backdrop, a navigation rail
+# on the left (Continue / Play / Co-op / Career / Options / Quit) and one
+# content panel on the right for the selected section.
+
+const ACCENT := Color(0.95, 0.32, 0.22)
+const ACCENT_BLUE := Color(0.45, 0.85, 1.0)
+const MODES := {
+	"casual": {"name": "CASUAL", "desc": "Survive 20 rounds, then kill THE PROGENITOR to contain the outbreak. Escape by chopper from round 8."},
+	"infinite": {"name": "INFINITE", "desc": "Endless rounds that keep getting harder. No final boss — just how long you last."},
+}
 
 var menu_cam: Camera3D
 var cam_pivot: Node3D
 var stage_pivot: Node3D
-var char_buttons: Dictionary = {}
-var detail_name: Label
-var detail_code: Label
-var detail_summary: Label
-var detail_stats: Label
-var detail_skills: VBoxContainer
 var _orbit_time: float = 0.0
+
+var _pages: Dictionary = {}
+var _nav: Dictionary = {}
+var _content_title: Label
+var _char_cards: Dictionary = {}
+var _mode_cards: Dictionary = {}
+var _diff_buttons: Array[Button] = []
+var _detail_name: Label
+var _detail_code: Label
+var _detail_summary: Label
+var _detail_stats: Label
+var _detail_skills: Label
+var _coop_settings: Label
+
+# Co-op lobby widgets
+var coop_status: Label
+var coop_roster: Label
+var coop_ip: LineEdit
+var coop_start: Button
+var coop_resume: Button
+var coop_invite: Button
+var coop_host_steam: Button
 
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	get_tree().paused = false
 	_build_3d_diorama()
-	_build_menu_ui()
+	_build_ui()
 	_select_character(GameState.selected_character)
+	_show_page("coop" if Net.is_online() or Net.status_text != "" else "play")
 
 
 func _process(delta: float) -> void:
@@ -27,258 +55,326 @@ func _process(delta: float) -> void:
 		stage_pivot.rotation.y = sin(_orbit_time * 1.4) * 0.18
 
 
+# ---------------------------------------------------------------------------
+# 3D BACKDROP
+# ---------------------------------------------------------------------------
 func _build_3d_diorama() -> void:
 	var arena := BunkerArena.new()
 	add_child(arena)
-
 	cam_pivot = Node3D.new()
 	cam_pivot.position = Vector3(0.0, 0.0, 1.5)
 	add_child(cam_pivot)
-
 	menu_cam = Camera3D.new()
-	menu_cam.position = Vector3(-1.4, 2.05, 8.2)
-	menu_cam.rotation_degrees = Vector3(-5.0, -8.0, 0.0)
+	menu_cam.position = Vector3(-2.6, 2.0, 8.4)
+	menu_cam.rotation_degrees = Vector3(-5.0, -14.0, 0.0)
 	menu_cam.fov = 58.0
 	menu_cam.current = true
 	cam_pivot.add_child(menu_cam)
-
-	# Lit 3D Showcase Stage in the open Center-Right of the screen!
 	stage_pivot = Node3D.new()
-	stage_pivot.position = Vector3(1.1, 0.0, 2.8)
+	stage_pivot.position = Vector3(-0.6, 0.0, 2.8)
 	add_child(stage_pivot)
-
 	var key_spot := SpotLight3D.new()
 	key_spot.light_color = Color(1.0, 0.72, 0.45)
 	key_spot.light_energy = 6.5
 	key_spot.spot_range = 14.0
 	key_spot.spot_angle = 38.0
-	key_spot.position = Vector3(1.4, 5.2, 6.5)
-	key_spot.look_at_from_position(Vector3(1.4, 5.2, 6.5), Vector3(1.1, 1.4, 2.8), Vector3.UP)
+	key_spot.look_at_from_position(Vector3(0.0, 5.2, 6.5), Vector3(-0.6, 1.4, 2.8), Vector3.UP)
 	add_child(key_spot)
-
-	var rim_light := OmniLight3D.new()
-	rim_light.light_color = Color(0.95, 0.22, 0.16)
-	rim_light.light_energy = 3.2
-	rim_light.omni_range = 8.0
-	rim_light.position = Vector3(2.8, 2.6, 0.8)
-	add_child(rim_light)
-
-	if ResourceLoader.exists("res://assets/models/boss_gun_zombie.glb"):
-		var b1 := (load("res://assets/models/boss_gun_zombie.glb") as PackedScene).instantiate() as Node3D
-		b1.position = Vector3(-1.35, 0.0, 0.25)
-		b1.rotation_degrees.y = 195.0
-		b1.scale = Vector3.ONE * 1.15
-		stage_pivot.add_child(b1)
-
-	if ResourceLoader.exists("res://assets/models/boss_gorilla.glb"):
-		var b2 := (load("res://assets/models/boss_gorilla.glb") as PackedScene).instantiate() as Node3D
-		b2.position = Vector3(1.15, 0.0, -0.35)
-		b2.rotation_degrees.y = 162.0
-		b2.scale = Vector3.ONE * 1.25
-		stage_pivot.add_child(b2)
+	var rim := OmniLight3D.new()
+	rim.light_color = Color(0.95, 0.22, 0.16)
+	rim.light_energy = 3.2
+	rim.omni_range = 8.0
+	rim.position = Vector3(1.4, 2.6, 0.8)
+	add_child(rim)
+	for m in [["res://assets/models/zombie_soldier_v2.glb", Vector3(-1.3, 0, 0.3), 200.0, 1.0],
+			["res://assets/models/boss_gorilla.glb", Vector3(0.9, 0, -0.5), 165.0, 1.25],
+			["res://assets/models/zombie_walker_v2.glb", Vector3(-0.1, 0, 0.9), 185.0, 1.0]]:
+		if ResourceLoader.exists(m[0]):
+			var n := (load(m[0]) as PackedScene).instantiate() as Node3D
+			n.position = m[1]
+			n.rotation_degrees.y = m[2]
+			n.scale = Vector3.ONE * float(m[3])
+			stage_pivot.add_child(n)
 
 
-func _make_card_style(bg: Color, border: Color, bw: int = 2) -> StyleBoxFlat:
+# ---------------------------------------------------------------------------
+# STYLE HELPERS
+# ---------------------------------------------------------------------------
+func _box(bg: Color, border: Color = Color(0, 0, 0, 0), bw: int = 0, left_bar: int = 0) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg
 	sb.border_color = border
-	sb.set_border_width_all(bw)
-	sb.set_corner_radius_all(8)
-	sb.content_margin_left = 16
-	sb.content_margin_right = 16
-	sb.content_margin_top = 12
-	sb.content_margin_bottom = 12
+	sb.border_width_left = maxi(bw, left_bar)
+	sb.border_width_right = bw
+	sb.border_width_top = bw
+	sb.border_width_bottom = bw
+	sb.corner_radius_top_left = 4
+	sb.corner_radius_top_right = 4
+	sb.corner_radius_bottom_left = 4
+	sb.corner_radius_bottom_right = 4
+	sb.content_margin_left = 14
+	sb.content_margin_right = 14
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 8
 	return sb
 
 
-func _build_menu_ui() -> void:
+func _make_theme() -> Theme:
+	var th := Theme.new()
+	th.set_stylebox("normal", "Button", _box(Color(0.07, 0.08, 0.1, 0.92), Color(1, 1, 1, 0.08), 1))
+	th.set_stylebox("hover", "Button", _box(Color(0.14, 0.12, 0.13, 0.96), ACCENT, 1))
+	th.set_stylebox("pressed", "Button", _box(Color(0.22, 0.1, 0.09, 0.98), ACCENT, 1))
+	th.set_stylebox("disabled", "Button", _box(Color(0.06, 0.06, 0.07, 0.7), Color(1, 1, 1, 0.04), 1))
+	th.set_stylebox("focus", "Button", StyleBoxEmpty.new())
+	th.set_color("font_color", "Button", Color(0.9, 0.92, 0.95))
+	th.set_color("font_hover_color", "Button", Color(1, 1, 1))
+	th.set_color("font_disabled_color", "Button", Color(0.45, 0.47, 0.5))
+	th.set_font_size("font_size", "Button", 16)
+	th.set_font_size("font_size", "Label", 15)
+	th.set_color("font_color", "Label", Color(0.86, 0.88, 0.92))
+	th.set_stylebox("normal", "LineEdit", _box(Color(0.04, 0.05, 0.07, 0.95), Color(1, 1, 1, 0.15), 1))
+	return th
+
+
+func _label(text: String, size: int, col: Color = Color(0.86, 0.88, 0.92), wrap: bool = false) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	if wrap:
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return l
+
+
+func _header(parent: Control, text: String) -> void:
+	var l := _label(text, 13, ACCENT)
+	parent.add_child(l)
+
+
+# ---------------------------------------------------------------------------
+# LAYOUT
+# ---------------------------------------------------------------------------
+func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.theme = _make_theme()
+	layer.add_child(root)
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 38)
-	margin.add_theme_constant_override("margin_right", 38)
-	margin.add_theme_constant_override("margin_top", 26)
-	margin.add_theme_constant_override("margin_bottom", 26)
-	layer.add_child(margin)
+	# Dark fade on the left so the rail reads over the 3D scene
+	var fade := TextureRect.new()
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.01, 0.01, 0.02, 0.92))
+	grad.set_color(1, Color(0.01, 0.01, 0.02, 0.0))
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(1, 0)
+	fade.texture = gt
+	fade.anchor_bottom = 1.0
+	fade.offset_right = 760
+	fade.stretch_mode = TextureRect.STRETCH_SCALE
+	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(fade)
 
-	var main_v := VBoxContainer.new()
-	main_v.add_theme_constant_override("separation", 14)
-	margin.add_child(main_v)
-
-	# --- HEADER ---
-	var header_h := HBoxContainer.new()
-	main_v.add_child(header_h)
-
-	var title_v := VBoxContainer.new()
-	title_v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header_h.add_child(title_v)
-
-	var tag_lbl := Label.new()
-	tag_lbl.text = "CLASSIFIED OUTBREAK PROTOCOL  //  OUTPOST NACHT-7"
-	tag_lbl.add_theme_font_size_override("font_size", 14)
-	tag_lbl.add_theme_color_override("font_color", Color(0.95, 0.30, 0.22))
-	tag_lbl.add_theme_constant_override("outline_size", 5)
-	tag_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	title_v.add_child(tag_lbl)
-
-	var game_title := Label.new()
-	game_title.text = "DEAD PROTOCOL: ZOMBIES"
-	game_title.add_theme_font_size_override("font_size", 42)
-	game_title.add_theme_color_override("font_color", Color(0.97, 0.95, 0.93))
-	game_title.add_theme_constant_override("outline_size", 8)
-	game_title.add_theme_color_override("font_outline_color", Color.BLACK)
-	title_v.add_child(game_title)
-
-	var career_lbl := Label.new()
+	# Title + career line
+	var title_box := VBoxContainer.new()
+	title_box.position = Vector2(56, 44)
+	title_box.add_theme_constant_override("separation", 0)
+	root.add_child(title_box)
+	title_box.add_child(_label("OUTPOST NACHT-7  //  CLASSIFIED", 13, ACCENT))
+	var t1 := _label("DEAD PROTOCOL", 58, Color(0.96, 0.96, 0.98))
+	t1.add_theme_constant_override("outline_size", 6)
+	t1.add_theme_color_override("font_outline_color", Color.BLACK)
+	title_box.add_child(t1)
+	title_box.add_child(_label("NACHT OUTBREAK", 22, Color(0.75, 0.77, 0.82)))
 	var lvl := GameState.career_level()
-	var next_u := ""
-	for u in GameState.META_UNLOCKS:
-		if int(u["level"]) > lvl:
-			next_u = "   •   NEXT (LV %d): %s" % [u["level"], u["text"]]
-			break
-	career_lbl.text = "CAREER LEVEL %d   •   XP %d / %d%s" % [lvl, GameState.career_xp, GameState.xp_for_level(lvl + 1), next_u]
-	career_lbl.add_theme_font_size_override("font_size", 14)
-	career_lbl.add_theme_color_override("font_color", Color(0.55, 0.9, 1.0))
-	title_v.add_child(career_lbl)
-	if GameState.best_round > 0:
-		var best_lbl := Label.new()
-		best_lbl.text = "BEST RUN: ROUND %d   •   MOST KILLS: %d" % [GameState.best_round, GameState.best_kills]
-		if GameState.exfils > 0:
-			best_lbl.text += "   •   EXTRACTIONS: %d" % GameState.exfils
-		best_lbl.add_theme_font_size_override("font_size", 15)
-		best_lbl.add_theme_color_override("font_color", Color(0.98, 0.80, 0.35))
-		best_lbl.add_theme_constant_override("outline_size", 5)
-		best_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-		title_v.add_child(best_lbl)
+	var career := _label("CAREER LEVEL %d   •   %d XP" % [lvl, GameState.career_xp], 14, ACCENT_BLUE)
+	title_box.add_child(Control.new())
+	title_box.add_child(career)
 
-	var tally_badge := Label.new()
-	tally_badge.text = "||||/"
-	tally_badge.add_theme_font_size_override("font_size", 52)
-	tally_badge.add_theme_color_override("font_color", Color(0.88, 0.12, 0.10))
-	tally_badge.add_theme_constant_override("outline_size", 6)
-	tally_badge.add_theme_color_override("font_outline_color", Color.BLACK)
-	header_h.add_child(tally_badge)
+	# Navigation rail
+	var rail := VBoxContainer.new()
+	rail.position = Vector2(56, 250)
+	rail.custom_minimum_size = Vector2(300, 0)
+	rail.add_theme_constant_override("separation", 6)
+	root.add_child(rail)
+	var saved := GameState.load_world()
+	if not saved.is_empty() and int(saved.get("players", 1)) <= 1:
+		var mode_name: String = MODES.get(String(saved.get("mode", "casual")), MODES["casual"])["name"]
+		_nav_button(rail, "continue", "CONTINUE", "%s • ROUND %d • %s" % [mode_name, int(saved.get("round", 1)), GameState.DIFFICULTY_NAMES[int(saved.get("difficulty", 1))]], func(): _continue_run(saved))
+	_nav_button(rail, "play", "PLAY", "SOLO RUN", func(): _show_page("play"))
+	_nav_button(rail, "coop", "CO-OP", "UP TO 8 PLAYERS", func(): _show_page("coop"))
+	_nav_button(rail, "career", "CAREER", "LEVEL, UNLOCKS & RECORDS", func(): _show_page("career"))
+	_nav_button(rail, "options", "OPTIONS", "AUDIO, CONTROLS, VIDEO", func(): _show_page("options"))
+	_nav_button(rail, "quit", "QUIT", "", func(): get_tree().quit())
 
-	# --- BODY: LEFT ROSTER + OPEN CENTER 3D STAGE + RIGHT COMPACT DOSSIER ---
-	var body_h := HBoxContainer.new()
-	body_h.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body_h.add_theme_constant_override("separation", 20)
-	main_v.add_child(body_h)
+	var foot := _label("[WASD] MOVE   [SHIFT] SPRINT   [C] CROUCH/SLIDE   [SPACE] JUMP   [LMB/RMB] FIRE/AIM   [R] RELOAD   [V] KNIFE   [G] GRENADE   [Q]/[F] SKILLS   [X]/[Z] RELIC SKILLS   [E] USE   [ESC] PAUSE", 11, Color(0.55, 0.58, 0.63))
+	foot.anchor_top = 1.0
+	foot.anchor_bottom = 1.0
+	foot.offset_left = 56
+	foot.offset_top = -34
+	root.add_child(foot)
 
-	# Left Column: Operator Roster + Boss Intel
-	var left_v := VBoxContainer.new()
-	left_v.custom_minimum_size = Vector2(370, 0)
-	left_v.add_theme_constant_override("separation", 10)
-	body_h.add_child(left_v)
+	# Content panel
+	var panel := PanelContainer.new()
+	panel.anchor_left = 1.0
+	panel.anchor_right = 1.0
+	panel.anchor_bottom = 1.0
+	panel.offset_left = -690
+	panel.offset_right = -40
+	panel.offset_top = 40
+	panel.offset_bottom = -40
+	var pst := _box(Color(0.03, 0.035, 0.045, 0.9), Color(1, 1, 1, 0.06), 1)
+	pst.border_width_top = 3
+	pst.border_color = ACCENT
+	pst.content_margin_left = 26
+	pst.content_margin_right = 26
+	pst.content_margin_top = 20
+	pst.content_margin_bottom = 20
+	panel.add_theme_stylebox_override("panel", pst)
+	root.add_child(panel)
+	var pv := VBoxContainer.new()
+	pv.add_theme_constant_override("separation", 12)
+	panel.add_child(pv)
+	_content_title = _label("", 30, Color(0.97, 0.97, 0.99))
+	pv.add_child(_content_title)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	pv.add_child(scroll)
+	var stack := VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(stack)
 
-	var sel_hdr := Label.new()
-	sel_hdr.text = "SELECT OPERATOR"
-	sel_hdr.add_theme_font_size_override("font_size", 16)
-	sel_hdr.add_theme_color_override("font_color", Color(0.90, 0.90, 0.94))
-	sel_hdr.add_theme_constant_override("outline_size", 5)
-	sel_hdr.add_theme_color_override("font_outline_color", Color.BLACK)
-	left_v.add_child(sel_hdr)
+	_pages["play"] = _build_play_page()
+	_pages["coop"] = _build_coop_page()
+	_pages["career"] = _build_career_page()
+	var opts := OptionsPanel.new()
+	opts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pages["options"] = opts
+	for k in _pages:
+		stack.add_child(_pages[k])
 
+
+func _nav_button(parent: Control, key: String, title: String, sub: String, on_press: Callable) -> void:
+	var b := Button.new()
+	b.text = "%s\n%s" % [title, sub] if sub != "" else title
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.custom_minimum_size = Vector2(300, 58 if sub != "" else 46)
+	b.add_theme_font_size_override("font_size", 19)
+	b.add_theme_stylebox_override("normal", _box(Color(0, 0, 0, 0.0), Color(0, 0, 0, 0), 0, 3))
+	b.add_theme_stylebox_override("hover", _box(Color(1, 1, 1, 0.06), ACCENT, 0, 4))
+	b.add_theme_stylebox_override("pressed", _box(Color(1, 1, 1, 0.1), ACCENT, 0, 4))
+	b.pressed.connect(func():
+		GameState.play_sfx("buy_ching", -12.0, 1.4)
+		on_press.call()
+	)
+	parent.add_child(b)
+	_nav[key] = b
+
+
+func _show_page(key: String) -> void:
+	var titles := {"play": "PLAY", "coop": "CO-OP SQUAD", "career": "CAREER", "options": "OPTIONS"}
+	_content_title.text = titles.get(key, "")
+	for k in _pages:
+		_pages[k].visible = k == key
+	for k in _nav:
+		var on: bool = k == key
+		(_nav[k] as Button).add_theme_stylebox_override("normal", _box(Color(1, 1, 1, 0.08) if on else Color(0, 0, 0, 0), ACCENT if on else Color(0, 0, 0, 0), 0, 4 if on else 0))
+	if key == "coop":
+		_refresh_coop()
+	elif key == "career":
+		_pages["career"].queue_free()
+		_pages["career"] = _build_career_page()
+		_pages["play"].get_parent().add_child(_pages["career"])
+		_pages["career"].visible = true
+
+
+# ---------------------------------------------------------------------------
+# PLAY
+# ---------------------------------------------------------------------------
+func _build_play_page() -> Control:
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	_header(v, "OPERATOR")
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	v.add_child(row)
 	for cid in ["ravager", "alchemist", "warden"]:
-		var cdata: Dictionary = GameState.CHARACTERS[cid]
-		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(0, 76)
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		btn.text = "  %s\n  %s" % [cdata["name"], cdata["codename"]]
-		btn.add_theme_font_size_override("font_size", 16)
-		btn.pressed.connect(func():
-			GameState.play_sfx("buy_ching", -5.0, 1.15)
+		var cd: Dictionary = GameState.CHARACTERS[cid]
+		var b := Button.new()
+		var full := String(cd["name"])
+		var short := full.get_slice("'", 1) if full.contains("'") else full.get_slice(" ", full.get_slice_count(" ") - 1)
+		b.text = "%s\n%s" % [short, String(cd["codename"]).get_slice("//", 1).strip_edges()]
+		b.custom_minimum_size = Vector2(0, 62)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.add_theme_font_size_override("font_size", 15)
+		b.pressed.connect(func():
+			GameState.play_sfx("buy_ching", -8.0, 1.15)
 			_select_character(cid)
 		)
-		left_v.add_child(btn)
-		char_buttons[cid] = btn
+		row.add_child(b)
+		_char_cards[cid] = b
+	_detail_code = _label("", 13, ACCENT)
+	v.add_child(_detail_code)
+	_detail_name = _label("", 22, Color(0.97, 0.97, 0.99))
+	v.add_child(_detail_name)
+	_detail_summary = _label("", 14, Color(0.78, 0.8, 0.85), true)
+	v.add_child(_detail_summary)
+	_detail_stats = _label("", 13, Color(1.0, 0.8, 0.4))
+	v.add_child(_detail_stats)
+	_detail_skills = _label("", 13, Color(0.86, 0.88, 0.92), true)
+	v.add_child(_detail_skills)
 
-	var boss_intel := PanelContainer.new()
-	boss_intel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	boss_intel.add_theme_stylebox_override("panel", _make_card_style(Color(0.04, 0.05, 0.07, 0.84), Color(0.62, 0.16, 0.14), 1))
-	left_v.add_child(boss_intel)
+	_header(v, "MODE")
+	var mrow := HBoxContainer.new()
+	mrow.add_theme_constant_override("separation", 8)
+	v.add_child(mrow)
+	for mid in ["casual", "infinite"]:
+		var b := Button.new()
+		b.text = "%s\n%s" % [MODES[mid]["name"], MODES[mid]["desc"]]
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.custom_minimum_size = Vector2(0, 92)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.add_theme_font_size_override("font_size", 14)
+		b.pressed.connect(func():
+			GameState.game_mode = mid
+			GameState.write_save()
+			_refresh_play())
+		mrow.add_child(b)
+		_mode_cards[mid] = b
 
-	var bi_v := VBoxContainer.new()
-	bi_v.add_theme_constant_override("separation", 5)
-	boss_intel.add_child(bi_v)
+	_header(v, "DIFFICULTY")
+	var drow := HBoxContainer.new()
+	drow.add_theme_constant_override("separation", 8)
+	v.add_child(drow)
+	var notes := ["x0.75 SCORE", "x1 SCORE", "x1.5 SCORE"]
+	for i in range(3):
+		var b := Button.new()
+		b.text = "%s\n%s" % [GameState.DIFFICULTY_NAMES[i], notes[i]]
+		b.custom_minimum_size = Vector2(0, 54)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var idx := i
+		b.pressed.connect(func():
+			GameState.difficulty = idx
+			GameState.write_save()
+			_refresh_play())
+		drow.add_child(b)
+		_diff_buttons.append(b)
 
-	var bi_hdr := Label.new()
-	bi_hdr.text = "☠ UNIQUE BOSS EVERY ROUND"
-	bi_hdr.add_theme_font_size_override("font_size", 14)
-	bi_hdr.add_theme_color_override("font_color", Color(1.0, 0.42, 0.30))
-	bi_v.add_child(bi_hdr)
-
-	for line in [
-		"• R1: Corp. Vex — Armed Rifle Zombie",
-		"• R2: Subject Goliath — Slow Tank Gorilla",
-		"• R3: Patient Zero-9 — Toxic Spitter",
-		"• R4: Panzer-Krieg — Flamethrower Mech",
-		"• R5+: Volt Reaper & Omega Variants",
-	]:
-		var bl := Label.new()
-		bl.text = line
-		bl.add_theme_font_size_override("font_size", 13)
-		bl.add_theme_color_override("font_color", Color(0.82, 0.84, 0.88))
-		bi_v.add_child(bl)
-
-	# Open Center Spacer so the live 3D Bunker & Boss Showcase Stage shines clearly!
-	var center_spacer := Control.new()
-	center_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	center_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	body_h.add_child(center_spacer)
-
-	# Right Compact Translucent Loadout & Deploy Panel
-	var right_card := PanelContainer.new()
-	right_card.custom_minimum_size = Vector2(520, 0)
-	right_card.size_flags_vertical = Control.SIZE_SHRINK_END
-	right_card.add_theme_stylebox_override("panel", _make_card_style(Color(0.04, 0.05, 0.08, 0.84), Color(0.85, 0.22, 0.18), 2))
-	body_h.add_child(right_card)
-
-	var rv := VBoxContainer.new()
-	rv.add_theme_constant_override("separation", 10)
-	right_card.add_child(rv)
-
-	detail_code = Label.new()
-	detail_code.add_theme_font_size_override("font_size", 13)
-	rv.add_child(detail_code)
-
-	detail_name = Label.new()
-	detail_name.add_theme_font_size_override("font_size", 26)
-	detail_name.add_theme_color_override("font_color", Color.WHITE)
-	rv.add_child(detail_name)
-
-	detail_summary = Label.new()
-	detail_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	detail_summary.add_theme_font_size_override("font_size", 14)
-	detail_summary.add_theme_color_override("font_color", Color(0.84, 0.86, 0.90))
-	rv.add_child(detail_summary)
-
-	detail_stats = Label.new()
-	detail_stats.add_theme_font_size_override("font_size", 13)
-	detail_stats.add_theme_color_override("font_color", Color(0.98, 0.80, 0.35))
-	rv.add_child(detail_stats)
-
-	detail_skills = VBoxContainer.new()
-	detail_skills.add_theme_constant_override("separation", 6)
-	rv.add_child(detail_skills)
-
-	var controls_lbl := Label.new()
-	controls_lbl.text = "[WASD] Move • [Shift] Sprint • [C] Crouch / Slide (while sprinting) • [Space] Jump • [LMB] Fire • [RMB] Aim • [R] Reload • [V] Knife • [G] Grenade • [1/2] Swap • [Q]/[F] Operator skills • [X]/[Z] Relic skills • [E] Buy / hold to rebuild windows / revive • [ESC] Pause
-Burn points at the AUGMENT FURNACE to level up Strength, Speed, Endurance, Stamina and more. Open doors to reach the Mystery Crate, turn on the GENERATOR to power the Weapon Forge, electric trap and field radio. Buy a SECOND WIND to get back up once when you go down. Bosses may drop relics (white, blue, purple, gold). Spend late-game points at the SUPPLY DEPOT. From round 8, use the radio between rounds to call the extraction chopper — or survive to ROUND 20 and kill the PROGENITOR to win."
-	controls_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	controls_lbl.add_theme_font_size_override("font_size", 12)
-	controls_lbl.add_theme_color_override("font_color", Color(0.68, 0.76, 0.85))
-	rv.add_child(controls_lbl)
-
-	var deploy_btn := Button.new()
-	deploy_btn.text = "▶  DEPLOY TO OUTBREAK (ROUND I)"
-	deploy_btn.custom_minimum_size = Vector2(0, 52)
-	deploy_btn.add_theme_font_size_override("font_size", 20)
-	deploy_btn.add_theme_stylebox_override("normal", _make_card_style(Color(0.72, 0.12, 0.10), Color(1.0, 0.38, 0.28), 2))
-	deploy_btn.add_theme_stylebox_override("hover", _make_card_style(Color(0.88, 0.18, 0.14), Color(1.0, 0.58, 0.38), 2))
-	deploy_btn.pressed.connect(func():
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 6)
+	v.add_child(gap)
+	var deploy := Button.new()
+	deploy.text = "DEPLOY"
+	deploy.custom_minimum_size = Vector2(0, 58)
+	deploy.add_theme_font_size_override("font_size", 24)
+	deploy.add_theme_stylebox_override("normal", _box(Color(0.72, 0.12, 0.1), Color(1.0, 0.4, 0.3), 1))
+	deploy.add_theme_stylebox_override("hover", _box(Color(0.88, 0.18, 0.14), Color(1.0, 0.6, 0.4), 1))
+	deploy.pressed.connect(func():
 		GameState.play_sfx("round_sting", -2.0, 1.0)
 		GameState.reset_run()
 		GameState.run_id = GameState.new_run_id()
@@ -286,107 +382,96 @@ Burn points at the AUGMENT FURNACE to level up Strength, Speed, Endurance, Stami
 		GameState.late_join = false
 		get_tree().change_scene_to_file("res://scenes/game.tscn")
 	)
-	var saved := GameState.load_world()
-	if not saved.is_empty() and int(saved.get("players", 1)) <= 1:
-		var cont_btn := Button.new()
-		cont_btn.text = "⟲  CONTINUE SAVED RUN — ROUND %d (%s)" % [int(saved.get("round", 1)), GameState.DIFFICULTY_NAMES[int(saved.get("difficulty", 1))]]
-		cont_btn.custom_minimum_size = Vector2(0, 42)
-		cont_btn.add_theme_font_size_override("font_size", 16)
-		cont_btn.pressed.connect(func():
-			GameState.reset_run()
-			GameState.run_id = int(saved.get("run_id", 0))
-			GameState.difficulty = int(saved.get("difficulty", 1))
-			GameState.pending_resume = true
-			GameState.late_join = false
-			get_tree().change_scene_to_file("res://scenes/game.tscn")
-		)
-		rv.add_child(cont_btn)
-	var diff_row := HBoxContainer.new()
-	var diff_lbl := Label.new()
-	diff_lbl.text = "DIFFICULTY"
-	diff_lbl.add_theme_font_size_override("font_size", 15)
-	diff_lbl.custom_minimum_size = Vector2(130, 0)
-	diff_row.add_child(diff_lbl)
-	var diff_opt := OptionButton.new()
-	for dn in ["EASY  (x0.75 SCORE)", "NORMAL", "HARD  (x1.5 SCORE)"]:
-		diff_opt.add_item(dn)
-	diff_opt.selected = GameState.difficulty
-	diff_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	diff_opt.item_selected.connect(func(i: int):
-		GameState.difficulty = i
-		GameState.write_save()
-	)
-	diff_row.add_child(diff_opt)
-	rv.add_child(diff_row)
-	rv.add_child(deploy_btn)
+	v.add_child(deploy)
+	_refresh_play.call_deferred()
+	return v
 
-	var coop_btn := Button.new()
-	coop_btn.text = "▶▶  CO-OP — PLAY WITH FRIENDS (UP TO 8)"
-	coop_btn.custom_minimum_size = Vector2(0, 44)
-	coop_btn.add_theme_font_size_override("font_size", 17)
-	coop_btn.add_theme_stylebox_override("normal", _make_card_style(Color(0.08, 0.2, 0.3), Color(0.35, 0.8, 1.0), 2))
-	coop_btn.add_theme_stylebox_override("hover", _make_card_style(Color(0.1, 0.28, 0.42), Color(0.55, 0.9, 1.0), 2))
-	coop_btn.pressed.connect(func(): _open_coop())
-	rv.add_child(coop_btn)
-	_build_coop_panel(layer)
+
+func _refresh_play() -> void:
+	for mid in _mode_cards:
+		var on: bool = mid == GameState.game_mode
+		(_mode_cards[mid] as Button).add_theme_stylebox_override("normal", _box(Color(0.2, 0.08, 0.07, 0.95) if on else Color(0.07, 0.08, 0.1, 0.92), ACCENT if on else Color(1, 1, 1, 0.08), 2 if on else 1))
+	for i in range(_diff_buttons.size()):
+		var on: bool = i == GameState.difficulty
+		_diff_buttons[i].add_theme_stylebox_override("normal", _box(Color(0.2, 0.08, 0.07, 0.95) if on else Color(0.07, 0.08, 0.1, 0.92), ACCENT if on else Color(1, 1, 1, 0.08), 2 if on else 1))
+	if _coop_settings:
+		_coop_settings.text = "SQUAD SETTINGS (HOST'S CHOICE, SET ON THE PLAY PAGE): %s • %s • YOUR OPERATOR: %s" % [MODES[GameState.game_mode]["name"], GameState.DIFFICULTY_NAMES[GameState.difficulty], GameState.CHARACTERS[GameState.selected_character]["name"]]
 
 
 func _select_character(cid: String) -> void:
 	GameState.selected_character = cid
 	Net.set_character(cid)
-	var cdata: Dictionary = GameState.CHARACTERS[cid]
-	var accent: Color = cdata["accent"]
+	var cd: Dictionary = GameState.CHARACTERS[cid]
+	var accent: Color = cd["accent"]
+	for k in _char_cards:
+		var on: bool = k == cid
+		var col: Color = GameState.CHARACTERS[k]["accent"]
+		(_char_cards[k] as Button).add_theme_stylebox_override("normal", _box(Color(0.16, 0.1, 0.1, 0.95) if on else Color(0.07, 0.08, 0.1, 0.92), col if on else Color(1, 1, 1, 0.08), 2 if on else 1))
+	_detail_code.text = cd["codename"]
+	_detail_code.add_theme_color_override("font_color", accent)
+	_detail_name.text = cd["name"]
+	_detail_summary.text = cd["summary"]
+	_detail_stats.text = "VITALITY %.0f HP   •   SPEED %.1f m/s   •   SIDEARM M1911" % [cd["max_hp"], cd["move_speed"]]
+	_detail_skills.text = "\n".join(cd["skills"])
+	_refresh_play()
 
-	for id_key in char_buttons.keys():
-		var b: Button = char_buttons[id_key]
-		var is_sel: bool = (id_key == cid)
-		var col: Color = GameState.CHARACTERS[id_key]["accent"]
-		b.add_theme_stylebox_override(
-			"normal",
-			_make_card_style(
-				Color(0.15, 0.12, 0.16, 0.94) if is_sel else Color(0.05, 0.06, 0.08, 0.82),
-				col if is_sel else Color(0.28, 0.30, 0.35),
-				2 if is_sel else 1
-			)
-		)
 
-	detail_code.text = cdata["codename"]
-	detail_code.add_theme_color_override("font_color", accent)
-	detail_name.text = cdata["name"]
-	detail_summary.text = cdata["summary"]
-	detail_stats.text = "VITALITY: %.0f HP   •   SPEED: %.1f m/s   •   SIDEARM: M1911" % [cdata["max_hp"], cdata["move_speed"]]
+func _continue_run(saved: Dictionary) -> void:
+	GameState.reset_run()
+	GameState.run_id = int(saved.get("run_id", 0))
+	GameState.difficulty = int(saved.get("difficulty", 1))
+	GameState.game_mode = String(saved.get("mode", "casual"))
+	GameState.pending_resume = true
+	GameState.late_join = false
+	get_tree().change_scene_to_file("res://scenes/game.tscn")
 
-	for ch in detail_skills.get_children():
-		ch.queue_free()
 
-	for s_line in cdata["skills"]:
-		var sl := Label.new()
-		sl.text = s_line
-		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		sl.add_theme_font_size_override("font_size", 13)
-		sl.add_theme_color_override("font_color", Color(0.94, 0.96, 0.98))
-		detail_skills.add_child(sl)
+# ---------------------------------------------------------------------------
+# CAREER
+# ---------------------------------------------------------------------------
+func _build_career_page() -> Control:
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var lvl := GameState.career_level()
+	var lo := GameState.xp_for_level(lvl)
+	var hi := GameState.xp_for_level(lvl + 1)
+	v.add_child(_label("CAREER LEVEL %d" % lvl, 24, Color(0.97, 0.97, 0.99)))
+	var bar := ProgressBar.new()
+	bar.min_value = lo
+	bar.max_value = hi
+	bar.value = GameState.career_xp
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, 14)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = ACCENT_BLUE
+	bar.add_theme_stylebox_override("fill", fill)
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(1, 1, 1, 0.08)
+	bar.add_theme_stylebox_override("background", bg)
+	v.add_child(bar)
+	v.add_child(_label("%d / %d XP  —  every run's score turns into XP (1 per 10 points)" % [GameState.career_xp, hi], 13, Color(0.7, 0.73, 0.78)))
+	_header(v, "UNLOCKS")
+	for u in GameState.META_UNLOCKS:
+		var got: bool = lvl >= int(u["level"])
+		v.add_child(_label("%s  LEVEL %d  —  %s" % ["■" if got else "□", u["level"], u["text"]], 14, Color(0.55, 1.0, 0.6) if got else Color(0.55, 0.57, 0.62)))
+	_header(v, "RECORDS")
+	v.add_child(_label("BEST ROUND (CASUAL): %d" % GameState.best_round, 14))
+	v.add_child(_label("BEST ROUND (INFINITE): %d" % GameState.best_round_infinite, 14))
+	v.add_child(_label("MOST KILLS IN A RUN: %d" % GameState.best_kills, 14))
+	v.add_child(_label("SUCCESSFUL EXTRACTIONS: %d" % GameState.exfils, 14))
+	v.visible = false
+	return v
 
 
 # ---------------------------------------------------------------------------
 # CO-OP LOBBY
 # ---------------------------------------------------------------------------
-var coop_panel: PanelContainer
-var coop_status: Label
-var coop_roster: Label
-var coop_ip: LineEdit
-var coop_start: Button
-var coop_resume: Button
-var coop_invite: Button
-var coop_host_steam: Button
-
-
 func _coop_button(text: String, on_press: Callable, parent: Control) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(0, 40)
+	b.custom_minimum_size = Vector2(0, 42)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.add_theme_font_size_override("font_size", 15)
 	b.pressed.connect(func():
 		GameState.play_sfx("buy_ching", -8.0, 1.2)
 		on_press.call()
@@ -395,99 +480,52 @@ func _coop_button(text: String, on_press: Callable, parent: Control) -> Button:
 	return b
 
 
-func _build_coop_panel(layer: CanvasLayer) -> void:
-	coop_panel = PanelContainer.new()
-	coop_panel.set_anchors_preset(Control.PRESET_CENTER)
-	coop_panel.offset_left = -340
-	coop_panel.offset_right = 340
-	coop_panel.offset_top = -290
-	coop_panel.offset_bottom = 290
-	coop_panel.add_theme_stylebox_override("panel", _make_card_style(Color(0.03, 0.05, 0.08, 0.97), Color(0.35, 0.8, 1.0), 2))
-	coop_panel.visible = false
-	layer.add_child(coop_panel)
-
-	var m := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		m.add_theme_constant_override("margin_" + side, 20)
-	coop_panel.add_child(m)
+func _build_coop_page() -> Control:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
-	m.add_child(v)
-
-	var title := Label.new()
-	title.text = "CO-OP SQUAD"
-	title.add_theme_font_size_override("font_size", 28)
-	title.add_theme_color_override("font_color", Color(0.55, 0.9, 1.0))
-	v.add_child(title)
-	var sub := Label.new()
-	sub.text = "Online play runs through Steam's relay network: no port forwarding, IPs stay private, and long-distance links take Valve's fast routes. Up to 8 survivors; zombie numbers and boss health scale with the squad."
-	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	sub.add_theme_font_size_override("font_size", 13)
-	sub.add_theme_color_override("font_color", Color(0.7, 0.78, 0.86))
-	v.add_child(sub)
-
-	coop_status = Label.new()
-	coop_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	coop_status.add_theme_font_size_override("font_size", 15)
-	coop_status.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45))
+	v.add_child(_label("Online play runs through Steam's relay network: no port forwarding, IPs stay private, and long-distance links take Valve's fast routes. Up to 8 survivors; zombie numbers and boss health scale with the squad. Friends can join a game already in progress.", 13, Color(0.7, 0.75, 0.82), true))
+	coop_status = _label("", 15, Color(1.0, 0.85, 0.45), true)
 	v.add_child(coop_status)
-
+	_coop_settings = _label("", 12, ACCENT_BLUE, true)
+	v.add_child(_coop_settings)
+	_header(v, "STEAM")
 	var steam_row := HBoxContainer.new()
 	steam_row.add_theme_constant_override("separation", 8)
 	v.add_child(steam_row)
 	coop_host_steam = _coop_button("HOST STEAM SQUAD", func(): Net.host_steam(), steam_row)
-	coop_invite = _coop_button("INVITE STEAM FRIENDS", func(): Net.invite_friends(), steam_row)
-
-	var ip_hdr := Label.new()
-	ip_hdr.text = "DIRECT CONNECTION (LAN / PORT %d OPEN ON THE HOST)" % Net.PORT
-	ip_hdr.add_theme_font_size_override("font_size", 12)
-	ip_hdr.add_theme_color_override("font_color", Color(0.6, 0.66, 0.74))
-	v.add_child(ip_hdr)
+	coop_invite = _coop_button("INVITE FRIENDS", func(): Net.invite_friends(), steam_row)
+	_header(v, "DIRECT CONNECTION  (LAN / UDP PORT %d)" % Net.PORT)
 	var ip_row := HBoxContainer.new()
 	ip_row.add_theme_constant_override("separation", 8)
 	v.add_child(ip_row)
 	coop_ip = LineEdit.new()
 	coop_ip.placeholder_text = "HOST IP ADDRESS"
-	coop_ip.custom_minimum_size = Vector2(220, 40)
+	coop_ip.custom_minimum_size = Vector2(200, 42)
 	ip_row.add_child(coop_ip)
-	_coop_button("HOST DIRECT", func(): Net.host_direct(), ip_row)
-	_coop_button("JOIN IP", func(): Net.join_direct(coop_ip.text if coop_ip.text.strip_edges() != "" else "127.0.0.1"), ip_row)
-
-	var roster_hdr := Label.new()
-	roster_hdr.text = "SQUAD"
-	roster_hdr.add_theme_font_size_override("font_size", 16)
-	v.add_child(roster_hdr)
-	coop_roster = Label.new()
-	coop_roster.custom_minimum_size = Vector2(0, 150)
-	coop_roster.add_theme_font_size_override("font_size", 15)
+	_coop_button("HOST", func(): Net.host_direct(), ip_row)
+	_coop_button("JOIN", func(): Net.join_direct(coop_ip.text if coop_ip.text.strip_edges() != "" else "127.0.0.1"), ip_row)
+	_header(v, "SQUAD")
+	coop_roster = _label("", 15)
+	coop_roster.custom_minimum_size = Vector2(0, 120)
 	v.add_child(coop_roster)
-
 	var bottom := HBoxContainer.new()
 	bottom.add_theme_constant_override("separation", 8)
 	v.add_child(bottom)
-	coop_start = _coop_button("▶ START GAME", func(): Net.start_game(false), bottom)
-	coop_resume = _coop_button("⟲ RESUME SAVED RUN", func(): Net.start_game(true), bottom)
+	coop_start = _coop_button("START GAME", func(): Net.start_game(false), bottom)
+	coop_resume = _coop_button("RESUME SAVED RUN", func(): Net.start_game(true), bottom)
 	_coop_button("LEAVE", func():
 		Net.leave()
 		Net.status_text = ""
 		_refresh_coop()
 	, bottom)
-	_coop_button("CLOSE", func(): coop_panel.visible = false, bottom)
-
 	Net.lobby_changed.connect(_refresh_coop)
 	Net.status_changed.connect(func(_t: String): _refresh_coop())
-	_refresh_coop()
-	if Net.is_online() or Net.status_text != "":
-		coop_panel.visible = true # back from a game, or a connection message to show
-
-
-func _open_coop() -> void:
-	coop_panel.visible = true
-	_refresh_coop()
+	v.visible = false
+	return v
 
 
 func _refresh_coop() -> void:
-	if coop_panel == null or not is_instance_valid(coop_panel):
+	if coop_status == null or not is_instance_valid(coop_status):
 		return
 	if Net.status_text != "":
 		coop_status.text = Net.status_text
@@ -509,4 +547,5 @@ func _refresh_coop() -> void:
 	var sw := GameState.load_world()
 	coop_resume.visible = Net.mode == Net.Mode.HOST and not sw.is_empty()
 	if coop_resume.visible:
-		coop_resume.text = "⟲ RESUME ROUND %d" % int(sw.get("round", 1))
+		coop_resume.text = "RESUME ROUND %d" % int(sw.get("round", 1))
+	_refresh_play()

@@ -61,7 +61,7 @@ var modal_overlay: ColorRect
 var modal_title: Label
 var modal_stats: Label
 var resume_btn: Button
-var settings_box: VBoxContainer
+var settings_box: Control
 var is_paused: bool = false
 
 const AugmentMenuScript := preload("res://scripts/ui/augment_menu.gd")
@@ -641,70 +641,14 @@ func _build_ui() -> void:
 	modal_stats.add_theme_color_override("font_color", Color(0.88, 0.88, 0.90))
 	mv.add_child(modal_stats)
 
-	settings_box = VBoxContainer.new()
-	settings_box.add_theme_constant_override("separation", 4)
-	mv.add_child(settings_box)
-	_add_slider_row(settings_box, "MOUSE SENSITIVITY", 0.3, 2.5, GameState.mouse_sens_mult, func(v: float):
-		GameState.mouse_sens_mult = v
-		GameState.write_save()
-	)
-	_add_slider_row(settings_box, "VOLUME", 0.0, 1.0, GameState.master_volume, func(v: float):
-		GameState.master_volume = v
-		GameState.apply_volume()
-		GameState.write_save()
-	)
-	_add_slider_row(settings_box, "MUSIC", 0.0, 1.0, GameState.music_volume, func(v: float):
-		GameState.music_volume = v
-		GameState.apply_volume()
-		GameState.write_save()
-	)
-	_add_slider_row(settings_box, "FIELD OF VIEW", 65.0, 105.0, GameState.fov_setting, func(v: float):
-		GameState.fov_setting = v
-		player.base_fov = v
-		GameState.write_save()
-	)
-	var fx_check := CheckBox.new()
-	fx_check.text = "FILM GRAIN & LENS EFFECTS"
-	fx_check.button_pressed = GameState.post_fx_enabled
-	fx_check.add_theme_font_size_override("font_size", 14)
-	fx_check.toggled.connect(func(on: bool):
-		GameState.post_fx_enabled = on
-		GameState.write_save()
-		var pfx := get_tree().current_scene.get_node_or_null("PostFX")
-		if pfx:
-			pfx.visible = on
-	)
-	settings_box.add_child(fx_check)
-
-	var gfx_row := HBoxContainer.new()
-	var gfx_lbl := Label.new()
-	gfx_lbl.text = "GRAPHICS"
-	gfx_lbl.custom_minimum_size = Vector2(150, 0)
-	gfx_lbl.add_theme_font_size_override("font_size", 14)
-	gfx_row.add_child(gfx_lbl)
-	var gfx := OptionButton.new()
-	for q in ["LOW (FASTEST)", "MEDIUM", "HIGH"]:
-		gfx.add_item(q)
-	gfx.selected = GameState.graphics_quality
-	gfx.item_selected.connect(func(i: int):
-		GameState.graphics_quality = i
-		GameState.apply_graphics()
-		GameState.write_save()
-	)
-	gfx_row.add_child(gfx)
-	settings_box.add_child(gfx_row)
-	for opt in [["VSYNC (OFF = LESS INPUT DELAY)", "vsync_on"], ["SHOW FPS", "show_fps"]]:
-		var cb := CheckBox.new()
-		cb.text = opt[0]
-		cb.button_pressed = bool(GameState.get(opt[1]))
-		cb.add_theme_font_size_override("font_size", 14)
-		var key: String = opt[1]
-		cb.toggled.connect(func(on: bool):
-			GameState.set(key, on)
-			GameState.apply_graphics()
-			GameState.write_save()
-		)
-		settings_box.add_child(cb)
+	var opt_scroll := ScrollContainer.new()
+	opt_scroll.custom_minimum_size = Vector2(560, 300)
+	opt_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	mv.add_child(opt_scroll)
+	settings_box = opt_scroll
+	var opts := OptionsPanel.new()
+	opts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	opt_scroll.add_child(opts)
 
 	resume_btn = Button.new()
 	resume_btn.text = "RESUME COMBAT"
@@ -727,7 +671,7 @@ func _build_ui() -> void:
 	mv.add_child(restart_btn)
 
 	var menu_btn := Button.new()
-	menu_btn.text = "LEAVE SQUAD" if Net.is_online() else "CHANGE OPERATOR / DOSSIER"
+	menu_btn.text = "LEAVE SQUAD" if Net.is_online() else "MAIN MENU"
 	menu_btn.custom_minimum_size = Vector2(0, 44)
 	menu_btn.pressed.connect(func():
 		Net.leave()
@@ -823,7 +767,7 @@ func _toggle_pause() -> void:
 		modal_title.text = "MISSION PAUSED"
 		resume_btn.visible = true
 		settings_box.visible = true
-		modal_stats.text = "ROUND %d  •  KILLS: %d  •  BOSSES SLAIN: %d" % [GameState.current_round, GameState.total_kills, GameState.bosses_slain]
+		modal_stats.text = ("CASUAL" if GameState.game_mode == "casual" else "INFINITE") + "  •  ROUND %d  •  KILLS: %d  •  BOSSES SLAIN: %d" % [GameState.current_round, GameState.total_kills, GameState.bosses_slain]
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -918,7 +862,7 @@ func _update_crosshair() -> void:
 	var gap := clampf(tan(spread_rad) / tan(half_fov) * vh * 0.5, 4.0, 90.0)
 	var offsets := [Vector2(-gap - 8, -1), Vector2(gap, -1), Vector2(-1, -gap - 8), Vector2(-1, gap)]
 	for i in range(cross_ticks.size()):
-		cross_ticks[i].visible = not hide_ch
+		cross_ticks[i].visible = not hide_ch and GameState.show_crosshair
 		cross_ticks[i].position = offsets[i]
 	var others: Array[String] = []
 	for i in range(player.weapons_owned.size()):

@@ -20,7 +20,7 @@ enum Mode {OFFLINE, HOST, CLIENT}
 const MAX_PLAYERS := 8
 const PORT := 24680
 const STEAM_APP_ID := 480 # Valve's public test app ("Spacewar"); replace with your own App ID
-const NET_VERSION := "dp-coop-2"
+const NET_VERSION := "dp-coop-3"
 const COLORS := [Color(0.35, 0.8, 1.0), Color(1.0, 0.75, 0.25), Color(0.55, 1.0, 0.45), Color(1.0, 0.45, 0.75),
 	Color(0.75, 0.55, 1.0), Color(1.0, 0.45, 0.3), Color(0.3, 1.0, 0.85), Color(0.95, 0.95, 0.95)]
 
@@ -312,7 +312,7 @@ func _s_hello(pname: String, char_id: String, version: String) -> void:
 	lobby_changed.emit()
 	if in_game:
 		# Join in progress: load straight into the running game
-		_c_start_game.rpc_id(id, GameState.difficulty, GameState.run_id, false, true)
+		_c_start_game.rpc_id(id, GameState.difficulty, GameState.run_id, false, true, GameState.game_mode)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -354,12 +354,14 @@ func start_game(resume: bool = false) -> void:
 	var rid := int(GameState.load_world().get("run_id", 0)) if resume else GameState.new_run_id()
 	if resume:
 		GameState.difficulty = int(GameState.load_world().get("difficulty", GameState.difficulty))
-	_c_start_game.rpc(GameState.difficulty, rid, resume, false)
+		GameState.game_mode = String(GameState.load_world().get("mode", GameState.game_mode))
+	_c_start_game.rpc(GameState.difficulty, rid, resume, false, GameState.game_mode)
 
 
 @rpc("authority", "call_local", "reliable")
-func _c_start_game(diff: int, rid: int = 0, resume: bool = false, late: bool = false) -> void:
+func _c_start_game(diff: int, rid: int = 0, resume: bool = false, late: bool = false, mode: String = "casual") -> void:
 	GameState.difficulty = clampi(diff, 0, 2)
+	GameState.game_mode = mode if mode in ["casual", "infinite"] else "casual"
 	in_game = true
 	GameState.reset_run()
 	GameState.run_id = rid
