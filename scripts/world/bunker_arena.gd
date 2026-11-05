@@ -41,7 +41,7 @@ var boss_points: Dictionary = {
 	"lab": [Vector3(-18.5, 0.1, -3.5)],
 	"armory": [Vector3(-20.0, 0.1, -15.0)],
 	"comms": [Vector3(21.0, 0.1, -15.0)],
-	"yard": [Vector3(0.0, 0.1, 29.0), Vector3(-6.0, 0.1, 22.0)],
+	"yard": [Vector3(46.0, 0.1, -3.0), Vector3(41.0, 0.1, 9.0)],
 }
 var player_spawn: Vector3 = Vector3(0.0, 0.2, 9.0)
 var nav_region: NavigationRegion3D
@@ -118,7 +118,7 @@ func get_open_windows() -> Array[Node3D]:
 
 # Which zone a point lies in ("" outside the walls).
 func zone_at(p: Vector3) -> String:
-	if p.z >= 14.0 and p.z < 34.0 and p.x > -12.0 and p.x < 12.0:
+	if p.x >= 30.0 and p.x < 52.0 and p.z > -8.0 and p.z < 14.0:
 		return "yard"
 	if p.z > -22.0 and p.z <= -8.0:
 		if p.x > -28.0 and p.x <= -12.0:
@@ -204,7 +204,7 @@ func _build_ground() -> void:
 	nav_region = NavigationRegion3D.new()
 	nav_region.name = "NavRegion"
 	add_child(nav_region)
-	_add_static_box(Vector3(1.0, -0.25, 1.0), Vector3(100.0, 0.5, 96.0),
+	_add_static_box(Vector3(6.0, -0.25, 1.0), Vector3(112.0, 0.5, 96.0),
 		MaterialLib.get_world("asphalt", 0.33, Color(0.88, 0.90, 0.96), 0.05, 1.0, 1.0, 0.0, true))
 	# Indoor floors (visual only)
 	_add_floor_tile(Vector3(0, 0, -15), Vector2(24, 14), MaterialLib.get_world("concrete_floor", 0.5, Color(0.56, 0.57, 0.6), 0.0, 1.0, 0.0, 0.0, true))
@@ -216,9 +216,10 @@ func _build_ground() -> void:
 # ---------------------------------------------------------------------------
 func _build_walls_and_windows() -> void:
 	# South outer wall (courtyard, lab, motor pool)
-	_wall_x(14.0, -28.3, 30.3, [[-20.0, WINDOW_W, WINDOW_H], [-7.0, WINDOW_W, WINDOW_H], [0.0, DOOR_W, DOOR_H], [7.0, WINDOW_W, WINDOW_H], [21.0, WINDOW_W, WINDOW_H]], m_conc)
+	_wall_x(14.0, -28.3, 30.3, [[-20.0, WINDOW_W, WINDOW_H], [-7.0, WINDOW_W, WINDOW_H], [0.0, WINDOW_W, WINDOW_H], [7.0, WINDOW_W, WINDOW_H], [21.0, WINDOW_W, WINDOW_H]], m_conc)
 	_add_window(Vector3(-20, 0, 14), Vector3.BACK, "lab")
 	_add_window(Vector3(-7, 0, 14), Vector3.BACK, "courtyard")
+	_add_window(Vector3(0, 0, 14), Vector3.BACK, "courtyard")
 	_add_window(Vector3(7, 0, 14), Vector3.BACK, "courtyard")
 	_add_window(Vector3(21, 0, 14), Vector3.BACK, "motorpool")
 
@@ -234,9 +235,7 @@ func _build_walls_and_windows() -> void:
 	_wall_z(-28.0, -8.3, 14.3, [[-1.0, WINDOW_W, WINDOW_H], [8.0, WINDOW_W, WINDOW_H]], m_conc)
 	_add_window(Vector3(-28, 0, -1), Vector3.LEFT, "lab")
 	_add_window(Vector3(-28, 0, 8), Vector3.LEFT, "lab")
-	_wall_z(30.0, -8.3, 14.3, [[-1.0, WINDOW_W, WINDOW_H], [8.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(30, 0, -1), Vector3.RIGHT, "motorpool")
-	_add_window(Vector3(30, 0, 8), Vector3.RIGHT, "motorpool")
+	_wall_z(30.0, -8.3, 14.3, [[-1.0, DOOR_W, DOOR_H]], m_conc)
 
 	# Courtyard side walls (also bunker side walls): doors to lab & motor pool
 	_wall_z(-12.0, -22.3, 14.3, [[3.0, DOOR_W, DOOR_H]], m_conc)
@@ -518,35 +517,43 @@ func _build_expansion() -> void:
 	med.position = Vector3(29.3, 0, -12.0)
 	med.rotation_degrees.y = -90.0
 
-	# --- RAIL YARD: x -12..12, z 14..34 (outdoor) ---
-	_wall_x(34.0, -12.3, 12.3, [[-6.0, WINDOW_W, WINDOW_H], [6.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(-6, 0, 34), Vector3.BACK, "yard")
-	_add_window(Vector3(6, 0, 34), Vector3.BACK, "yard")
-	_wall_z(-12.0, 13.7, 34.3, [[24.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(-12, 0, 24), Vector3.LEFT, "yard")
-	_wall_z(12.0, 13.7, 34.3, [[24.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(12, 0, 24), Vector3.RIGHT, "yard")
-	for x in [-10.0, -2.5, 2.5, 10.0]:
-		_add_static_box(Vector3(x, WALL_H * 0.5, 34.45), Vector3(0.9, WALL_H + 0.3, 0.5), m_dark_conc)
-	# Rails across the yard
-	for rz in [20.0, 28.0]:
+	# --- RAIL YARD: x 30..52, z -8..14 (outdoor, east of the motor pool) ---
+	_wall_x(14.0, 29.7, 52.3, [[36.0, WINDOW_W, WINDOW_H], [46.0, WINDOW_W, WINDOW_H]], m_conc)
+	_add_window(Vector3(36, 0, 14), Vector3.BACK, "yard")
+	_add_window(Vector3(46, 0, 14), Vector3.BACK, "yard")
+	_wall_x(-8.0, 29.7, 52.3, [[41.0, WINDOW_W, WINDOW_H]], m_conc)
+	_add_window(Vector3(41, 0, -8), Vector3.FORWARD, "yard")
+	_wall_z(52.0, -8.3, 14.3, [[-1.0, WINDOW_W, WINDOW_H], [8.0, WINDOW_W, WINDOW_H]], m_conc)
+	_add_window(Vector3(52, 0, -1), Vector3.RIGHT, "yard")
+	_add_window(Vector3(52, 0, 8), Vector3.RIGHT, "yard")
+	for x in [33.0, 41.0, 50.0]:
+		_add_static_box(Vector3(x, WALL_H * 0.5, 14.45), Vector3(0.9, WALL_H + 0.3, 0.5), m_dark_conc)
+	# Two tracks running north-south
+	for rx in [37.0, 45.0]:
 		for side in [-0.72, 0.72]:
-			_add_static_box(Vector3(0, 0.06, rz + side), Vector3(23.4, 0.12, 0.12), m_metal)
-		for i in range(12):
-			_add_static_box(Vector3(-11.0 + 2.0 * i, 0.03, rz), Vector3(0.3, 0.06, 2.0), m_wood)
-	_prop("prop_truck", Vector3(-6.5, 0, 28.0), 90.0, Vector3(6.0, 2.6, 2.3), Vector3(0, 1.3, 0))
-	_prop("prop_car_wreck", Vector3(7.5, 0, 19.0), -70.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
-	_prop("prop_tire_stack", Vector3(10.6, 0, 31.8), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
-	_prop("prop_fuel_tank", Vector3(-9.0, 0, 16.2), 0.0, Vector3(3.6, 2.1, 1.8), Vector3(0, 1.05, 0))
-	_add_sandbags(Vector3(3.0, 0, 24.0), 0.0)
-	_add_sandbags(Vector3(-3.0, 0, 17.0), 10.0)
-	_add_crate_stack(Vector3(9.5, 0, 24.5), 2)
-	_add_crate_stack(Vector3(-10.5, 0, 32.5), 1)
-	_add_fire_barrel(Vector3(0.0, 0, 31.5))
-	_add_fire_barrel(Vector3(-10.6, 0, 21.0))
-	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(1.0, 0.78, 0.20), Vector3(0.0, 1.55, 33.68), 180.0)
-	_spawn_station("weapon", "smg", "KURZ-9 SMG", 1000, 500, Color(0.25, 0.88, 1.0), Vector3(11.68, 1.55, 29.0), -90.0)
-
+			_add_static_box(Vector3(rx + side, 0.06, 3.0), Vector3(0.12, 0.12, 21.4), m_metal)
+		for i in range(11):
+			_add_static_box(Vector3(rx, 0.03, -7.0 + 2.0 * i), Vector3(2.0, 0.06, 0.3), m_wood)
+	_prop("prop_truck", Vector3(45.0, 0, 7.0), 0.0, Vector3(2.3, 2.6, 6.0), Vector3(0, 1.3, 0))
+	_prop("prop_car_wreck", Vector3(33.5, 0, 9.5), 20.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
+	_prop("prop_tire_stack", Vector3(50.6, 0, -6.6), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
+	_prop("prop_fuel_tank", Vector3(49.5, 0, 11.6), 0.0, Vector3(3.6, 2.1, 1.8), Vector3(0, 1.05, 0))
+	_add_sandbags(Vector3(41.0, 0, 3.0), 90.0)
+	_add_sandbags(Vector3(34.0, 0, -4.0), 0.0)
+	_add_crate_stack(Vector3(50.5, 0, 4.0), 2)
+	_add_crate_stack(Vector3(31.5, 0, -6.5), 1)
+	_add_fire_barrel(Vector3(41.0, 0, 11.5))
+	_add_fire_barrel(Vector3(48.5, 0, -2.0))
+	for lp in [Vector3(33.0, 0, 1.0), Vector3(49.0, 0, 1.0)]:
+		_prop("prop_lamp_post", lp, 90.0 if lp.x < 40.0 else -90.0, Vector3.ZERO, Vector3.ZERO)
+		var yl := OmniLight3D.new()
+		yl.light_color = Color(1.0, 0.82, 0.55)
+		yl.light_energy = 2.0
+		yl.omni_range = 11.0
+		yl.position = lp + Vector3(0.75 if lp.x < 40.0 else -0.75, 4.2, 0)
+		add_child(yl)
+	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(1.0, 0.78, 0.20), Vector3(51.68, 1.55, 3.0), -90.0)
+	_spawn_station("weapon", "smg", "KURZ-9 SMG", 1000, 500, Color(0.25, 0.88, 1.0), Vector3(36.0, 1.55, -7.68), 0.0)
 
 func _dress_map() -> void:
 	# --- Courtyard ---
@@ -602,9 +609,9 @@ func _dress_map() -> void:
 
 
 	# --- Outside: dead trees, radio tower, wire, wrecks, rubble, lamp posts ---
-	var trees := [Vector3(-36, 0, 24), Vector3(-25, 0, 26), Vector3(16, 0, 28), Vector3(33, 0, 24), Vector3(38, 0, -12),
+	var trees := [Vector3(-36, 0, 24), Vector3(-25, 0, 26), Vector3(12, 0, 27), Vector3(33, 0, 24), Vector3(38, 0, -12),
 		Vector3(32, 0, -26), Vector3(-15, 0, -30), Vector3(17, 0, -30), Vector3(-38, 0, -20), Vector3(-36, 0, 12),
-		Vector3(28, 0, 21), Vector3(-17, 0, 30), Vector3(40, 0, 6), Vector3(-40, 0, -4)]
+		Vector3(28, 0, 21), Vector3(-4, 0, 28), Vector3(57, 0, 6), Vector3(-40, 0, -4)]
 	for i in range(trees.size()):
 		_prop("prop_dead_tree", trees[i], float(i) * 47.0, Vector3.ZERO, Vector3.ZERO, randf_range(0.8, 1.3))
 	_prop("prop_radio_tower", Vector3(-33, 0, -27), 20.0, Vector3.ZERO, Vector3.ZERO)
@@ -616,7 +623,7 @@ func _dress_map() -> void:
 	add_child(beacon)
 	fire_lights.append(beacon)
 	for w in [[Vector3(-13.5, 0, 17.2), 0.0], [Vector3(14.0, 0, 17.2), 0.0], [Vector3(0, 0, -25.5), 0.0],
-			[Vector3(33.0, 0, 3.5), 90.0], [Vector3(-31.0, 0, 3.5), 90.0]]:
+			[Vector3(55.0, 0, 3.5), 90.0], [Vector3(-31.0, 0, 3.5), 90.0]]:
 		_prop("prop_barbed_wire", w[0], w[1], Vector3.ZERO, Vector3.ZERO)
 	_prop("prop_car_wreck", Vector3(-25, 0, 21), 30.0, Vector3.ZERO, Vector3.ZERO)
 	_prop("prop_car_wreck", Vector3(35, 0, -18), -60.0, Vector3.ZERO, Vector3.ZERO)
@@ -677,7 +684,7 @@ func _build_doors() -> void:
 	_add_door(Vector3(-12, 0, 3), 90.0, "lab", 1250)
 	_add_door(Vector3(-20, 0, -8), 0.0, "armory", 1500)
 	_add_door(Vector3(21, 0, -8), 0.0, "comms", 1500)
-	_add_door(Vector3(0, 0, 14), 0.0, "yard", 2000)
+	_add_door(Vector3(30, 0, -1), 90.0, "yard", 2000)
 
 
 func _add_door(pos: Vector3, rot_y: float, zone_id: String, cost: int) -> void:
@@ -716,7 +723,7 @@ func _bake_navigation() -> void:
 	nav_mesh.agent_max_slope = 40.0
 	nav_mesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
 	nav_mesh.geometry_collision_mask = 1
-	nav_mesh.filter_baking_aabb = AABB(Vector3(-46.0, -1.0, -42.0), Vector3(94.0, 3.2, 86.0))
+	nav_mesh.filter_baking_aabb = AABB(Vector3(-46.0, -1.0, -42.0), Vector3(106.0, 3.2, 86.0))
 	var source := NavigationMeshSourceGeometryData3D.new()
 	NavigationServer3D.parse_source_geometry_data(nav_mesh, source, self)
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
