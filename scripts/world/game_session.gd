@@ -1,0 +1,92 @@
+extends Node3D
+
+var arena: BunkerArena
+var player: PlayerController
+var wave_mgr: WaveManager
+var hud: GameHUD
+var enemies_container: Node3D
+var post_fx: ShaderMaterial
+var _fx_damage: float = 0.0
+var _fx_downed: float = 0.0
+
+
+func _ready() -> void:
+	GameState.reset_run()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+	arena = BunkerArena.new()
+	arena.name = "BunkerArena"
+	add_child(arena)
+
+	enemies_container = Node3D.new()
+	enemies_container.name = "EnemiesContainer"
+	add_child(enemies_container)
+
+	player = PlayerController.new()
+	player.name = "Player"
+	player.position = arena.player_spawn
+	add_child(player)
+
+	wave_mgr = WaveManager.new()
+	wave_mgr.name = "WaveManager"
+	add_child(wave_mgr)
+
+	hud = GameHUD.new()
+	hud.name = "GameHUD"
+	add_child(hud)
+
+	var weather := Weather.new()
+	weather.name = "Weather"
+	add_child(weather)
+	weather.setup(arena.world_env)
+	wave_mgr.weather = weather
+
+	hud.setup(player, wave_mgr)
+	wave_mgr.setup(arena, player, enemies_container)
+
+	if Net.is_online():
+		var ng := NetGame.new()
+		ng.name = "NetGame"
+		add_child(ng)
+		ng.setup(player, wave_mgr, arena, enemies_container)
+
+	# Looping ambient soundtrack
+	var music := AudioStreamPlayer.new()
+	music.name = "Music"
+	music.bus = &"Music"
+	var stream := GameState.get_sfx_stream("ambient_loop")
+	if stream is AudioStreamWAV:
+		var wav: AudioStreamWAV = (stream as AudioStreamWAV).duplicate()
+		wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		wav.loop_begin = 0
+		wav.loop_end = int(wav.get_length() * float(wav.mix_rate))
+		music.stream = wav
+	music.volume_db = -10.5
+	add_child(music)
+	music.play()
+
+	# Camera finishing pass (grain, vignette, grade) under the HUD
+	if true:
+		var layer := CanvasLayer.new()
+		layer.name = "PostFX"
+		layer.layer = -1
+		layer.visible = GameState.post_fx_enabled
+		add_child(layer)
+		var rect := ColorRect.new()
+		rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+		rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		post_fx = ShaderMaterial.new()
+		post_fx.shader = load("res://assets/shaders/post_fx.gdshader")
+		rect.material = post_fx
+		layer.add_child(rect)
+
+
+func _process(delta: float) -> void:
+	if post_fx == null or not is_instance_valid(player):
+		return
+	var ratio := clampf(player.hp / maxf(1.0, player.max_hp), 0.0, 1.0)
+	var want_damage := clampf((0.45 - ratio) / 0.45, 0.0, 1.0)
+	_fx_damage = lerpf(_fx_damage, want_damage, clampf(4.0 * delta, 0.0, 1.0))
+	_fx_downed = move_toward(_fx_downed, 1.0 if player.is_downed else 0.0, delta * 2.5)
+	post_fx.set_shader_parameter("damage", _fx_damage)
+	post_fx.set_shader_parameter("downed", _fx_downed)
