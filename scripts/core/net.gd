@@ -20,7 +20,7 @@ enum Mode {OFFLINE, HOST, CLIENT}
 const MAX_PLAYERS := 8
 const PORT := 24680
 const STEAM_APP_ID := 480 # Valve's public test app ("Spacewar"); replace with your own App ID
-const NET_VERSION := "dp-coop-5"
+const NET_VERSION := "dp-coop-6"
 const COLORS := [Color(0.35, 0.8, 1.0), Color(1.0, 0.75, 0.25), Color(0.55, 1.0, 0.45), Color(1.0, 0.45, 0.75),
 	Color(0.75, 0.55, 1.0), Color(1.0, 0.45, 0.3), Color(0.3, 1.0, 0.85), Color(0.95, 0.95, 0.95)]
 

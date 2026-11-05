@@ -55,6 +55,8 @@ var _nuking: bool = false
 
 func setup(p_arena: BunkerArena, p_player: PlayerController, p_container: Node3D) -> void:
 	arena = p_arena
+	if "lz_pos" in p_arena:
+		lz_pos = p_arena.lz_pos
 	player = p_player
 	enemies_container = p_container
 	kills_until_drop = randi_range(7, 12)

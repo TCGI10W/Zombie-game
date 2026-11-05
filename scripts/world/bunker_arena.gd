@@ -1,16 +1,11 @@
 class_name BunkerArena
 extends Node3D
-# Outpost Nacht-7: four zones joined by buyable doors.
-#
-#            +-----------------------+
-#            |     COMMAND BUNKER    |  (roofed, mystery crate)
-#  +---------+-----------[D]---------+-----------+
-#  | MED LAB [D]      COURTYARD     [D] MOTOR    |
-#  | (forge) |  (start, furnace)     |   POOL    |
-#  +---------+-----------------------+-----------+
-#
-# Zombies spawn outside and break in through boarded windows in the outer
-# walls. Only windows in zones the player has opened are used.
+# Town of Nacht: an open map of six very different areas joined by buyable
+# doors and gates. The town plaza is the start; the old church (with the
+# cemetery behind it), the warehouse, the hospital and the rail station
+# open up around it. Walls can run at any angle, so areas follow their
+# own shapes. Zombies come from outside through boarded windows on the
+# outer walls; only windows of opened areas are used.
 
 signal zone_opened(zone_id: String)
 
@@ -31,19 +26,20 @@ const WINDOW_H := 2.4
 const DOOR_W := 3.0
 const DOOR_H := 3.2
 
-var zones_open: Dictionary = {"courtyard": true, "bunker": false, "motorpool": false, "lab": false, "armory": false, "comms": false, "yard": false}
-var zone_names: Dictionary = {"courtyard": "COURTYARD", "bunker": "COMMAND BUNKER", "motorpool": "MOTOR POOL", "lab": "MED LAB", "armory": "ARMORY", "comms": "COMMS CENTER", "yard": "RAIL YARD"}
+var zones_open: Dictionary = {"plaza": true, "church": false, "warehouse": false, "hospital": false, "rail": false, "cemetery": false}
+var zone_names: Dictionary = {"plaza": "TOWN PLAZA", "church": "OLD CHURCH", "warehouse": "WAREHOUSE", "hospital": "HOSPITAL", "rail": "RAIL STATION", "cemetery": "CEMETERY"}
+var zone_polys: Dictionary = {}
 var windows: Array[Node3D] = []
 var boss_points: Dictionary = {
-	"courtyard": [Vector3(-6.0, 0.1, -4.8), Vector3(6.0, 0.1, -4.8), Vector3(0.0, 0.1, 11.0)],
-	"bunker": [Vector3(0.0, 0.1, -14.0)],
-	"motorpool": [Vector3(16.0, 0.1, -3.5), Vector3(25.0, 0.1, 10.0)],
-	"lab": [Vector3(-18.5, 0.1, -3.5)],
-	"armory": [Vector3(-20.0, 0.1, -15.0)],
-	"comms": [Vector3(21.0, 0.1, -15.0)],
-	"yard": [Vector3(46.0, 0.1, -3.0), Vector3(41.0, 0.1, 9.0)],
+	"plaza": [Vector3(0.0, 0.1, -12.0), Vector3(13.0, 0.1, 8.0), Vector3(-14.0, 0.1, -2.0)],
+	"church": [Vector3(1.0, 0.1, -36.0)],
+	"warehouse": [Vector3(42.0, 0.1, -6.0), Vector3(42.0, 0.1, 22.0)],
+	"hospital": [Vector3(-38.0, 0.1, -20.0)],
+	"rail": [Vector3(-36.0, 0.1, 31.5), Vector3(-10.0, 0.1, 31.5)],
+	"cemetery": [Vector3(36.0, 0.1, -40.0)],
 }
 var player_spawn: Vector3 = Vector3(0.0, 0.2, 9.0)
+var lz_pos: Vector3 = Vector3(-7.0, 0.0, 4.0)
 var nav_region: NavigationRegion3D
 var world_env: Environment
 
@@ -60,45 +56,35 @@ var _flicker_time: float = 0.0
 var m_conc: Material
 var m_dark_conc: Material
 var m_metal: Material
+var m_stone: Material
+var m_brick: Material
+var m_fence: Material
 var m_wood: Material
 
 
 func _ready() -> void:
 	add_to_group("arena")
+	_make_polys()
 	m_conc = MaterialLib.get_world("concrete", 0.5, Color(0.78, 0.8, 0.84), 0.0, 1.0, 0.0, 0.55)
 	m_dark_conc = MaterialLib.get_world("concrete", 0.5, Color(0.5, 0.51, 0.55), 0.0, 1.0, 0.0, 0.4)
 	m_metal = MaterialLib.get_world("rusted_metal", 0.5, Color(0.85, 0.82, 0.8), 0.35, 0.9, 0.0, 0.25)
 	m_wood = MaterialLib.get_world("wood_planks", 0.5, Color(0.9, 0.85, 0.78), 0.0, 1.0, 0.0, 0.3)
+	m_stone = MaterialLib.get_world("concrete", 0.4, Color(0.66, 0.62, 0.58), 0.0, 1.0, 0.0, 0.6)
+	m_brick = MaterialLib.get_world("concrete", 0.6, Color(0.62, 0.42, 0.36), 0.0, 1.0, 0.0, 0.5)
+	m_fence = MaterialLib.get_world("rusted_metal", 0.5, Color(0.55, 0.52, 0.5), 0.4, 0.9, 0.0, 0.2)
 
 	_build_environment()
 	_build_ground()
-	_build_walls_and_windows()
-	_build_roofs_and_lights()
-	_build_courtyard()
-	_build_bunker()
-	_build_motor_pool()
-	_build_lab()
-	_build_expansion()
-	_dress_map()
-	_build_doors()
+	_build_plaza()
+	_build_church()
+	_build_warehouse()
+	_build_hospital()
+	_build_rail()
+	_build_cemetery()
+	_build_outside()
+	_window_lights()
 	_bake_navigation()
 	_scatter_blood.call_deferred()
-
-
-func _process(delta: float) -> void:
-	_flicker_time += delta * 7.5
-	for i in range(fire_lights.size()):
-		var fl := fire_lights[i]
-		fl.light_energy = 2.6 + sin(_flicker_time + float(i) * 1.9) * 0.45 + cos(_flicker_time * 2.3 + float(i)) * 0.25
-	if power_on:
-		for i in range(flicker_lamps.size()):
-			var lamp := flicker_lamps[i]
-			var n := sin(_flicker_time * 3.1 + float(i) * 7.0) + sin(_flicker_time * 7.7 + float(i))
-			lamp.light_energy = 0.15 if n > 1.6 else 1.9
-	else:
-		var pulse := 0.45 + sin(_flicker_time * 0.35) * 0.2
-		for d in powered_lamps:
-			(d["light"] as OmniLight3D).light_energy = pulse
 
 
 # ---------------------------------------------------------------------------
@@ -116,28 +102,477 @@ func get_open_windows() -> Array[Node3D]:
 	return out
 
 
-# Which zone a point lies in ("" outside the walls).
 func zone_at(p: Vector3) -> String:
-	if p.x >= 30.0 and p.x < 52.0 and p.z > -8.0 and p.z < 14.0:
-		return "yard"
-	if p.z > -22.0 and p.z <= -8.0:
-		if p.x > -28.0 and p.x <= -12.0:
-			return "armory"
-		if p.x >= 12.0 and p.x < 30.0:
-			return "comms"
-	if p.z > -8.0 and p.z < 14.0:
-		if p.x > -12.0 and p.x < 12.0:
-			return "courtyard"
-		if p.x > -28.0 and p.x <= -12.0:
-			return "lab"
-		if p.x >= 12.0 and p.x < 30.0:
-			return "motorpool"
-	elif p.z > -22.0 and p.z <= -8.0 and p.x > -12.0 and p.x < 12.0:
-		return "bunker"
+	var q := Vector2(p.x, p.z)
+	for zid in zone_polys:
+		if _in_zone(zid, q):
+			return zid
 	return ""
 
 
-# Boss spawns in an open zone, as far from the player as possible.
+func _in_zone(zid: String, q: Vector2) -> bool:
+	for poly in zone_polys.get(zid, []):
+		if Geometry2D.is_point_in_polygon(q, poly):
+			return true
+	return false
+
+
+# ---------------------------------------------------------------------------
+# SHAPE HELPERS: walls at any angle, windows and doors placed along them
+# ---------------------------------------------------------------------------
+# Straight wall from a to b (x, z on the ground). gaps: [[distance from a, width, height]]
+func _seg(a: Vector2, b: Vector2, gaps: Array, mat: Material, h: float = WALL_H) -> void:
+	var d := (b - a).normalized()
+	var a2 := a - d * WALL_T * 0.5 # overlap the corners
+	var total := a.distance_to(b) + WALL_T
+	var ang := atan2(-d.y, d.x)
+	var gs := gaps.duplicate()
+	gs.sort_custom(func(x, y): return x[0] < y[0])
+	var cursor := 0.0
+	for g in gs:
+		var g0: float = float(g[0]) + WALL_T * 0.5 - float(g[1]) * 0.5
+		var g1: float = g0 + float(g[1])
+		_seg_box(a2, d, cursor, g0, 0.0, h, mat, ang)
+		_seg_box(a2, d, g0, g1, float(g[2]), h, mat, ang)
+		cursor = g1
+	_seg_box(a2, d, cursor, total, 0.0, h, mat, ang)
+
+
+func _seg_box(a: Vector2, d: Vector2, t0: float, t1: float, y0: float, y1: float, mat: Material, ang: float) -> void:
+	if t1 - t0 < 0.02 or y1 - y0 < 0.02:
+		return
+	var mid := a + d * ((t0 + t1) * 0.5)
+	_add_static_box(Vector3(mid.x, (y0 + y1) * 0.5, mid.y), Vector3(t1 - t0, y1 - y0, WALL_T), mat, Vector3(0, ang, 0))
+
+
+# A wall on the edge of `zone`: barricaded windows at the given distances,
+# and optionally a buyable door [distance, zone it opens, cost].
+func _edge(zone: String, a: Vector2, b: Vector2, wins: Array, door: Array = [], mat: Material = null, h: float = WALL_H) -> void:
+	var gaps := []
+	for w in wins:
+		gaps.append([w, WINDOW_W, WINDOW_H])
+	if not door.is_empty():
+		gaps.append([door[0], DOOR_W, DOOR_H])
+	_seg(a, b, gaps, mat if mat else m_conc, h)
+	var d := (b - a).normalized()
+	var out := _outward(zone, a, b)
+	for w in wins:
+		var p: Vector2 = a + d * float(w)
+		_add_window(Vector3(p.x, 0, p.y), Vector3(out.x, 0, out.y), zone)
+	if not door.is_empty():
+		var p2: Vector2 = a + d * float(door[0])
+		_add_door(Vector3(p2.x, 0, p2.y), rad_to_deg(atan2(-d.y, d.x)), door[1], door[2])
+
+
+func _outward(zone: String, a: Vector2, b: Vector2) -> Vector2:
+	var d := (b - a).normalized()
+	var n := Vector2(-d.y, d.x)
+	return -n if _in_zone(zone, (a + b) * 0.5 + n) else n
+
+
+# Wall station on the inside face of a wall of `zone`.
+func _wall_buy(zone: String, a: Vector2, b: Vector2, dist: float, stype: String, wid: String, title: String, cost: int, acost: int, y: float = 1.55, inset: float = 0.32) -> void:
+	var d := (b - a).normalized()
+	var inn := -_outward(zone, a, b)
+	var p: Vector2 = a + d * dist + inn * inset
+	var col := Color(0.25, 0.88, 1.0)
+	if stype == "ammo_box":
+		col = Color(1.0, 0.78, 0.20)
+	elif stype == "forge":
+		col = Color(0.72, 0.30, 1.0)
+	_spawn_station(stype, wid, title, cost, acost, col, Vector3(p.x, y, p.y), rad_to_deg(atan2(inn.x, inn.y)))
+
+
+func _roof(center: Vector3, size: Vector2) -> void:
+	_add_static_box(center, Vector3(size.x, 0.4, size.y), m_dark_conc)
+
+
+func _post_light(pos: Vector3, col: Color, energy: float, rng: float, rot: float = 0.0) -> void:
+	_prop("prop_lamp_post", pos, rot, Vector3(0.3, 4.0, 0.3), Vector3(0, 2.0, 0))
+	var l := OmniLight3D.new()
+	l.light_color = col
+	l.light_energy = energy
+	l.omni_range = rng
+	l.position = pos + Vector3(0, 4.3, 0)
+	add_child(l)
+
+
+# Soft always-on light so big rooms are readable before the power is on
+func _fill_lights(points: Array, col: Color, energy: float, rng: float) -> void:
+	for p in points:
+		var l := OmniLight3D.new()
+		l.light_color = col
+		l.light_energy = energy
+		l.omni_range = rng
+		l.position = p
+		add_child(l)
+
+
+func _place(script: GDScript, pos: Vector3, rot: float) -> Node3D:
+	var n: Node3D = script.new()
+	n.position = pos
+	n.rotation_degrees.y = rot
+	add_child(n)
+	return n
+
+
+# ---------------------------------------------------------------------------
+# GROUND
+# ---------------------------------------------------------------------------
+func _build_ground() -> void:
+	nav_region = NavigationRegion3D.new()
+	nav_region.name = "NavRegion"
+	add_child(nav_region)
+	_add_static_box(Vector3(2.5, -0.25, -7.5), Vector3(150.0, 0.5, 140.0),
+		MaterialLib.get_world("asphalt", 0.33, Color(0.88, 0.90, 0.96), 0.05, 1.0, 1.0, 0.0, true))
+	var tile := MaterialLib.get_world("concrete_floor", 0.5, Color(0.56, 0.57, 0.6), 0.0, 1.0, 0.0, 0.0, true)
+	_add_floor_tile(Vector3(1, 0, -31), Vector2(18, 30), tile)
+	_add_floor_tile(Vector3(1, 0, -33), Vector2(42, 10), tile)
+	_add_floor_tile(Vector3(35, 0, 0), Vector2(30, 24), tile)
+	_add_floor_tile(Vector3(42, 0, 22), Vector2(16, 20), tile)
+	var htile := MaterialLib.get_world("concrete_floor", 0.5, Color(0.62, 0.68, 0.66), 0.0, 0.9, 0.0, 0.0, true)
+	_add_floor_tile(Vector3(-32, 0, -3), Vector2(24, 18), htile)
+	_add_floor_tile(Vector3(-38, 0, -21), Vector2(12, 18), htile)
+
+
+# ---------------------------------------------------------------------------
+# TOWN PLAZA (start): a wide, eight-sided square around an old fountain
+# ---------------------------------------------------------------------------
+func _build_plaza() -> void:
+	var P := zone_polys["plaza"][0] as PackedVector2Array
+	_edge("plaza", P[0], P[1], [8.0], [], m_brick)
+	_edge("church", P[1], P[2], [], [9.0, "church", 1000], m_stone, 8.0)
+	_edge("plaza", P[2], P[3], [8.0], [], m_brick)
+	_edge("warehouse", Vector2(20, -12), Vector2(20, 12), [], [14.0, "warehouse", 1250], m_dark_conc, 7.0)
+	_edge("plaza", P[4], P[5], [5.0, 11.5], [], m_brick)
+	_edge("rail", P[5], P[6], [], [9.0, "rail", 1500], m_fence, 3.4)
+	_edge("plaza", P[6], P[7], [6.0], [], m_brick)
+	_edge("hospital", Vector2(-20, -12), Vector2(-20, 6), [], [9.0, "hospital", 1250], m_conc)
+
+	# Fountain in the middle: run trains around it
+	_add_static_box(Vector3(0, 0.35, -2.0), Vector3(6.0, 0.7, 6.0), m_stone)
+	_add_static_box(Vector3(0, 0.35, -2.0), Vector3(8.4, 0.7, 2.4), m_stone, Vector3(0, PI / 4.0, 0))
+	_add_static_box(Vector3(0, 1.6, -2.0), Vector3(1.2, 1.8, 1.2), m_stone)
+	var water := MeshInstance3D.new()
+	var wm := BoxMesh.new()
+	wm.size = Vector3(5.4, 0.04, 5.4)
+	water.mesh = wm
+	water.material_override = MaterialLib.get_emissive(Color(0.15, 0.35, 0.45), 0.6, 0.85)
+	water.position = Vector3(0, 0.72, -2.0)
+	add_child(water)
+	var fl := OmniLight3D.new()
+	fl.light_color = Color(0.5, 0.75, 1.0)
+	fl.light_energy = 1.4
+	fl.omni_range = 9.0
+	fl.position = Vector3(0, 2.8, -2.0)
+	add_child(fl)
+	# Cover and scenery
+	_prop("prop_car_wreck", Vector3(-12.0, 0, -4.0), 20.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
+	_prop("prop_rubble", Vector3(11.5, 0, -9.0), 30.0, Vector3(2.0, 0.6, 1.6), Vector3(0, 0.3, 0))
+	_add_sandbags(Vector3(-6.0, 0, 6.5), 20.0)
+	_add_sandbags(Vector3(7.5, 0, 2.0), -30.0)
+	_add_crate_stack(Vector3(16.5, 0, 9.5), 2)
+	for p in [Vector3(-16.0, 0, 8.0), Vector3(14.0, 0, -11.0), Vector3(4.0, 0, 13.0)]:
+		_add_fire_barrel(p)
+	for lp in [Vector3(-15.0, 0, -6.0), Vector3(15.0, 0, 3.0), Vector3(-6.0, 0, 12.5)]:
+		_post_light(lp, Color(1.0, 0.82, 0.55), 2.2, 13.0)
+	# Stations
+	_wall_buy("plaza", P[0], P[1], 3.0, "weapon", "smg", "KURZ-9 SMG", 1000, 500)
+	_wall_buy("plaza", P[2], P[3], 3.0, "weapon", "rifle", "COMMANDO M14A", 1200, 600)
+	_place(FurnaceScript, Vector3(-15.5, 0.0, 3.0), 90.0)
+	_place(load("res://scripts/world/supply_depot.gd") as GDScript, Vector3(17.0, 0.0, 5.0), -90.0)
+	_place(SecondWindScript, Vector3(-4.5, 0.0, -13.5), 0.0)
+	_skull(Vector3(0.0, 2.6, -2.0), 30.0)
+
+
+# ---------------------------------------------------------------------------
+# OLD CHURCH: cross-shaped, tall stone walls, rounded altar end
+# ---------------------------------------------------------------------------
+func _build_church() -> void:
+	var H := 8.0
+	_edge("church", Vector2(-8, -16), Vector2(-8, -28), [7.5], [], m_stone, H)
+	_edge("church", Vector2(-8, -28), Vector2(-20, -28), [6.0], [], m_stone, H)
+	_edge("church", Vector2(-20, -28), Vector2(-20, -38), [5.0], [], m_stone, H)
+	_edge("church", Vector2(-20, -38), Vector2(-8, -38), [6.0], [], m_stone, H)
+	_edge("church", Vector2(-8, -38), Vector2(-8, -46), [], [], m_stone, H)
+	var apse := _apse_points()
+	for i in range(apse.size() - 1):
+		_edge("church", apse[i], apse[i + 1], [2.3] if i == 1 or i == 4 else [], [], m_stone, H)
+	_edge("church", Vector2(10, -46), Vector2(10, -38), [], [], m_stone, H)
+	_edge("church", Vector2(10, -38), Vector2(22, -38), [6.0], [], m_stone, H)
+	_edge("cemetery", Vector2(22, -38), Vector2(22, -28), [], [5.0, "cemetery", 2000], m_stone, H)
+	_edge("church", Vector2(22, -28), Vector2(10, -28), [6.0], [], m_stone, H)
+	_edge("church", Vector2(10, -28), Vector2(10, -16), [4.5], [], m_stone, H)
+	_roof(Vector3(1, H + 0.2, -31.0), Vector2(18.6, 30.6))
+	_roof(Vector3(1, H + 0.2, -33.0), Vector2(42.6, 10.6))
+	_roof(Vector3(1, H + 0.2, -50.5), Vector2(18.6, 9.6))
+	# Pillars down the nave and pews between them
+	for z in [-20.0, -25.0, -40.0, -44.0]:
+		for x in [-4.5, 6.5]:
+			_add_static_box(Vector3(x, H * 0.5, z), Vector3(0.9, H, 0.9), m_stone)
+	for z in [-19.0, -21.5, -24.0, -26.5]:
+		for x in [-2.5, 4.5]:
+			_add_static_box(Vector3(x, 0.45, z), Vector3(3.2, 0.9, 0.6), m_wood)
+	# Altar
+	_add_static_box(Vector3(1, 0.6, -49.0), Vector3(4.0, 1.2, 1.6), m_stone)
+	var candle_col := Color(1.0, 0.6, 0.3)
+	for p in [Vector3(-2.0, 1.4, -49.0), Vector3(4.0, 1.4, -49.0)]:
+		var c := OmniLight3D.new()
+		c.light_color = candle_col
+		c.light_energy = 1.6
+		c.omni_range = 7.0
+		c.position = p
+		add_child(c)
+		fire_lights.append(c)
+	for p in [Vector3(1, 7.6, -22.0), Vector3(1, 7.6, -33.0), Vector3(-14, 7.6, -33.0), Vector3(16, 7.6, -33.0)]:
+		_add_lamp(p, Color(1.0, 0.8, 0.55), 2.4, p.x > 10.0)
+		(powered_lamps[-1]["light"] as OmniLight3D).omni_range = 17.0
+	_fill_lights([Vector3(1, 5.0, -22.0), Vector3(1, 5.0, -40.0), Vector3(-14, 5.0, -33.0), Vector3(16, 5.0, -33.0)], Color(0.9, 0.7, 0.5), 0.9, 15.0)
+	# Stations
+	_place(CrateScript, Vector3(1.0, 0.0, -52.6), 180.0)
+	_place(RadioScript, Vector3(-4.0, 0.0, -47.0), 135.0)
+	_wall_buy("church", Vector2(-8, -16), Vector2(-8, -28), 3.0, "weapon", "shotgun", "TRENCH-12 PUMP", 1500, 750)
+	_skull(Vector3(-4.5, H - 0.4, -44.0), 90.0)
+
+
+func _apse_points() -> Array:
+	var pts := []
+	for i in range(7):
+		var a := deg_to_rad(-30.0 * float(i))
+		pts.append(Vector2(1.0 + 9.0 * cos(a), -46.0 + 9.0 * sin(a)))
+	return pts
+
+
+# ---------------------------------------------------------------------------
+# WAREHOUSE: one huge L-shaped hall with racks and a truck
+# ---------------------------------------------------------------------------
+func _build_warehouse() -> void:
+	var H := 7.0
+	_edge("warehouse", Vector2(20, -12), Vector2(50, -12), [8.0, 22.0], [], m_dark_conc, H)
+	_edge("warehouse", Vector2(50, -12), Vector2(50, 32), [8.0, 20.0, 36.0], [], m_dark_conc, H)
+	_edge("warehouse", Vector2(50, 32), Vector2(34, 32), [8.0], [], m_dark_conc, H)
+	_edge("warehouse", Vector2(34, 32), Vector2(34, 12), [6.0, 14.0], [], m_dark_conc, H)
+	_edge("warehouse", Vector2(34, 12), Vector2(20, 12), [7.0], [], m_dark_conc, H)
+	_roof(Vector3(35, H + 0.2, 0.0), Vector2(30.6, 24.6))
+	_roof(Vector3(42, H + 0.2, 22.0), Vector2(16.6, 20.6))
+	for x in [27.0, 35.0, 43.0]:
+		_add_static_box(Vector3(x, H - 0.4, 0.0), Vector3(0.4, 0.6, 24.0), m_metal)
+	# Racks (leave lanes free)
+	for r in [[Vector3(28.0, 1.6, -6.5), Vector3(8.0, 3.2, 1.2)], [Vector3(28.0, 1.6, 7.0), Vector3(8.0, 3.2, 1.2)],
+			[Vector3(45.0, 1.6, -7.0), Vector3(1.2, 3.2, 7.0)], [Vector3(38.0, 1.6, 26.0), Vector3(1.2, 3.2, 8.0)],
+			[Vector3(46.0, 1.6, 18.0), Vector3(1.2, 3.2, 6.0)]]:
+		_add_static_box(r[0], r[1], m_metal)
+	if ResourceLoader.exists("res://assets/models/prop_truck.glb"):
+		var truck: Node3D = (load("res://assets/models/prop_truck.glb") as PackedScene).instantiate()
+		truck.position = Vector3(38.0, 0, 2.0)
+		truck.rotation_degrees.y = 90.0
+		add_child(truck)
+	_add_invisible_collider(Vector3(37.6, 1.4, 2.0), Vector3(7.4, 2.8, 2.4), 0.0)
+	_prop("prop_fuel_tank", Vector3(46.5, 0, 28.5), 0.0, Vector3(3.6, 2.1, 1.8), Vector3(0, 1.05, 0))
+	_prop("prop_tire_stack", Vector3(48.4, 0, 9.5), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
+	_add_crate_stack(Vector3(23.0, 0, 9.5), 2)
+	_add_crate_stack(Vector3(36.5, 0, 14.5), 1)
+	for p in [Vector3(27, 6.6, -3), Vector3(41, 6.6, -3), Vector3(34, 6.6, 8), Vector3(42, 6.6, 22)]:
+		_add_lamp(p, Color(1.0, 0.9, 0.7), 2.6, p.x > 40.0 and p.z > 10.0)
+		(powered_lamps[-1]["light"] as OmniLight3D).omni_range = 16.0
+	_fill_lights([Vector3(27, 4.5, -3), Vector3(41, 4.5, -3), Vector3(30, 4.5, 8), Vector3(42, 4.5, 24)], Color(0.75, 0.8, 0.9), 0.8, 14.0)
+	_place(GeneratorScript, Vector3(24.0, 0, -8.5), 0.0)
+	_wall_buy("warehouse", Vector2(50, -12), Vector2(50, 32), 14.0, "weapon", "lmg", "RAZORBACK LMG", 3000, 1500)
+	_wall_buy("warehouse", Vector2(20, -12), Vector2(50, -12), 15.0, "ammo_box", "", "AMMO CACHE", 450, 0)
+
+
+# ---------------------------------------------------------------------------
+# HOSPITAL: T-shaped, a corridor along the plaza and wards behind it
+# ---------------------------------------------------------------------------
+func _build_hospital() -> void:
+	_edge("hospital", Vector2(-20, 6), Vector2(-44, 6), [6.0, 18.0])
+	_edge("hospital", Vector2(-44, 6), Vector2(-44, -30), [8.0, 20.0, 30.0])
+	_edge("hospital", Vector2(-44, -30), Vector2(-32, -30), [6.0])
+	_edge("hospital", Vector2(-32, -30), Vector2(-32, -12), [9.0])
+	_edge("hospital", Vector2(-32, -12), Vector2(-20, -12), [6.0])
+	# Inside walls with open doorways
+	_seg(Vector2(-32, -12), Vector2(-32, 6), [[4.0, 3.0, 3.2], [14.0, 3.0, 3.2]], m_conc)
+	_seg(Vector2(-44, -3), Vector2(-32, -3), [[6.0, 3.0, 3.2]], m_conc)
+	_seg(Vector2(-44, -12), Vector2(-32, -12), [[6.0, 3.0, 3.2]], m_conc)
+	_roof(Vector3(-32, WALL_H + 0.2, -3.0), Vector2(24.6, 18.6))
+	_roof(Vector3(-38, WALL_H + 0.2, -21.0), Vector2(12.6, 18.6))
+	var lab_col := Color(0.75, 1.0, 0.85)
+	for p in [Vector3(-26, 3.85, -3.0), Vector3(-38, 3.85, 1.5), Vector3(-38, 3.85, -7.5), Vector3(-38, 3.85, -21.0)]:
+		_add_lamp(p, lab_col, 2.0, p.z < -15.0)
+	for g in [[Vector3(-41.5, 0, 2.5), 90.0], [Vector3(-35.0, 0, 2.5), 90.0], [Vector3(-41.5, 0, -8.0), 90.0], [Vector3(-38.0, 0, -26.0), 0.0]]:
+		_prop("prop_gurney", g[0], g[1], Vector3(0.8, 1.1, 2.0), Vector3(0, 0.55, 0))
+	_prop("prop_lockers", Vector3(-21.0, 0, -9.0), -90.0, Vector3(2.0, 2.0, 0.55), Vector3(0, 1.0, 0))
+	_prop("prop_desk", Vector3(-26.0, 0, 3.5), 0.0, Vector3(1.6, 1.0, 0.8), Vector3(0, 0.5, 0))
+	var vat_glass := MaterialLib.get_emissive(Color(0.3, 1.0, 0.45), 2.2, 0.55)
+	for p in [Vector3(-42.6, 0, -28.0), Vector3(-33.4, 0, -28.0), Vector3(-33.4, 0, -14.0)]:
+		var vat := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.5
+		cm.bottom_radius = 0.5
+		cm.height = 2.0
+		vat.mesh = cm
+		vat.material_override = vat_glass
+		vat.position = p + Vector3(0, 1.2, 0)
+		add_child(vat)
+		_add_static_box(p + Vector3(0, 0.1, 0), Vector3(1.3, 0.2, 1.3), m_metal)
+		_add_invisible_collider(p + Vector3(0, 1.2, 0), Vector3(1.1, 2.4, 1.1), 0.0)
+	_wall_buy("hospital", Vector2(-44, 6), Vector2(-44, -30), 13.0, "forge", "", "WEAPON FORGE", 5000, 0, 0.0, 2.8)
+	_wall_buy("hospital", Vector2(-32, -12), Vector2(-20, -12), 3.0, "ammo_box", "", "AMMO CACHE", 450, 0)
+	_place(SecondWindScript, Vector3(-43.4, 0.0, -18.0), 90.0)
+	_skull(Vector3(-21.0, 2.05, -9.0), -90.0)
+
+
+# ---------------------------------------------------------------------------
+# RAIL STATION: a long open platform area with tracks and wagons
+# ---------------------------------------------------------------------------
+func _build_rail() -> void:
+	var R := zone_polys["rail"][0] as PackedVector2Array
+	_edge("rail", R[1], R[2], [9.0], [], m_fence, 3.4)
+	_edge("rail", R[2], R[3], [8.0, 24.0, 40.0], [], m_fence, 3.4)
+	_edge("rail", R[3], R[4], [8.0], [], m_fence, 3.4)
+	_edge("rail", R[4], R[5], [8.0, 18.0], [], m_fence, 3.4)
+	_edge("rail", R[5], R[0], [4.0], [], m_fence, 3.4)
+	for tz in [21.0, 29.5]:
+		for side in [-0.72, 0.72]:
+			_add_static_box(Vector3(-20.0, 0.06, tz + side), Vector3(50.0, 0.12, 0.12), m_metal)
+		for i in range(25):
+			_add_static_box(Vector3(-44.0 + 2.0 * i, 0.03, tz), Vector3(0.3, 0.06, 2.0), m_wood)
+	# Low platform between the tracks (low enough to walk onto)
+	_add_static_box(Vector3(-20.0, 0.12, 25.2), Vector3(40.0, 0.24, 3.4), m_stone)
+	# Wagons
+	_add_static_box(Vector3(-30.0, 1.7, 29.5), Vector3(12.0, 3.0, 2.8), m_metal)
+	_add_static_box(Vector3(-5.0, 1.5, 21.0), Vector3(9.0, 2.6, 2.8), m_brick)
+	_prop("prop_car_wreck", Vector3(-38.0, 0, 21.5), 80.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
+	_add_crate_stack(Vector3(-42.5, 0, 31.5), 2)
+	_add_crate_stack(Vector3(-12.0, 0, 32.0), 1)
+	_add_sandbags(Vector3(-20.0, 0, 18.0), 0.0)
+	for p in [Vector3(-26.0, 0, 32.5), Vector3(2.0, 0, 30.0)]:
+		_add_fire_barrel(p)
+	for lp in [Vector3(-36.0, 0, 25.2), Vector3(-20.0, 0, 25.2), Vector3(-4.0, 0, 25.2)]:
+		_post_light(lp, Color(1.0, 0.82, 0.55), 2.0, 12.0)
+	_wall_buy("rail", R[2], R[3], 16.0, "weapon", "revolver", ".44 HAND CANNON", 1750, 875)
+	_wall_buy("rail", R[2], R[3], 32.0, "ammo_box", "", "AMMO CACHE", 450, 0)
+	_skull(Vector3(-27.0, 3.4, 29.5), 0.0)
+
+
+# ---------------------------------------------------------------------------
+# CEMETERY: an uneven fenced field behind the church, graves and a crypt
+# ---------------------------------------------------------------------------
+func _build_cemetery() -> void:
+	var C := zone_polys["cemetery"][0] as PackedVector2Array
+	_edge("cemetery", C[1], C[2], [4.5], [], m_fence, 3.4)
+	_edge("cemetery", C[2], C[3], [5.0, 11.0], [], m_fence, 3.4)
+	_edge("cemetery", C[3], C[4], [8.0], [], m_fence, 3.4)
+	_edge("cemetery", C[4], C[5], [8.0], [], m_fence, 3.4)
+	_edge("cemetery", C[5], C[6], [6.0, 12.0], [], m_fence, 3.4)
+	_edge("cemetery", C[6], C[0], [7.5], [], m_fence, 3.4)
+	# Graves in loose rows
+	for row in range(4):
+		for i in range(6):
+			var gp := Vector3(27.0 + 2.6 * float(i) + (1.3 if row % 2 == 1 else 0.0), 0.35, -30.0 - 3.6 * float(row))
+			if gp.x > 44.0:
+				continue
+			_add_static_box(gp, Vector3(0.8, 0.7, 0.18), m_stone, Vector3(0, randf_range(-0.12, 0.12), 0))
+	# Crypt
+	_add_static_box(Vector3(44.0, 2.0, -44.0), Vector3(6.0, 4.0, 7.0), m_stone)
+	_add_static_box(Vector3(44.0, 4.3, -44.0), Vector3(6.8, 0.6, 7.8), m_dark_conc)
+	_spawn_station("weapon", "sniper", "LONGSHOT .50", 3500, 1750, Color(0.25, 0.88, 1.0), Vector3(40.68, 1.55, -44.0), -90.0)
+	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(1.0, 0.78, 0.20), Vector3(44.0, 1.55, -40.18), 0.0)
+	for t in [Vector3(30.0, 0, -46.0), Vector3(48.0, 0, -30.0), Vector3(36.0, 0, -50.0)]:
+		_prop("prop_dead_tree", t, t.x * 7.0, Vector3(0.6, 3.0, 0.6), Vector3(0, 1.5, 0), 1.1)
+	for lp in [Vector3(34.0, 0, -36.0), Vector3(46.0, 0, -36.0)]:
+		_post_light(lp, Color(0.6, 0.75, 1.0), 1.8, 12.0)
+
+
+# ---------------------------------------------------------------------------
+# OUTSIDE: scenery around the town
+# ---------------------------------------------------------------------------
+func _build_outside() -> void:
+	var trees := [Vector3(-55, 0, -40), Vector3(-58, 0, 10), Vector3(-30, 0, 45), Vector3(20, 0, 45), Vector3(62, 0, 10),
+		Vector3(62, 0, -30), Vector3(10, 0, -62), Vector3(-25, 0, -55), Vector3(64, 0, -58), Vector3(-60, 0, 40),
+		Vector3(-52, 0, -10), Vector3(40, 0, 44), Vector3(-10, 0, -60), Vector3(24, 0, -16), Vector3(-30, 0, -40)]
+	for i in range(trees.size()):
+		_prop("prop_dead_tree", trees[i], float(i) * 47.0, Vector3.ZERO, Vector3.ZERO, randf_range(0.9, 1.4))
+	_prop("prop_radio_tower", Vector3(-52, 0, -50), 20.0, Vector3.ZERO, Vector3.ZERO)
+	var beacon := OmniLight3D.new()
+	beacon.light_color = Color(1.0, 0.1, 0.05)
+	beacon.light_energy = 3.0
+	beacon.omni_range = 8.0
+	beacon.position = Vector3(-52, 22.4, -50)
+	add_child(beacon)
+	fire_lights.append(beacon)
+	_prop("prop_car_wreck", Vector3(-30, 0, 9), 30.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_car_wreck", Vector3(58, 0, -12), -60.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_rubble", Vector3(-50, 0, 24), 0.0, Vector3.ZERO, Vector3.ZERO, 1.4)
+	_prop("prop_rubble", Vector3(56, 0, 20), 70.0, Vector3.ZERO, Vector3.ZERO, 1.3)
+	# Ruined buildings on the horizon
+	for b in [[Vector3(-62, 6, -66), Vector3(14, 12, 10)], [Vector3(40, 9, -68), Vector3(18, 18, 8)], [Vector3(68, 5, 40), Vector3(8, 10, 16)],
+			[Vector3(-66, 7, 48), Vector3(10, 14, 12)], [Vector3(12, 4, 54), Vector3(20, 8, 6)]]:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = b[1]
+		mi.mesh = bm
+		mi.material_override = m_dark_conc
+		mi.position = b[0]
+		add_child(mi)
+
+
+# Old blood stains on the floors (decals need the scene to be ready)
+func _scatter_blood() -> void:
+	if not is_inside_tree():
+		return
+	var spots := [Vector3(-3, 0, 6), Vector3(5, 0, -8), Vector3(-10, 0, 9), Vector3(1, 0, -24), Vector3(-12, 0, -33),
+		Vector3(30, 0, 4), Vector3(42, 0, 20), Vector3(-28, 0, 0), Vector3(-38, 0, -18), Vector3(-25, 0, 27), Vector3(36, 0, -38)]
+	for sp in spots:
+		FX.blood_decal(sp + Vector3(0, 0.02, 0), Vector3.UP, randf_range(1.0, 2.2))
+
+
+func _make_polys() -> void:
+	zone_polys["plaza"] = [PackedVector2Array([Vector2(-20, -10), Vector2(-8, -16), Vector2(10, -16), Vector2(20, -8),
+		Vector2(20, 12), Vector2(4, 16), Vector2(-14, 14), Vector2(-20, 4)])]
+	var church := PackedVector2Array([Vector2(-8, -16), Vector2(10, -16), Vector2(10, -28), Vector2(22, -28), Vector2(22, -38),
+		Vector2(10, -38), Vector2(10, -46)])
+	var apse := _apse_points()
+	for i in range(1, apse.size() - 1):
+		church.append(apse[i])
+	church.append_array(PackedVector2Array([Vector2(-8, -46), Vector2(-8, -38), Vector2(-20, -38), Vector2(-20, -28), Vector2(-8, -28)]))
+	zone_polys["church"] = [church]
+	zone_polys["warehouse"] = [PackedVector2Array([Vector2(20, -12), Vector2(50, -12), Vector2(50, 32), Vector2(34, 32), Vector2(34, 12), Vector2(20, 12)])]
+	zone_polys["hospital"] = [PackedVector2Array([Vector2(-20, -12), Vector2(-20, 6), Vector2(-44, 6), Vector2(-44, -30), Vector2(-32, -30), Vector2(-32, -12)])]
+	zone_polys["rail"] = [PackedVector2Array([Vector2(-14, 14), Vector2(4, 16), Vector2(6, 34), Vector2(-46, 34), Vector2(-46, 18), Vector2(-22, 16)])]
+	zone_polys["cemetery"] = [PackedVector2Array([Vector2(22, -38), Vector2(22, -28), Vector2(30, -24), Vector2(46, -26), Vector2(54, -40), Vector2(46, -54), Vector2(28, -52)])]
+
+
+# Red danger lights outside every window so you can see what's coming
+func _window_lights() -> void:
+	for w in windows:
+		var l := OmniLight3D.new()
+		l.light_color = Color(0.95, 0.2, 0.12)
+		l.light_energy = 1.5
+		l.omni_range = 5.5
+		l.position = w.position + w.basis.z * 2.6 + Vector3(0, 2.4, 0)
+		add_child(l)
+
+
+# ---------------------------------------------------------------------------
+# BUILDING HELPERS AND SHARED PARTS
+# ---------------------------------------------------------------------------
+func _process(delta: float) -> void:
+	_flicker_time += delta * 7.5
+	for i in range(fire_lights.size()):
+		var fl := fire_lights[i]
+		fl.light_energy = 2.6 + sin(_flicker_time + float(i) * 1.9) * 0.45 + cos(_flicker_time * 2.3 + float(i)) * 0.25
+	if power_on:
+		for i in range(flicker_lamps.size()):
+			var lamp := flicker_lamps[i]
+			var n := sin(_flicker_time * 3.1 + float(i) * 7.0) + sin(_flicker_time * 7.7 + float(i))
+			lamp.light_energy = 0.15 if n > 1.6 else 1.9
+	else:
+		var pulse := 0.45 + sin(_flicker_time * 0.35) * 0.2
+		for d in powered_lamps:
+			(d["light"] as OmniLight3D).light_energy = pulse
+
+
 func get_boss_spawn(player_pos: Vector3) -> Vector3:
 	var best := Vector3(0, 0.1, -4.8)
 	var best_d := -1.0
@@ -152,9 +587,6 @@ func get_boss_spawn(player_pos: Vector3) -> Vector3:
 	return best
 
 
-# ---------------------------------------------------------------------------
-# ENVIRONMENT
-# ---------------------------------------------------------------------------
 func _build_environment() -> void:
 	var we := WorldEnvironment.new()
 	var env := Environment.new()
@@ -200,82 +632,6 @@ func _build_environment() -> void:
 	add_child(moon)
 
 
-func _build_ground() -> void:
-	nav_region = NavigationRegion3D.new()
-	nav_region.name = "NavRegion"
-	add_child(nav_region)
-	_add_static_box(Vector3(6.0, -0.25, 1.0), Vector3(112.0, 0.5, 96.0),
-		MaterialLib.get_world("asphalt", 0.33, Color(0.88, 0.90, 0.96), 0.05, 1.0, 1.0, 0.0, true))
-	# Indoor floors (visual only)
-	_add_floor_tile(Vector3(0, 0, -15), Vector2(24, 14), MaterialLib.get_world("concrete_floor", 0.5, Color(0.56, 0.57, 0.6), 0.0, 1.0, 0.0, 0.0, true))
-	_add_floor_tile(Vector3(-20, 0, 3), Vector2(16, 22), MaterialLib.get_world("concrete_floor", 0.5, Color(0.62, 0.68, 0.66), 0.0, 0.9, 0.0, 0.0, true))
-
-
-# ---------------------------------------------------------------------------
-# WALLS, WINDOWS & ROOFS
-# ---------------------------------------------------------------------------
-func _build_walls_and_windows() -> void:
-	# South outer wall (courtyard, lab, motor pool)
-	_wall_x(14.0, -28.3, 30.3, [[-20.0, WINDOW_W, WINDOW_H], [-7.0, WINDOW_W, WINDOW_H], [0.0, WINDOW_W, WINDOW_H], [7.0, WINDOW_W, WINDOW_H], [21.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(-20, 0, 14), Vector3.BACK, "lab")
-	_add_window(Vector3(-7, 0, 14), Vector3.BACK, "courtyard")
-	_add_window(Vector3(0, 0, 14), Vector3.BACK, "courtyard")
-	_add_window(Vector3(7, 0, 14), Vector3.BACK, "courtyard")
-	_add_window(Vector3(21, 0, 14), Vector3.BACK, "motorpool")
-
-	# Middle wall: lab/motor pool north walls + bunker/courtyard divider
-	_wall_x(-8.0, -28.3, 30.3, [[-20.0, DOOR_W, DOOR_H], [0.0, DOOR_W, DOOR_H], [21.0, DOOR_W, DOOR_H]], m_conc)
-
-	# Bunker north wall
-	_wall_x(-22.0, -12.3, 12.3, [[-6.0, WINDOW_W, WINDOW_H], [6.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(-6, 0, -22), Vector3.FORWARD, "bunker")
-	_add_window(Vector3(6, 0, -22), Vector3.FORWARD, "bunker")
-
-	# Lab west wall / motor pool east wall
-	_wall_z(-28.0, -8.3, 14.3, [[-1.0, WINDOW_W, WINDOW_H], [8.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(-28, 0, -1), Vector3.LEFT, "lab")
-	_add_window(Vector3(-28, 0, 8), Vector3.LEFT, "lab")
-	_wall_z(30.0, -8.3, 14.3, [[-1.0, DOOR_W, DOOR_H]], m_conc)
-
-	# Courtyard side walls (also bunker side walls): doors to lab & motor pool
-	_wall_z(-12.0, -22.3, 14.3, [[3.0, DOOR_W, DOOR_H]], m_conc)
-	_wall_z(12.0, -22.3, 14.3, [[3.0, DOOR_W, DOOR_H]], m_conc)
-
-	# Buttress pillars along the outer walls
-	for x in [-24.0, -16.0, -10.0, 10.0, 16.0, 26.0]:
-		_add_static_box(Vector3(x, WALL_H * 0.5, 14.45), Vector3(0.9, WALL_H + 0.3, 0.5), m_dark_conc)
-	for x in [-10.0, -3.0, 3.0, 10.0]:
-		_add_static_box(Vector3(x, WALL_H * 0.5, -22.45), Vector3(0.9, WALL_H + 0.3, 0.5), m_dark_conc)
-
-
-func _build_roofs_and_lights() -> void:
-	# Bunker & lab are roofed
-	_add_static_box(Vector3(0, WALL_H + 0.2, -15.0), Vector3(24.6, 0.4, 14.6), m_dark_conc)
-	_add_static_box(Vector3(-20, WALL_H + 0.2, 3.0), Vector3(16.6, 0.4, 22.6), m_dark_conc)
-	# Roof beams
-	for x in [-8.0, 0.0, 8.0]:
-		_add_static_box(Vector3(x, WALL_H - 0.25, -15.0), Vector3(0.4, 0.5, 14.0), m_metal)
-	for z in [-3.0, 3.0, 9.0]:
-		_add_static_box(Vector3(-20, WALL_H - 0.25, z), Vector3(16.0, 0.5, 0.4), m_metal)
-
-	# Ceiling lamps
-	var warm := Color(1.0, 0.82, 0.55)
-	for p in [Vector3(-6, 3.85, -11.5), Vector3(6, 3.85, -11.5), Vector3(-6, 3.85, -18.5), Vector3(6, 3.85, -18.5)]:
-		_add_lamp(p, warm, 2.2, p.x > 0.0 and p.z < -15.0)
-	var lab_col := Color(0.75, 1.0, 0.85)
-	for p in [Vector3(-20, 3.85, -3.5), Vector3(-20, 3.85, 3.0), Vector3(-20, 3.85, 9.5)]:
-		_add_lamp(p, lab_col, 2.0, p.z > 9.0)
-
-	# Red danger lights outside every window so you can see what's coming
-	for w in windows:
-		var l := OmniLight3D.new()
-		l.light_color = Color(0.95, 0.2, 0.12)
-		l.light_energy = 1.8
-		l.omni_range = 6.0
-		l.position = w.position + w.basis.z * 3.0 + Vector3(0, 2.6, 0)
-		add_child(l)
-
-
 func _add_lamp(pos: Vector3, col: Color, energy: float, flicker: bool) -> void:
 	var fixture := MeshInstance3D.new()
 	var bm := BoxMesh.new()
@@ -319,326 +675,6 @@ func skull_found() -> void:
 		player.status_banner_requested.emit("SECRET UNLOCKED! +2500 POINTS & MAX AMMO", Color(0.4, 1.0, 0.55))
 
 
-# ---------------------------------------------------------------------------
-# ZONES
-# ---------------------------------------------------------------------------
-func _build_courtyard() -> void:
-	# Ruined monument in the middle — good for running trains
-	_add_static_box(Vector3(0, 0.55, -0.5), Vector3(3.6, 1.1, 3.6), m_conc)
-	_add_static_box(Vector3(0, 1.95, -0.5), Vector3(1.3, 1.8, 1.3), m_metal)
-	for x in [-8.0, 8.0]:
-		_add_static_box(Vector3(x, 1.1, 4.5), Vector3(1.4, 2.2, 1.4), m_dark_conc)
-	# Caged wall lamps along the courtyard side walls
-	for p in [Vector3(-11.55, 3.5, -3.0), Vector3(11.55, 3.5, -3.0), Vector3(-11.55, 3.5, 9.0), Vector3(11.55, 3.5, 9.0)]:
-		var out := -signf(p.x)
-		var bracket := MeshInstance3D.new()
-		var brm := BoxMesh.new()
-		brm.size = Vector3(0.3, 0.12, 0.25)
-		bracket.mesh = brm
-		bracket.material_override = m_metal
-		bracket.position = p + Vector3(out * 0.1, 0.12, 0)
-		add_child(bracket)
-		var bulb := MeshInstance3D.new()
-		var bm := SphereMesh.new()
-		bm.radius = 0.08
-		bm.height = 0.16
-		bulb.mesh = bm
-		bulb.material_override = MaterialLib.get_emissive(Color(1.0, 0.85, 0.6), 3.0)
-		bulb.position = p + Vector3(out * 0.18, 0, 0)
-		add_child(bulb)
-		var l := OmniLight3D.new()
-		l.light_color = Color(1.0, 0.85, 0.65)
-		l.light_energy = 1.5
-		l.omni_range = 12.0
-		l.position = p + Vector3(out * 0.4, 0, 0)
-		add_child(l)
-
-	_add_sandbags(Vector3(-5.0, 0, 5.2), 20.0)
-	_add_sandbags(Vector3(5.0, 0, 5.2), -20.0)
-	_add_sandbags(Vector3(-6.5, 0, -4.0), -10.0)
-	_add_sandbags(Vector3(6.5, 0, -4.0), 10.0)
-	for p in [Vector3(-10.3, 0, -6.3), Vector3(10.3, 0, -6.3), Vector3(10.3, 0, 12.6)]:
-		_add_fire_barrel(p)
-
-	_spawn_station("weapon", "smg", "KURZ-9 SMG", 1000, 500, Color(0.25, 0.88, 1.0), Vector3(-6.0, 1.55, -7.68), 0.0)
-	_spawn_station("weapon", "rifle", "COMMANDO M14A", 1200, 600, Color(0.25, 0.88, 1.0), Vector3(6.0, 1.55, -7.68), 0.0)
-
-	var furnace: Node3D = FurnaceScript.new()
-	furnace.position = Vector3(-10.6, 0.0, 9.5)
-	furnace.rotation_degrees.y = -90.0
-	add_child(furnace)
-
-	# Second Wind medical cabinet against the east wall
-	var depot: Node3D = (load("res://scripts/world/supply_depot.gd") as GDScript).new()
-	depot.position = Vector3(-11.0, 0.0, -3.5)
-	depot.rotation_degrees.y = -90.0
-	add_child(depot)
-	var med: Node3D = SecondWindScript.new()
-	med.position = Vector3(11.6, 0.0, 11.0)
-	med.rotation_degrees.y = 90.0
-	add_child(med)
-
-
-func _build_bunker() -> void:
-	for x in [-5.0, 5.0]:
-		_add_static_box(Vector3(x, WALL_H * 0.5, -15.0), Vector3(0.8, WALL_H, 0.8), m_dark_conc)
-	_add_crate_stack(Vector3(-10.5, 0, -20.5), 2)
-	_add_crate_stack(Vector3(10.5, 0, -10.0), 1)
-	_add_sandbags(Vector3(-2.5, 0, -12.0), 0.0)
-
-	var crate: Node3D = CrateScript.new()
-	crate.position = Vector3(0.0, 0.0, -20.9)
-	crate.rotation_degrees.y = 180.0
-	add_child(crate)
-
-	_spawn_station("weapon", "shotgun", "TRENCH-12 PUMP", 1500, 750, Color(0.25, 0.88, 1.0), Vector3(-7.0, 1.55, -8.32), 180.0)
-
-	# Field radio for calling the extraction chopper
-	var radio: Node3D = RadioScript.new()
-	radio.position = Vector3(-3.2, 0.0, -21.2)
-	radio.rotation_degrees.y = 180.0
-	add_child(radio)
-
-
-func _build_motor_pool() -> void:
-	if ResourceLoader.exists("res://assets/models/prop_truck.glb"):
-		var truck: Node3D = (load("res://assets/models/prop_truck.glb") as PackedScene).instantiate()
-		truck.position = Vector3(21.0, 0, 4.0)
-		truck.rotation_degrees.y = 90.0
-		add_child(truck)
-	_add_invisible_collider(Vector3(20.6, 1.4, 4.0), Vector3(7.4, 2.8, 2.4), 0.0)
-
-	_add_crate_stack(Vector3(27.5, 0, 12.0), 2)
-	_add_crate_stack(Vector3(27.5, 0, -5.8), 1)
-	_add_sandbags(Vector3(17.0, 0, 10.0), 15.0)
-	_add_fire_barrel(Vector3(14.0, 0, 12.5))
-
-	# Floodlights on poles
-	for pair in [[Vector3(28.8, 0, -6.8), Vector3(21, 0, 3)], [Vector3(13.2, 0, 12.8), Vector3(21, 0, 3)]]:
-		var base: Vector3 = pair[0]
-		_add_static_box(base + Vector3(0, 3.0, 0), Vector3(0.25, 6.0, 0.25), m_metal)
-		var head := MeshInstance3D.new()
-		var hm := BoxMesh.new()
-		hm.size = Vector3(0.7, 0.4, 0.4)
-		head.mesh = hm
-		head.material_override = MaterialLib.get_emissive(Color(1.0, 0.95, 0.8), 4.0)
-		head.position = base + Vector3(0, 6.1, 0)
-		add_child(head)
-		var spot := SpotLight3D.new()
-		spot.light_color = Color(1.0, 0.92, 0.75)
-		spot.light_energy = 6.0
-		spot.spot_range = 22.0
-		spot.spot_angle = 42.0
-		add_child(spot)
-		spot.look_at_from_position(base + Vector3(0, 6.0, 0), pair[1], Vector3.UP)
-
-	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(1.0, 0.78, 0.20), Vector3(25.5, 1.55, -7.68), 0.0)
-	_spawn_station("weapon", "lmg", "RAZORBACK LMG", 3000, 1500, Color(0.25, 0.88, 1.0), Vector3(29.68, 1.55, 3.5), -90.0)
-
-
-func _build_lab() -> void:
-	var m_bench := MaterialLib.get_pbr("rusted_metal", 0.6, Color(0.6, 0.62, 0.65), 0.6, 0.6)
-	for p in [Vector3(-22.0, 0.45, -5.6), Vector3(-15.5, 0.45, -5.6), Vector3(-22.0, 0.45, 11.6), Vector3(-15.5, 0.45, 11.6)]:
-		_add_static_box(p, Vector3(2.6, 0.9, 0.9), m_bench)
-	var vat_glass := MaterialLib.get_emissive(Color(0.3, 1.0, 0.45), 2.2, 0.55)
-	for p in [Vector3(-26.6, 0, -6.6), Vector3(-26.6, 0, 12.6), Vector3(-13.4, 0, 12.6)]:
-		var vat := MeshInstance3D.new()
-		var cm := CylinderMesh.new()
-		cm.top_radius = 0.5
-		cm.bottom_radius = 0.5
-		cm.height = 2.0
-		vat.mesh = cm
-		vat.material_override = vat_glass
-		vat.position = p + Vector3(0, 1.2, 0)
-		add_child(vat)
-		_add_static_box(p + Vector3(0, 0.1, 0), Vector3(1.3, 0.2, 1.3), m_metal)
-		_add_static_box(p + Vector3(0, 2.3, 0), Vector3(1.2, 0.2, 1.2), m_metal)
-		_add_invisible_collider(p + Vector3(0, 1.2, 0), Vector3(1.1, 2.4, 1.1), 0.0)
-		var gl := OmniLight3D.new()
-		gl.light_color = Color(0.3, 1.0, 0.45)
-		gl.light_energy = 1.2
-		gl.omni_range = 4.0
-		gl.position = p + Vector3(0, 1.4, 0)
-		add_child(gl)
-
-	_spawn_station("forge", "", "WEAPON FORGE", 5000, 0, Color(0.72, 0.30, 1.0), Vector3(-25.2, 0.0, 3.0), -90.0)
-	_spawn_station("weapon", "revolver", ".44 HAND CANNON", 1750, 875, Color(0.25, 0.88, 1.0), Vector3(-15.0, 1.55, 13.68), 180.0)
-
-
-# Props, the generator, the trap, the secret skulls and outside scenery.
-# ---------------------------------------------------------------------------
-# EXPANSION: Armory (behind the lab), Comms Center (behind the motor pool)
-# and the outdoor Rail Yard south of the courtyard.
-# ---------------------------------------------------------------------------
-func _build_expansion() -> void:
-	var floor_mat := MaterialLib.get_world("concrete_floor", 0.5, Color(0.55, 0.56, 0.58), 0.0, 1.0, 0.0, 0.0, true)
-	var warm := Color(1.0, 0.82, 0.55)
-
-	# --- ARMORY: x -28..-12, z -22..-8 (roofed) ---
-	_wall_z(-28.0, -22.3, -7.7, [[-15.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(-28, 0, -15), Vector3.LEFT, "armory")
-	_wall_x(-22.0, -28.3, -11.7, [[-20.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(-20, 0, -22), Vector3.FORWARD, "armory")
-	_add_floor_tile(Vector3(-20, 0, -15), Vector2(16, 14), floor_mat)
-	_add_static_box(Vector3(-20, WALL_H + 0.2, -15.0), Vector3(16.6, 0.4, 14.6), m_dark_conc)
-	for z in [-18.5, -11.5]:
-		_add_static_box(Vector3(-20, WALL_H - 0.25, z), Vector3(16.0, 0.5, 0.4), m_metal)
-	for lp in [Vector3(-23, 3.85, -15), Vector3(-16, 3.85, -15)]:
-		_add_lamp(lp, warm, 2.1, lp.x < -20.0)
-	_prop("prop_lockers", Vector3(-27.4, 0, -19.5), 90.0, Vector3(2.0, 2.0, 0.55), Vector3(0, 1.0, 0))
-	_prop("prop_lockers", Vector3(-27.4, 0, -11.0), 90.0, Vector3(2.0, 2.0, 0.55), Vector3(0, 1.0, 0))
-	_prop("prop_desk", Vector3(-16.0, 0, -19.8), 0.0, Vector3(1.6, 1.0, 0.8), Vector3(0, 0.5, 0))
-	_add_crate_stack(Vector3(-13.2, 0, -20.8), 2)
-	_add_crate_stack(Vector3(-24.5, 0, -10.2), 1)
-	_add_sandbags(Vector3(-20.0, 0, -13.0), 0.0)
-	_spawn_station("weapon", "sniper", "LONGSHOT .50", 3500, 1750, Color(0.25, 0.88, 1.0), Vector3(-15.0, 1.55, -21.68), 0.0)
-	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(1.0, 0.78, 0.20), Vector3(-12.32, 1.55, -15.0), -90.0)
-
-	# --- COMMS CENTER: x 12..30, z -22..-8 (roofed) ---
-	_wall_z(30.0, -22.3, -7.7, [[-15.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(30, 0, -15), Vector3.RIGHT, "comms")
-	_wall_x(-22.0, 11.7, 30.3, [[21.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(21, 0, -22), Vector3.FORWARD, "comms")
-	_add_floor_tile(Vector3(21, 0, -15), Vector2(18, 14), floor_mat)
-	_add_static_box(Vector3(21, WALL_H + 0.2, -15.0), Vector3(18.6, 0.4, 14.6), m_dark_conc)
-	for z in [-18.5, -11.5]:
-		_add_static_box(Vector3(21, WALL_H - 0.25, z), Vector3(18.0, 0.5, 0.4), m_metal)
-	var comm_col := Color(0.6, 0.85, 1.0)
-	for lp in [Vector3(16, 3.85, -15), Vector3(25, 3.85, -15)]:
-		_add_lamp(lp, comm_col, 2.0, lp.x > 20.0)
-	_prop("prop_radio_console", Vector3(14.0, 0, -20.6), 0.0, Vector3(2.0, 1.4, 0.9), Vector3(0, 0.7, 0))
-	_prop("prop_radio_console", Vector3(28.6, 0, -18.0), -90.0, Vector3(2.0, 1.4, 0.9), Vector3(0, 0.7, 0))
-	_prop("prop_generator", Vector3(26.0, 0, -10.0), 0.0, Vector3(2.2, 1.6, 1.2), Vector3(0, 0.8, 0))
-	_prop("prop_desk", Vector3(18.0, 0, -14.0), 90.0, Vector3(1.6, 1.0, 0.8), Vector3(0, 0.5, 0))
-	_add_crate_stack(Vector3(13.0, 0, -9.5), 1)
-	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(1.0, 0.78, 0.20), Vector3(12.32, 1.55, -15.0), 90.0)
-	var med: Node3D = SecondWindScript.new()
-	add_child(med)
-	med.position = Vector3(29.3, 0, -12.0)
-	med.rotation_degrees.y = -90.0
-
-	# --- RAIL YARD: x 30..52, z -8..14 (outdoor, east of the motor pool) ---
-	_wall_x(14.0, 29.7, 52.3, [[36.0, WINDOW_W, WINDOW_H], [46.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(36, 0, 14), Vector3.BACK, "yard")
-	_add_window(Vector3(46, 0, 14), Vector3.BACK, "yard")
-	_wall_x(-8.0, 29.7, 52.3, [[41.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(41, 0, -8), Vector3.FORWARD, "yard")
-	_wall_z(52.0, -8.3, 14.3, [[-1.0, WINDOW_W, WINDOW_H], [8.0, WINDOW_W, WINDOW_H]], m_conc)
-	_add_window(Vector3(52, 0, -1), Vector3.RIGHT, "yard")
-	_add_window(Vector3(52, 0, 8), Vector3.RIGHT, "yard")
-	for x in [33.0, 41.0, 50.0]:
-		_add_static_box(Vector3(x, WALL_H * 0.5, 14.45), Vector3(0.9, WALL_H + 0.3, 0.5), m_dark_conc)
-	# Two tracks running north-south
-	for rx in [37.0, 45.0]:
-		for side in [-0.72, 0.72]:
-			_add_static_box(Vector3(rx + side, 0.06, 3.0), Vector3(0.12, 0.12, 21.4), m_metal)
-		for i in range(11):
-			_add_static_box(Vector3(rx, 0.03, -7.0 + 2.0 * i), Vector3(2.0, 0.06, 0.3), m_wood)
-	_prop("prop_truck", Vector3(45.0, 0, 7.0), 0.0, Vector3(2.3, 2.6, 6.0), Vector3(0, 1.3, 0))
-	_prop("prop_car_wreck", Vector3(33.5, 0, 9.5), 20.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
-	_prop("prop_tire_stack", Vector3(50.6, 0, -6.6), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
-	_prop("prop_fuel_tank", Vector3(49.5, 0, 11.6), 0.0, Vector3(3.6, 2.1, 1.8), Vector3(0, 1.05, 0))
-	_add_sandbags(Vector3(41.0, 0, 3.0), 90.0)
-	_add_sandbags(Vector3(34.0, 0, -4.0), 0.0)
-	_add_crate_stack(Vector3(50.5, 0, 4.0), 2)
-	_add_crate_stack(Vector3(31.5, 0, -6.5), 1)
-	_add_fire_barrel(Vector3(41.0, 0, 11.5))
-	_add_fire_barrel(Vector3(48.5, 0, -2.0))
-	for lp in [Vector3(33.0, 0, 1.0), Vector3(49.0, 0, 1.0)]:
-		_prop("prop_lamp_post", lp, 90.0 if lp.x < 40.0 else -90.0, Vector3.ZERO, Vector3.ZERO)
-		var yl := OmniLight3D.new()
-		yl.light_color = Color(1.0, 0.82, 0.55)
-		yl.light_energy = 2.0
-		yl.omni_range = 11.0
-		yl.position = lp + Vector3(0.75 if lp.x < 40.0 else -0.75, 4.2, 0)
-		add_child(yl)
-	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(1.0, 0.78, 0.20), Vector3(51.68, 1.55, 3.0), -90.0)
-	_spawn_station("weapon", "smg", "KURZ-9 SMG", 1000, 500, Color(0.25, 0.88, 1.0), Vector3(36.0, 1.55, -7.68), 0.0)
-
-func _dress_map() -> void:
-	# --- Courtyard ---
-	_prop("prop_car_wreck", Vector3(-8.6, 0, -0.8), 4.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
-	_prop("prop_rubble", Vector3(10.4, 0, 8.4), 30.0, Vector3(2.0, 0.6, 1.6), Vector3(0, 0.3, 0))
-	_skull(Vector3(8.0, 2.2, 4.5), 200.0)
-
-	# --- Bunker ---
-	_prop("prop_desk", Vector3(-9.3, 0, -11.6), 90.0, Vector3(1.6, 1.0, 0.8), Vector3(0, 0.5, 0))
-	_prop("prop_desk", Vector3(8.6, 0, -18.6), -90.0, Vector3(1.6, 1.0, 0.8), Vector3(0, 0.5, 0))
-	_prop("prop_lockers", Vector3(11.4, 0, -19.6), -90.0, Vector3(2.0, 2.0, 0.55), Vector3(0, 1.0, 0))
-	_prop("prop_lockers", Vector3(-11.4, 0, -11.0), 90.0, Vector3(2.0, 2.0, 0.55), Vector3(0, 1.0, 0))
-	for z in [-21.2, -8.9]:
-		var pipe := MeshInstance3D.new()
-		var cm := CylinderMesh.new()
-		cm.top_radius = 0.09
-		cm.bottom_radius = 0.09
-		cm.height = 23.0
-		pipe.mesh = cm
-		pipe.material_override = m_metal
-		pipe.rotation.z = PI * 0.5
-		pipe.position = Vector3(0, 3.7, z)
-		add_child(pipe)
-	_skull(Vector3(-10.5, 2.27, -20.5), 150.0)
-
-	# --- Med Lab ---
-	for g in [[Vector3(-23.0, 0, -2.5), 90.0], [Vector3(-17.0, 0, -2.5), 90.0], [Vector3(-17.0, 0, 8.5), 90.0]]:
-		_prop("prop_gurney", g[0], g[1], Vector3(0.8, 1.1, 2.0), Vector3(0, 0.55, 0))
-	_prop("prop_lockers", Vector3(-14.5, 0, -7.4), 0.0, Vector3(2.0, 2.0, 0.55), Vector3(0, 1.0, 0))
-	_skull(Vector3(-14.5, 2.0, -7.35), 0.0)
-	# A specimen floating in a vat
-	if ResourceLoader.exists("res://assets/models/zombie_walker_v2.glb"):
-		var spec: Node3D = (load("res://assets/models/zombie_walker_v2.glb") as PackedScene).instantiate()
-		spec.position = Vector3(-26.6, 0.35, -6.6)
-		spec.scale = Vector3.ONE * 0.85
-		spec.rotation_degrees.y = 45.0
-		add_child(spec)
-		var arm := spec.find_child("UpperArmL", true, false) as Node3D
-		if arm:
-			arm.rotation.x = 0.6
-		var head := spec.find_child("Head", true, false) as Node3D
-		if head:
-			head.rotation.x = -0.5
-
-	# --- Motor Pool ---
-	var gen: Node3D = GeneratorScript.new()
-	gen.position = Vector3(17.0, 0, -5.4)
-	gen.rotation_degrees.y = 180.0
-	add_child(gen)
-	_prop("prop_fuel_tank", Vector3(24.5, 0, 10.6), 90.0, Vector3(3.6, 2.1, 1.8), Vector3(0, 1.05, 0))
-	_prop("prop_tire_stack", Vector3(28.6, 0, -3.6), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
-	_prop("prop_tire_stack", Vector3(13.4, 0, -1.2), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
-
-
-	# --- Outside: dead trees, radio tower, wire, wrecks, rubble, lamp posts ---
-	var trees := [Vector3(-36, 0, 24), Vector3(-25, 0, 26), Vector3(12, 0, 27), Vector3(33, 0, 24), Vector3(38, 0, -12),
-		Vector3(32, 0, -26), Vector3(-15, 0, -30), Vector3(17, 0, -30), Vector3(-38, 0, -20), Vector3(-36, 0, 12),
-		Vector3(28, 0, 21), Vector3(-4, 0, 28), Vector3(57, 0, 6), Vector3(-40, 0, -4)]
-	for i in range(trees.size()):
-		_prop("prop_dead_tree", trees[i], float(i) * 47.0, Vector3.ZERO, Vector3.ZERO, randf_range(0.8, 1.3))
-	_prop("prop_radio_tower", Vector3(-33, 0, -27), 20.0, Vector3.ZERO, Vector3.ZERO)
-	var beacon := OmniLight3D.new()
-	beacon.light_color = Color(1.0, 0.1, 0.05)
-	beacon.light_energy = 3.0
-	beacon.omni_range = 8.0
-	beacon.position = Vector3(-33, 22.4, -27)
-	add_child(beacon)
-	fire_lights.append(beacon)
-	for w in [[Vector3(-13.5, 0, 17.2), 0.0], [Vector3(14.0, 0, 17.2), 0.0], [Vector3(0, 0, -25.5), 0.0],
-			[Vector3(55.0, 0, 3.5), 90.0], [Vector3(-31.0, 0, 3.5), 90.0]]:
-		_prop("prop_barbed_wire", w[0], w[1], Vector3.ZERO, Vector3.ZERO)
-	_prop("prop_car_wreck", Vector3(-25, 0, 21), 30.0, Vector3.ZERO, Vector3.ZERO)
-	_prop("prop_car_wreck", Vector3(35, 0, -18), -60.0, Vector3.ZERO, Vector3.ZERO)
-	_prop("prop_rubble", Vector3(-30, 0, -13), 0.0, Vector3.ZERO, Vector3.ZERO, 1.4)
-	_prop("prop_rubble", Vector3(37, 0, 15), 70.0, Vector3.ZERO, Vector3.ZERO, 1.3)
-	for lp in [Vector3(-3.5, 0, 17.6), Vector3(10.5, 0, 17.6)]:
-		_prop("prop_lamp_post", lp, 180.0, Vector3.ZERO, Vector3.ZERO)
-		var ll := OmniLight3D.new()
-		ll.light_color = Color(1.0, 0.82, 0.55)
-		ll.light_energy = 2.2
-		ll.omni_range = 11.0
-		ll.position = lp + Vector3(0, 4.2, -0.75)
-		add_child(ll)
-
-
 func _prop(model: String, pos: Vector3, rot_deg: float, col_size: Vector3, col_off: Vector3, scale_f: float = 1.0) -> void:
 	var path := "res://assets/models/%s.glb" % model
 	if ResourceLoader.exists(path):
@@ -669,22 +705,6 @@ func _skull(pos: Vector3, rot_deg: float) -> void:
 
 
 # Old blood stains on the floors (decals need the scene to be ready)
-func _scatter_blood() -> void:
-	if not is_inside_tree():
-		return
-	var spots := [Vector3(-3, 0, 6), Vector3(4.5, 0, -2), Vector3(-6, 0, 11), Vector3(2, 0, -6.5),
-		Vector3(-4, 0, -14), Vector3(6, 0, -19), Vector3(-20, 0, 6), Vector3(-24, 0, -4), Vector3(20, 0, -2), Vector3(26, 0, 7)]
-	for sp in spots:
-		FX.blood_decal(sp + Vector3(0, 0.02, 0), Vector3.UP, randf_range(1.0, 2.2))
-
-
-func _build_doors() -> void:
-	_add_door(Vector3(0, 0, -8), 0.0, "bunker", 750)
-	_add_door(Vector3(12, 0, 3), 90.0, "motorpool", 1000)
-	_add_door(Vector3(-12, 0, 3), 90.0, "lab", 1250)
-	_add_door(Vector3(-20, 0, -8), 0.0, "armory", 1500)
-	_add_door(Vector3(21, 0, -8), 0.0, "comms", 1500)
-	_add_door(Vector3(30, 0, -1), 90.0, "yard", 2000)
 
 
 func _add_door(pos: Vector3, rot_y: float, zone_id: String, cost: int) -> void:
@@ -708,11 +728,6 @@ func _on_door_opened(zone_id: String) -> void:
 	_bake_navigation()
 
 
-# ---------------------------------------------------------------------------
-# NAVIGATION
-# ---------------------------------------------------------------------------
-# Bakes the navmesh from the arena's colliders so zombies path around walls,
-# props and closed doors.
 func _bake_navigation() -> void:
 	var nav_mesh := NavigationMesh.new()
 	nav_mesh.cell_size = 0.25
@@ -723,46 +738,11 @@ func _bake_navigation() -> void:
 	nav_mesh.agent_max_slope = 40.0
 	nav_mesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
 	nav_mesh.geometry_collision_mask = 1
-	nav_mesh.filter_baking_aabb = AABB(Vector3(-46.0, -1.0, -42.0), Vector3(106.0, 3.2, 86.0))
+	nav_mesh.filter_baking_aabb = AABB(Vector3(-52.0, -1.0, -60.0), Vector3(112.0, 3.2, 100.0))
 	var source := NavigationMeshSourceGeometryData3D.new()
 	NavigationServer3D.parse_source_geometry_data(nav_mesh, source, self)
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
 	nav_region.navigation_mesh = nav_mesh
-
-
-# ---------------------------------------------------------------------------
-# BUILDING HELPERS
-# ---------------------------------------------------------------------------
-# Wall along X at `z`, from x0 to x1, with gaps [center, width, gap_height].
-func _wall_x(z: float, x0: float, x1: float, gaps: Array, mat: Material) -> void:
-	gaps.sort_custom(func(a, b): return a[0] < b[0])
-	var cursor := x0
-	for g in gaps:
-		var a: float = g[0] - g[1] * 0.5
-		var b: float = g[0] + g[1] * 0.5
-		if a > cursor:
-			_add_static_box(Vector3((cursor + a) * 0.5, WALL_H * 0.5, z), Vector3(a - cursor, WALL_H, WALL_T), mat)
-		var lintel_h: float = WALL_H - g[2]
-		_add_static_box(Vector3(g[0], g[2] + lintel_h * 0.5, z), Vector3(g[1], lintel_h, WALL_T), m_metal if g[2] > 3.0 else mat)
-		cursor = b
-	if cursor < x1:
-		_add_static_box(Vector3((cursor + x1) * 0.5, WALL_H * 0.5, z), Vector3(x1 - cursor, WALL_H, WALL_T), mat)
-
-
-# Wall along Z at `x`, from z0 to z1, with gaps [center, width, gap_height].
-func _wall_z(x: float, z0: float, z1: float, gaps: Array, mat: Material) -> void:
-	gaps.sort_custom(func(a, b): return a[0] < b[0])
-	var cursor := z0
-	for g in gaps:
-		var a: float = g[0] - g[1] * 0.5
-		var b: float = g[0] + g[1] * 0.5
-		if a > cursor:
-			_add_static_box(Vector3(x, WALL_H * 0.5, (cursor + a) * 0.5), Vector3(WALL_T, WALL_H, a - cursor), mat)
-		var lintel_h: float = WALL_H - g[2]
-		_add_static_box(Vector3(x, g[2] + lintel_h * 0.5, g[0]), Vector3(WALL_T, lintel_h, g[1]), m_metal if g[2] > 3.0 else mat)
-		cursor = b
-	if cursor < z1:
-		_add_static_box(Vector3(x, WALL_H * 0.5, (cursor + z1) * 0.5), Vector3(WALL_T, WALL_H, z1 - cursor), mat)
 
 
 func _add_window(pos: Vector3, outward: Vector3, zone_id: String) -> void:
