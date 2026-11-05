@@ -22,7 +22,9 @@ const CROUCH_HEAD := 1.05
 const SLIDE_HEAD := 0.82
 const HIP_POS := Vector3(0.19, -0.2, -0.36)
 var base_fov: float = 80.0 # set from the FOV setting
-const SLIDE_TIME := 0.8
+const SLIDE_FRICTION := 8.5 # m/s lost per second while sliding
+const SLIDE_DRAG := 0.035 # extra loss at high speed (speed squared)
+const SLIDE_MAX_TIME := 2.5
 const KNIFE_DAMAGE := 150.0
 const MAX_GRENADES := 4
 const VIEWMODEL_LAYER := 4 # render layer 3
@@ -555,8 +557,10 @@ func _handle_movement(delta: float) -> void:
 
 	# --- Crouch toggle / slide ---
 	if Input.is_action_just_pressed("crouch") and not is_monster_form and not is_downed:
-		if was_sprinting and on_floor and slide_cd <= 0.0:
-			_start_slide(wish if wish != Vector3.ZERO else -transform.basis.z, sprint_speed * 1.3)
+		var flat_v := Vector3(velocity.x, 0.0, velocity.z)
+		# Slide whenever you are moving fast enough (sprinting, or still carrying speed)
+		if on_floor and slide_cd <= 0.0 and (was_sprinting or flat_v.length() > walk_speed * 1.15):
+			_start_slide(flat_v if flat_v.length() > 0.5 else (wish if wish != Vector3.ZERO else -transform.basis.z), flat_v.length(), walk_speed)
 		elif not is_sliding:
 			is_crouching = not is_crouching
 
@@ -576,15 +580,23 @@ func _handle_movement(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 
 	if is_sliding:
-		slide_timer -= delta
-		var t := clampf(slide_timer / SLIDE_TIME, 0.0, 1.0)
+		# Momentum slide: keeps the speed you came in with and loses it to friction,
+		# so a faster entry slides farther. Slopes add or take speed.
+		slide_timer += delta
 		if wish != Vector3.ZERO:
 			slide_dir = slide_dir.slerp(wish, clampf(1.2 * delta, 0.0, 1.0)).normalized()
-		var spd := lerpf(walk_speed * 0.55, slide_speed, t * t)
-		velocity.x = slide_dir.x * spd
-		velocity.z = slide_dir.z * spd
+		var friction := SLIDE_FRICTION + SLIDE_DRAG * slide_speed * slide_speed
+		if not on_floor:
+			friction *= 0.15 # sliding off a ledge barely slows you
+		var slope := 0.0
+		if on_floor:
+			var n := get_floor_normal()
+			slope = GRAVITY * Vector3(n.x, 0.0, n.z).dot(slide_dir) # downhill speeds you up
+		slide_speed = maxf(0.0, slide_speed + (slope - friction) * delta)
+		velocity.x = slide_dir.x * slide_speed
+		velocity.z = slide_dir.z * slide_speed
 		bob_phase += delta * 2.0
-		if slide_timer <= 0.0:
+		if slide_speed < walk_speed * 0.6 or slide_timer > SLIDE_MAX_TIME:
 			is_sliding = false
 			is_crouching = Input.is_action_pressed("crouch")
 			slide_cd = 0.45
@@ -610,6 +622,10 @@ func _handle_movement(delta: float) -> void:
 
 	var fall_speed := -velocity.y
 	move_and_slide()
+	if is_sliding:
+		# Hitting a wall or a zombie eats the momentum
+		var real := get_real_velocity()
+		slide_speed = minf(slide_speed, Vector3(real.x, 0.0, real.z).length() + 0.5)
 
 	# Landing dip + thud
 	var now_floor := is_on_floor()
@@ -665,13 +681,14 @@ func _handle_movement(delta: float) -> void:
 	camera.fov = lerpf(camera.fov, target_fov, clampf(14.0 * delta, 0.0, 1.0))
 
 
-func _start_slide(dir: Vector3, speed: float) -> void:
+func _start_slide(dir: Vector3, entry_speed: float, walk_speed: float) -> void:
 	is_sliding = true
 	is_sprinting = false
 	is_crouching = false
-	slide_timer = SLIDE_TIME
-	slide_dir = dir.normalized()
-	slide_speed = speed
+	slide_timer = 0.0
+	slide_dir = Vector3(dir.x, 0.0, dir.z).normalized()
+	# Kick off with a boost on top of the speed you had, a bit less when already very fast
+	slide_speed = entry_speed + clampf(walk_speed * 0.5, 1.5, 4.0) * clampf(1.6 - entry_speed / (walk_speed * 2.5), 0.4, 1.0)
 	GameState.play_sfx("slide", -4.0, randf_range(0.95, 1.05))
 
 
