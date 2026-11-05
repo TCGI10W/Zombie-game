@@ -80,19 +80,15 @@ func _scene() -> Node:
 	return get_tree().current_scene
 
 
-var _dmg_nums: Dictionary = {} # target instance id -> {label, value, t}
+const DMG_POOL := 32
+var _dmg_pool: Array[Label3D] = []
+var _dmg_next: int = 0
+var _dmg_last: Dictionary = {} # target instance id -> {i: pool index, value, t}
 
 
-func damage_number(target: Node3D, pos: Vector3, amount: float, headshot: bool, killed: bool) -> void:
-	if not GameState.damage_numbers or amount <= 0.0 or _scene() == null:
-		return
-	var key := target.get_instance_id()
-	var now := Time.get_ticks_msec() / 1000.0
-	var e: Dictionary = _dmg_nums.get(key, {})
-	var lbl: Label3D = e.get("label") if not e.is_empty() else null
-	if lbl != null and is_instance_valid(lbl) and now - float(e["t"]) < 0.12:
-		amount += float(e["value"])
-	else:
+func _dmg_label() -> Label3D:
+	var lbl: Label3D = null
+	if _dmg_pool.size() < DMG_POOL:
 		lbl = Label3D.new()
 		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		lbl.no_depth_test = true
@@ -101,9 +97,47 @@ func damage_number(target: Node3D, pos: Vector3, amount: float, headshot: bool, 
 		lbl.outline_size = 9
 		lbl.outline_modulate = Color(0, 0, 0, 0.85)
 		lbl.render_priority = 10
+		_dmg_pool.append(lbl)
+	else:
+		lbl = _dmg_pool[_dmg_next]
+		_dmg_next = (_dmg_next + 1) % DMG_POOL
+	if not is_instance_valid(lbl):
+		return null
+	if lbl.get_parent() != _scene():
+		if lbl.get_parent():
+			lbl.get_parent().remove_child(lbl)
 		_scene().add_child(lbl)
+	return lbl
+
+
+# Floating number over a zombie the local player hit. Labels come from a small
+# reused pool and quick hits on the same zombie add up into one number.
+func damage_number(target: Node3D, pos: Vector3, amount: float, headshot: bool, killed: bool) -> void:
+	if not GameState.damage_numbers or amount <= 0.0 or _scene() == null:
+		return
+	for i in range(_dmg_pool.size() - 1, -1, -1):
+		if not is_instance_valid(_dmg_pool[i]):
+			_dmg_pool.remove_at(i) # freed with an old scene
+	_dmg_next = mini(_dmg_next, maxi(0, _dmg_pool.size() - 1))
+	var key := target.get_instance_id()
+	var now := Time.get_ticks_msec() / 1000.0
+	var lbl: Label3D = null
+	var e: Dictionary = _dmg_last.get(key, {})
+	if not e.is_empty() and now - float(e["t"]) < 0.12:
+		var idx: int = e["i"]
+		if idx < _dmg_pool.size() and is_instance_valid(_dmg_pool[idx]) and _dmg_pool[idx].get_meta("owner_id", 0) == key:
+			lbl = _dmg_pool[idx]
+			amount += float(e["value"])
+	if lbl == null:
+		lbl = _dmg_label()
+		if lbl == null:
+			return
 		lbl.global_position = pos + Vector3(randf_range(-0.25, 0.25), 0.25, randf_range(-0.25, 0.25))
-	_dmg_nums[key] = {"label": lbl, "value": amount, "t": now}
+	lbl.set_meta("owner_id", key)
+	_dmg_last[key] = {"i": _dmg_pool.find(lbl), "value": amount, "t": now}
+	if _dmg_last.size() > 96:
+		_dmg_last.clear()
+	lbl.visible = true
 	lbl.text = str(roundi(amount))
 	var col := Color(1, 1, 1)
 	var fs := 30
@@ -116,17 +150,18 @@ func damage_number(target: Node3D, pos: Vector3, amount: float, headshot: bool, 
 	lbl.modulate = col
 	lbl.font_size = fs
 	lbl.scale = Vector3.ONE * 1.5
+	if lbl.has_meta("tw"):
+		var old: Tween = lbl.get_meta("tw")
+		if old and old.is_valid():
+			old.kill()
 	var start := lbl.global_position
 	var tw := lbl.create_tween()
+	lbl.set_meta("tw", tw)
 	tw.set_parallel(true)
 	tw.tween_property(lbl, "scale", Vector3.ONE, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_property(lbl, "global_position", start + Vector3(0, 0.7, 0), 0.75).set_ease(Tween.EASE_OUT)
 	tw.tween_property(lbl, "modulate:a", 0.0, 0.35).set_delay(0.45)
-	tw.chain().tween_callback(lbl.queue_free)
-	if _dmg_nums.size() > 64:
-		for k in _dmg_nums.keys():
-			if not is_instance_valid(_dmg_nums[k]["label"]):
-				_dmg_nums.erase(k)
+	tw.chain().tween_callback(func(): lbl.visible = false)
 
 
 func _push(list: Array[Node3D], node: Node3D, cap: int) -> void:

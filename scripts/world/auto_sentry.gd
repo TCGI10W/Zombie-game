@@ -11,6 +11,8 @@ var _life: float = LIFETIME
 var _cd: float = 0.5
 var _head: Node3D
 var _light: OmniLight3D
+var _target: ZombieEnemy = null
+var _search_t: float = 0.0
 
 
 func _ready() -> void:
@@ -81,7 +83,12 @@ func _physics_process(delta: float) -> void:
 	if _life <= 0.0:
 		queue_free()
 		return
-	var target := _pick_target()
+	# Searching with raycasts is costly, so only re-pick a few times a second
+	_search_t -= delta
+	if _search_t <= 0.0 or not is_instance_valid(_target) or _target.is_dead:
+		_search_t = 0.25
+		_target = _pick_target()
+	var target := _target
 	if target == null:
 		return
 	var aim := target.global_position + Vector3(0, 1.1, 0)

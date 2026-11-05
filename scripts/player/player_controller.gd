@@ -1411,8 +1411,9 @@ func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 		kill_streak.emit(_streak)
 	if z.is_boss:
 		hit_stop(0.14, 0.1)
-	elif _streak >= 3 or (was_headshot and _last_shot_heavy):
-		hit_stop(0.05, 0.2)
+	elif was_headshot and _last_shot_heavy and now - _last_hit_stop > 2.0:
+		_last_hit_stop = now
+		hit_stop(0.04, 0.3)
 	if has_perk("vampire") and not is_dead and not is_downed:
 		hp = minf(max_hp, hp + 4.0)
 		hp_changed.emit(hp, max_hp, overshield)
@@ -2273,6 +2274,7 @@ var _streak: int = 0
 var _streak_t: float = -10.0
 var _last_shot_heavy: bool = false
 var _hit_stop_on: bool = false
+var _last_hit_stop: float = -10.0
 
 
 # A tiny slow-motion beat on big kills. Solo only (co-op can't slow the world).
@@ -2284,6 +2286,10 @@ func hit_stop(dur: float, scale: float) -> void:
 	await get_tree().create_timer(dur, true, false, true).timeout
 	Engine.time_scale = 1.0
 	_hit_stop_on = false
+
+
+func _exit_tree() -> void:
+	Engine.time_scale = 1.0
 
 
 func has_perk(id: String) -> bool:
