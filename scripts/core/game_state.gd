@@ -28,6 +28,9 @@ var master_volume: float = 0.8
 var music_volume: float = 0.8
 var fov_setting: float = 80.0
 var post_fx_enabled: bool = true
+var graphics_quality: int = 2 # 0 low, 1 medium, 2 high
+var vsync_on: bool = true
+var show_fps: bool = false
 var _best_round_at_start: int = 0
 var rebuild_points_round: int = 0 # points earned rebuilding barriers this round
 const REBUILD_POINTS_CAP := 500
@@ -280,6 +283,9 @@ func load_save() -> void:
 		music_volume = float(cfg.get_value("settings", "music_volume", 0.8))
 		fov_setting = float(cfg.get_value("settings", "fov", 80.0))
 		post_fx_enabled = bool(cfg.get_value("settings", "post_fx", true))
+		graphics_quality = int(cfg.get_value("settings", "graphics", 2))
+		vsync_on = bool(cfg.get_value("settings", "vsync", true))
+		show_fps = bool(cfg.get_value("settings", "show_fps", false))
 	apply_volume()
 
 
@@ -294,6 +300,9 @@ func write_save() -> void:
 	cfg.set_value("settings", "music_volume", music_volume)
 	cfg.set_value("settings", "fov", fov_setting)
 	cfg.set_value("settings", "post_fx", post_fx_enabled)
+	cfg.set_value("settings", "graphics", graphics_quality)
+	cfg.set_value("settings", "vsync", vsync_on)
+	cfg.set_value("settings", "show_fps", show_fps)
 	cfg.save(SAVE_PATH)
 
 
@@ -548,3 +557,28 @@ func to_roman(n: int) -> String:
 			res += syms[i]
 			rem -= vals[i]
 	return res
+
+
+# Graphics presets for weaker PCs. Low frame rates are what make aiming feel
+# laggy, so Low drops the expensive screen effects and renders 3D at 75%.
+func apply_graphics() -> void:
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if vsync_on else DisplayServer.VSYNC_DISABLED)
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var q := graphics_quality
+	vp.msaa_3d = Viewport.MSAA_2X if q == 2 else Viewport.MSAA_DISABLED
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR if q == 0 else Viewport.SCALING_3D_MODE_BILINEAR
+	vp.scaling_3d_scale = 0.75 if q == 0 else 1.0
+	vp.positional_shadow_atlas_size = [1024, 2048, 4096][q]
+	RenderingServer.directional_shadow_atlas_set_size([1024, 2048, 4096][q], true)
+	var scene := get_tree().current_scene
+	if scene == null:
+		return
+	for we in scene.find_children("*", "WorldEnvironment", true, false):
+		var env: Environment = (we as WorldEnvironment).environment
+		if env:
+			env.ssr_enabled = q == 2
+			env.ssao_enabled = q >= 1
+			env.volumetric_fog_enabled = q >= 1

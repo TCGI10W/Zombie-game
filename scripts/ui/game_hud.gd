@@ -82,11 +82,19 @@ var downed_bar: ProgressBar
 
 
 var borrowed_lbl: Label
+var fps_lbl: Label
 
 
 func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	player = p_player
 	wave_mgr = p_wave
+	fps_lbl = Label.new()
+	fps_lbl.position = Vector2(12, 6)
+	fps_lbl.add_theme_font_size_override("font_size", 15)
+	fps_lbl.add_theme_constant_override("outline_size", 5)
+	fps_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	fps_lbl.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6))
+	add_child(fps_lbl)
 	borrowed_lbl = Label.new()
 	borrowed_lbl.anchor_left = 1.0
 	borrowed_lbl.anchor_right = 1.0
@@ -649,6 +657,36 @@ func _build_ui() -> void:
 	)
 	settings_box.add_child(fx_check)
 
+	var gfx_row := HBoxContainer.new()
+	var gfx_lbl := Label.new()
+	gfx_lbl.text = "GRAPHICS"
+	gfx_lbl.custom_minimum_size = Vector2(150, 0)
+	gfx_lbl.add_theme_font_size_override("font_size", 14)
+	gfx_row.add_child(gfx_lbl)
+	var gfx := OptionButton.new()
+	for q in ["LOW (FASTEST)", "MEDIUM", "HIGH"]:
+		gfx.add_item(q)
+	gfx.selected = GameState.graphics_quality
+	gfx.item_selected.connect(func(i: int):
+		GameState.graphics_quality = i
+		GameState.apply_graphics()
+		GameState.write_save()
+	)
+	gfx_row.add_child(gfx)
+	settings_box.add_child(gfx_row)
+	for opt in [["VSYNC (OFF = LESS INPUT DELAY)", "vsync_on"], ["SHOW FPS", "show_fps"]]:
+		var cb := CheckBox.new()
+		cb.text = opt[0]
+		cb.button_pressed = bool(GameState.get(opt[1]))
+		cb.add_theme_font_size_override("font_size", 14)
+		var key: String = opt[1]
+		cb.toggled.connect(func(on: bool):
+			GameState.set(key, on)
+			GameState.apply_graphics()
+			GameState.write_save()
+		)
+		settings_box.add_child(cb)
+
 	resume_btn = Button.new()
 	resume_btn.text = "RESUME COMBAT"
 	resume_btn.custom_minimum_size = Vector2(0, 44)
@@ -771,6 +809,10 @@ func _toggle_pause() -> void:
 
 
 func _process(delta: float) -> void:
+	if fps_lbl:
+		fps_lbl.visible = GameState.show_fps
+		if GameState.show_fps:
+			fps_lbl.text = "%d FPS" % Engine.get_frames_per_second()
 	if borrowed_lbl and is_instance_valid(player):
 		if player.borrowed_skill == "":
 			borrowed_lbl.text = ""

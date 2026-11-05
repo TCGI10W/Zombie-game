@@ -44,6 +44,8 @@ func _ready() -> void:
 	hud.setup(player, wave_mgr)
 	wave_mgr.setup(arena, player, enemies_container)
 
+	GameState.apply_graphics()
+
 	if Net.is_online():
 		var ng := NetGame.new()
 		ng.name = "NetGame"
