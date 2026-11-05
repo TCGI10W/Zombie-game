@@ -409,6 +409,17 @@ func _c_died(id: int, headshot: bool, point: Vector3, from_dir: Vector3, dmg: fl
 			wave_mgr.active_boss = null
 
 
+func boss_fx(z: ZombieEnemy, kind: String, on: bool, pos: Vector3, amount: float) -> void:
+	_c_boss_fx.rpc(z.net_id, kind, on, pos, amount)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_boss_fx(id: int, kind: String, on: bool, pos: Vector3, amount: float) -> void:
+	var z: ZombieEnemy = zombies.get(id)
+	if z and is_instance_valid(z) and not z.is_dead:
+		z.net_boss_fx(kind, on, pos, amount)
+
+
 # Client -> host: our predicted hit. The host trusts the shooter.
 func forward_damage(z: ZombieEnemy, raw: float, pos: Vector3, ignore_armor: bool, kind: String, killed: bool, headshot: bool) -> void:
 	_s_damage.rpc_id(1, z.net_id, raw, pos, ignore_armor, kind, killed, headshot)

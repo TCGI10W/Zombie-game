@@ -410,6 +410,8 @@ func _physics_process(delta: float) -> void:
 	if net_puppet:
 		_puppet_process(delta)
 		return
+	if is_boss and Net.is_online():
+		_net_sync_fx()
 	_flesh_sfx_cd = maxf(0.0, _flesh_sfx_cd - delta)
 	_yaw_rate = lerpf(_yaw_rate, wrapf(rotation.y - _prev_yaw, -PI, PI) / maxf(delta, 0.001), clampf(10.0 * delta, 0.0, 1.0))
 	_prev_yaw = rotation.y
@@ -844,6 +846,16 @@ func _boss_necromancer(delta: float, dist: float, dir_to_p: Vector3, speed_mult:
 
 
 func _launch_acid_pool(target_pos: Vector3) -> void:
+	var dmg_per_tick := (base_damage * 0.35) * (0.45 if pain_drug_timer > 0.0 else 1.0)
+	if Net.is_online():
+		var ng := _net_game()
+		if ng:
+			ng.boss_fx(self, "acid", true, target_pos, dmg_per_tick)
+	_spawn_acid_pool(target_pos, dmg_per_tick)
+
+
+# Every machine shows the pool and hurts its own player standing in it.
+func _spawn_acid_pool(target_pos: Vector3, dmg_per_tick: float) -> void:
 	GameState.play_sfx("pain_drug", -2.0, 0.65)
 	var pool := Area3D.new()
 	pool.collision_layer = 0
@@ -867,8 +879,7 @@ func _launch_acid_pool(target_pos: Vector3) -> void:
 	get_parent().add_child(pool)
 	pool.global_position = Vector3(target_pos.x, 0.06, target_pos.z)
 
-	var dmg_per_tick := (base_damage * 0.35) * (0.45 if pain_drug_timer > 0.0 else 1.0)
-	var victim := target_player
+	var victim := get_tree().get_first_node_in_group("player") as Node3D
 	var tw := pool.create_tween()
 	for i in range(10):
 		tw.tween_callback(func():
@@ -1510,6 +1521,9 @@ func _puppet_process(delta: float) -> void:
 	velocity = s[2]
 	_yaw_rate = lerpf(_yaw_rate, wrapf(rotation.y - _prev_yaw, -PI, PI) / maxf(delta, 0.001), clampf(10.0 * delta, 0.0, 1.0))
 	_prev_yaw = rotation.y
+	if telegraph_ring and telegraph_ring.visible:
+		var pulse := 0.92 + 0.08 * sin(Time.get_ticks_msec() * 0.02)
+		telegraph_ring.scale = Vector3(pulse, 1.0, pulse)
 	var stunned := (_net_anim & 128) != 0
 	if stun_halo:
 		stun_halo.visible = stunned
@@ -1543,3 +1557,37 @@ func _puppet_process(delta: float) -> void:
 		_animate_gorilla_walk(delta, _net_speed)
 	else:
 		_animate_walk(delta, _net_speed)
+
+
+# Host: tell clients when the boss's warning ring / flame cone shows.
+var _fx_ring_sent: bool = false
+var _fx_flame_sent: bool = false
+
+
+func _net_sync_fx() -> void:
+	var ng := _net_game()
+	if ng == null:
+		return
+	var ring_on := telegraph_ring != null and telegraph_ring.visible
+	if ring_on != _fx_ring_sent:
+		_fx_ring_sent = ring_on
+		ng.boss_fx(self, "ring", ring_on, telegraph_ring.global_position if ring_on else Vector3.ZERO, 0.0)
+	var flame_on := flame_cone != null and flame_cone.visible
+	if flame_on != _fx_flame_sent:
+		_fx_flame_sent = flame_on
+		ng.boss_fx(self, "flame", flame_on, Vector3.ZERO, 0.0)
+
+
+# Client: the host's boss effect, mirrored.
+func net_boss_fx(kind: String, on: bool, pos: Vector3, amount: float) -> void:
+	match kind:
+		"ring":
+			if telegraph_ring:
+				telegraph_ring.visible = on
+				if on:
+					telegraph_ring.global_position = pos
+		"flame":
+			if flame_cone:
+				flame_cone.visible = on
+		"acid":
+			_spawn_acid_pool(pos, amount)
