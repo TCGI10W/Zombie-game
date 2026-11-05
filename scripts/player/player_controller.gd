@@ -368,25 +368,30 @@ func burn_into_stat(id: String, amount: int) -> int:
 
 
 func _apply_stats() -> void:
-	var new_max := base_max_hp + 15.0 * stat_level("endurance")
+	var new_max := base_max_hp + 15.0 * stat_level("endurance") + (60.0 if has_perk("titan") else 0.0)
 	if new_max > max_hp:
 		hp += new_max - max_hp
 	max_hp = new_max
 	hp = minf(hp, max_hp)
-	GameState.points_mult = 1.0 + 0.06 * stat_level("fortune")
+	GameState.points_mult = (1.0 + 0.06 * stat_level("fortune")) * (1.2 if has_perk("banker") else 1.0)
 	hp_changed.emit(hp, max_hp, overshield)
 
 
 func dmg_mult() -> float:
-	return (1.0 + 0.08 * stat_level("strength")) * (1.06 if GameState.has_unlock("damage") else 1.0)
+	var m := (1.0 + 0.08 * stat_level("strength")) * (1.06 if GameState.has_unlock("damage") else 1.0)
+	if has_perk("hollow"):
+		m *= 1.15
+	if has_perk("mastery"):
+		m *= 1.35
+	return m
 
 
 func speed_mult() -> float:
-	return 1.0 + 0.04 * stat_level("speed")
+	return (1.0 + 0.04 * stat_level("speed")) * (1.3 if adrenaline_timer > 0.0 else 1.0)
 
 
 func dex_mult() -> float:
-	return 1.0 + 0.07 * stat_level("dexterity")
+	return (1.0 + 0.07 * stat_level("dexterity")) * (1.25 if has_perk("hands") else 1.0) * (1.2 if adrenaline_timer > 0.0 else 1.0)
 
 
 func stamina_duration() -> float:
@@ -461,6 +466,10 @@ func _update_timers(delta: float) -> void:
 
 	if stim_timer > 0.0:
 		stim_timer = maxf(0.0, stim_timer - delta)
+	if adrenaline_timer > 0.0:
+		adrenaline_timer = maxf(0.0, adrenaline_timer - delta)
+	if last_stand_cd > 0.0:
+		last_stand_cd = maxf(0.0, last_stand_cd - delta)
 	if pap_timer > 0.0:
 		pap_timer = maxf(0.0, pap_timer - delta)
 		if pap_timer <= 0.0:
@@ -795,6 +804,10 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 		rate_mult *= 1.35
 	if pap_timer > 0.0:
 		rate_mult *= 1.20
+	if adrenaline_timer > 0.0:
+		rate_mult *= 1.2
+	if has_perk("mastery"):
+		rate_mult *= 1.15
 
 	fire_cooldown = float(w_cfg["fire_rate"]) / rate_mult
 	if pap_timer <= 0.0:
@@ -1379,6 +1392,9 @@ func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 	var pts := z.point_reward + (40 if was_headshot else 0)
 	GameState.add_points(pts)
 	GameState.total_kills += 1
+	if has_perk("vampire") and not is_dead and not is_downed:
+		hp = minf(max_hp, hp + 4.0)
+		hp_changed.emit(hp, max_hp, overshield)
 	if was_headshot:
 		GameState.headshots += 1
 		GameState.play_sfx("headshot_ding", -2.5, randf_range(0.96, 1.05))
@@ -1396,6 +1412,8 @@ func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
 		dmg *= 0.60
 	if stim_timer > 0.0:
 		dmg *= 0.65
+	if has_perk("kevlar"):
+		dmg *= 0.85
 
 	regen_delay_timer = maxf(1.6, 3.8 - 0.22 * stat_level("vitality"))
 	add_camera_shake(0.22)
@@ -1411,6 +1429,12 @@ func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
 		dmg -= absorbed
 
 	hp = maxf(0.0, hp - dmg)
+	if hp <= 0.0 and has_perk("laststand") and last_stand_cd <= 0.0:
+		hp = 1.0
+		revive_invuln = 3.0
+		last_stand_cd = 120.0
+		status_banner_requested.emit("LAST STAND!  3s INVULNERABLE", Color(1.0, 0.82, 0.3))
+		GameState.play_sfx("level_up", 0.0, 0.7)
 	hp_changed.emit(hp, max_hp, overshield)
 
 	if hp <= 0.0:
@@ -2162,7 +2186,7 @@ func export_state() -> Dictionary:
 		"kills": GameState.total_kills, "headshots": GameState.headshots, "bosses": GameState.bosses_slain,
 		"weapons": Array(weapons_owned), "slot": active_slot, "mag": mag_ammo.duplicate(),
 		"reserve": reserve_ammo.duplicate(), "upgraded": upgraded.duplicate(), "stats": stat_burned.duplicate(),
-		"revives": revives, "grenades": grenades, "c4": c4_count, "mines": mines,
+		"revives": revives, "grenades": grenades, "c4": c4_count, "mines": mines, "perks": perks.duplicate(),
 		"skill1": borrowed_skill, "skill1_cd": borrowed_cd_max, "skill2": borrowed_skill2, "skill2_cd": borrowed_cd_max2,
 	}
 
@@ -2189,6 +2213,7 @@ func import_state(d: Dictionary) -> void:
 	grenades = int(d.get("grenades", grenades))
 	c4_count = int(d.get("c4", 0))
 	mines = int(d.get("mines", 0))
+	perks = d.get("perks", {})
 	borrowed_skill = String(d.get("skill1", ""))
 	borrowed_cd_max = float(d.get("skill1_cd", 0.0))
 	borrowed_skill2 = String(d.get("skill2", ""))
@@ -2208,6 +2233,16 @@ func import_state(d: Dictionary) -> void:
 # ---------------------------------------------------------------------------
 const ExplosiveScript := preload("res://scripts/player/explosive_charge.gd")
 var c4_count: int = 0
+# Supply Depot perks (permanent for the run) and timed boosts
+var perks: Dictionary = {}
+var adrenaline_timer: float = 0.0
+var last_stand_cd: float = 0.0
+
+
+func has_perk(id: String) -> bool:
+	return perks.has(id)
+
+
 var mines: int = 0
 var _c4_hold_t: float = 0.0
 var _c4_fired: bool = false

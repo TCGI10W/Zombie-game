@@ -894,6 +894,9 @@ func _update_powerups() -> void:
 		lines.append("x2 DOUBLE POINTS  %ds" % ceili(GameState.powerup_timers["double_points"]))
 	if GameState.is_powerup_active("fire_sale"):
 		lines.append("$ FIRE SALE  %ds" % ceili(GameState.powerup_timers["fire_sale"]))
+	var pl := get_tree().get_first_node_in_group("player")
+	if pl and float(pl.get("adrenaline_timer")) > 0.0:
+		lines.append("⚡ ADRENALINE  %ds" % ceili(float(pl.get("adrenaline_timer"))))
 	powerups_lbl.text = "\n".join(lines)
 	var dp := GameState.is_powerup_active("double_points")
 	points_lbl.add_theme_color_override("font_color", Color(0.55, 1.0, 0.45) if dp else Color(0.98, 0.78, 0.25))
