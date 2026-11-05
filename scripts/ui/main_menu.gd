@@ -131,6 +131,17 @@ func _build_menu_ui() -> void:
 	game_title.add_theme_color_override("font_outline_color", Color.BLACK)
 	title_v.add_child(game_title)
 
+	var career_lbl := Label.new()
+	var lvl := GameState.career_level()
+	var next_u := ""
+	for u in GameState.META_UNLOCKS:
+		if int(u["level"]) > lvl:
+			next_u = "   •   NEXT (LV %d): %s" % [u["level"], u["text"]]
+			break
+	career_lbl.text = "CAREER LEVEL %d   •   XP %d / %d%s" % [lvl, GameState.career_xp, GameState.xp_for_level(lvl + 1), next_u]
+	career_lbl.add_theme_font_size_override("font_size", 14)
+	career_lbl.add_theme_color_override("font_color", Color(0.55, 0.9, 1.0))
+	title_v.add_child(career_lbl)
 	if GameState.best_round > 0:
 		var best_lbl := Label.new()
 		best_lbl.text = "BEST RUN: ROUND %d   •   MOST KILLS: %d" % [GameState.best_round, GameState.best_kills]
@@ -254,8 +265,8 @@ func _build_menu_ui() -> void:
 	rv.add_child(detail_skills)
 
 	var controls_lbl := Label.new()
-	controls_lbl.text = "[WASD] Move • [Shift] Sprint • [C] Crouch / Slide (while sprinting) • [Space] Jump • [LMB] Fire • [RMB] Aim • [R] Reload • [V] Knife • [G] Grenade • [1/2] Swap • [Q]/[F] Operator skills • [E] Buy / hold to rebuild windows • [ESC] Pause
-Burn points at the AUGMENT FURNACE to level up Strength, Speed, Endurance, Stamina and more. Open doors to reach the Mystery Crate, turn on the GENERATOR to power the Weapon Forge, electric trap and field radio. Buy a SECOND WIND to get back up once when you go down. From round 8, use the radio between rounds to call the extraction chopper and escape... or hunt the three glowing skulls."
+	controls_lbl.text = "[WASD] Move • [Shift] Sprint • [C] Crouch / Slide (while sprinting) • [Space] Jump • [LMB] Fire • [RMB] Aim • [R] Reload • [V] Knife • [G] Grenade • [1/2] Swap • [Q]/[F] Operator skills • [X]/[Z] Relic skills • [E] Buy / hold to rebuild windows / revive • [ESC] Pause
+Burn points at the AUGMENT FURNACE to level up Strength, Speed, Endurance, Stamina and more. Open doors to reach the Mystery Crate, turn on the GENERATOR to power the Weapon Forge, electric trap and field radio. Buy a SECOND WIND to get back up once when you go down. Bosses may drop relics (white, blue, purple, gold). Spend late-game points at the SUPPLY DEPOT. From round 8, use the radio between rounds to call the extraction chopper — or survive to ROUND 20 and kill the PROGENITOR to win."
 	controls_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	controls_lbl.add_theme_font_size_override("font_size", 12)
 	controls_lbl.add_theme_color_override("font_color", Color(0.68, 0.76, 0.85))
@@ -269,8 +280,44 @@ Burn points at the AUGMENT FURNACE to level up Strength, Speed, Endurance, Stami
 	deploy_btn.add_theme_stylebox_override("hover", _make_card_style(Color(0.88, 0.18, 0.14), Color(1.0, 0.58, 0.38), 2))
 	deploy_btn.pressed.connect(func():
 		GameState.play_sfx("round_sting", -2.0, 1.0)
+		GameState.reset_run()
+		GameState.run_id = GameState.new_run_id()
+		GameState.pending_resume = false
+		GameState.late_join = false
 		get_tree().change_scene_to_file("res://scenes/game.tscn")
 	)
+	var saved := GameState.load_world()
+	if not saved.is_empty() and int(saved.get("players", 1)) <= 1:
+		var cont_btn := Button.new()
+		cont_btn.text = "⟲  CONTINUE SAVED RUN — ROUND %d (%s)" % [int(saved.get("round", 1)), GameState.DIFFICULTY_NAMES[int(saved.get("difficulty", 1))]]
+		cont_btn.custom_minimum_size = Vector2(0, 42)
+		cont_btn.add_theme_font_size_override("font_size", 16)
+		cont_btn.pressed.connect(func():
+			GameState.reset_run()
+			GameState.run_id = int(saved.get("run_id", 0))
+			GameState.difficulty = int(saved.get("difficulty", 1))
+			GameState.pending_resume = true
+			GameState.late_join = false
+			get_tree().change_scene_to_file("res://scenes/game.tscn")
+		)
+		rv.add_child(cont_btn)
+	var diff_row := HBoxContainer.new()
+	var diff_lbl := Label.new()
+	diff_lbl.text = "DIFFICULTY"
+	diff_lbl.add_theme_font_size_override("font_size", 15)
+	diff_lbl.custom_minimum_size = Vector2(130, 0)
+	diff_row.add_child(diff_lbl)
+	var diff_opt := OptionButton.new()
+	for dn in ["EASY  (x0.75 SCORE)", "NORMAL", "HARD  (x1.5 SCORE)"]:
+		diff_opt.add_item(dn)
+	diff_opt.selected = GameState.difficulty
+	diff_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	diff_opt.item_selected.connect(func(i: int):
+		GameState.difficulty = i
+		GameState.write_save()
+	)
+	diff_row.add_child(diff_opt)
+	rv.add_child(diff_row)
 	rv.add_child(deploy_btn)
 
 	var coop_btn := Button.new()
@@ -329,6 +376,7 @@ var coop_status: Label
 var coop_roster: Label
 var coop_ip: LineEdit
 var coop_start: Button
+var coop_resume: Button
 var coop_invite: Button
 var coop_host_steam: Button
 
@@ -417,7 +465,8 @@ func _build_coop_panel(layer: CanvasLayer) -> void:
 	var bottom := HBoxContainer.new()
 	bottom.add_theme_constant_override("separation", 8)
 	v.add_child(bottom)
-	coop_start = _coop_button("▶ START GAME", func(): Net.start_game(), bottom)
+	coop_start = _coop_button("▶ START GAME", func(): Net.start_game(false), bottom)
+	coop_resume = _coop_button("⟲ RESUME SAVED RUN", func(): Net.start_game(true), bottom)
 	_coop_button("LEAVE", func():
 		Net.leave()
 		Net.status_text = ""
@@ -457,3 +506,7 @@ func _refresh_coop() -> void:
 		lines.append("■ %s  —  %s%s" % [pinfo.get("name", "?"), cname, "   (HOST)" if int(id) == 1 else ""])
 	coop_roster.text = "\n".join(lines) if not lines.is_empty() else "NOBODY YET — HOST A SQUAD OR JOIN ONE"
 	coop_start.visible = Net.mode == Net.Mode.HOST
+	var sw := GameState.load_world()
+	coop_resume.visible = Net.mode == Net.Mode.HOST and not sw.is_empty()
+	if coop_resume.visible:
+		coop_resume.text = "⟲ RESUME ROUND %d" % int(sw.get("round", 1))

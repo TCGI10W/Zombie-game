@@ -70,6 +70,12 @@ func net_apply(action: String, _args: Array) -> void:
 			_do_tear()
 		"repair":
 			_do_repair()
+		"set":
+			var want := clampi(int(_args[0]), 0, MAX_BOARDS)
+			while boards > want:
+				_do_tear()
+			while boards < want:
+				_do_repair()
 
 
 func _do_tear() -> void:

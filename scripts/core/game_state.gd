@@ -286,6 +286,8 @@ func load_save() -> void:
 		graphics_quality = int(cfg.get_value("settings", "graphics", 2))
 		vsync_on = bool(cfg.get_value("settings", "vsync", true))
 		show_fps = bool(cfg.get_value("settings", "show_fps", false))
+		difficulty = clampi(int(cfg.get_value("settings", "difficulty", 1)), 0, 2)
+		career_xp = int(cfg.get_value("records", "career_xp", 0))
 	apply_volume()
 
 
@@ -303,6 +305,8 @@ func write_save() -> void:
 	cfg.set_value("settings", "graphics", graphics_quality)
 	cfg.set_value("settings", "vsync", vsync_on)
 	cfg.set_value("settings", "show_fps", show_fps)
+	cfg.set_value("settings", "difficulty", difficulty)
+	cfg.set_value("records", "career_xp", career_xp)
 	cfg.save(SAVE_PATH)
 
 
@@ -427,7 +431,8 @@ func reset_run() -> void:
 	_zombie_roar_slots.clear()
 	_best_round_at_start = best_round
 	points_mult = 1.0
-	points = 500
+	points = start_points()
+	_run_finished = false
 	current_round = 1
 	total_kills = 0
 	headshots = 0
@@ -468,6 +473,20 @@ func spend_points(cost: int) -> bool:
 
 
 func get_boss_config(round_num: int) -> Dictionary:
+	if round_num == FINAL_ROUND:
+		var c: Dictionary = _boss_config(4 + 15).duplicate()
+		c["name"] = "THE PROGENITOR — FINAL BOSS"
+		c["subtitle"] = "PATIENT ZERO OF NACHT-7 // KILL IT TO END THE OUTBREAK"
+		c["max_hp"] = roundf(float(c["max_hp"]) * 2.2)
+		c["damage"] = roundf(float(c["damage"]) * 1.2)
+		c["scale"] = float(c.get("scale", 1.2)) * 1.25
+		c["color"] = Color(1.0, 0.82, 0.25)
+		c["final"] = true
+		return c
+	return _boss_config(round_num)
+
+
+func _boss_config(round_num: int) -> Dictionary:
 	var tier: int = max(0, (round_num - 1) / 5)
 	var slot: int = ((round_num - 1) % 5) + 1
 	var hp_mult: float = pow(1.45, float(tier))
@@ -582,3 +601,134 @@ func apply_graphics() -> void:
 			env.ssr_enabled = q == 2
 			env.ssao_enabled = q >= 1
 			env.volumetric_fog_enabled = q >= 1
+
+
+# ---------------------------------------------------------------------------
+# DIFFICULTY, RUN SCORE AND CAREER PROGRESSION
+# ---------------------------------------------------------------------------
+const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD"]
+const FINAL_ROUND := 20
+const META_UNLOCKS := [
+	{"level": 2, "id": "points_250", "text": "+250 STARTING POINTS"},
+	{"level": 3, "id": "grenade", "text": "+1 STARTING GRENADE"},
+	{"level": 4, "id": "skill_slot", "text": "SECOND RELIC SKILL SLOT [Z]"},
+	{"level": 5, "id": "points_500", "text": "+500 MORE STARTING POINTS"},
+	{"level": 6, "id": "relic_luck", "text": "RELIC LUCK: STAT RELICS MAY UPGRADE A RARITY"},
+	{"level": 8, "id": "start_smg", "text": "START WITH THE KURZ-9 SMG"},
+	{"level": 10, "id": "damage", "text": "+6% WEAPON DAMAGE"},
+]
+var difficulty: int = 1 # 0 easy, 1 normal, 2 hard (the host's choice in co-op)
+var career_xp: int = 0
+var _run_finished: bool = false
+
+
+func diff_hp_mult() -> float:
+	return [0.75, 1.0, 1.35][difficulty]
+
+
+func diff_dmg_mult() -> float:
+	return [0.7, 1.0, 1.3][difficulty]
+
+
+func diff_score_mult() -> float:
+	return [0.75, 1.0, 1.5][difficulty]
+
+
+static func xp_for_level(level: int) -> int:
+	return 300 * level * (level - 1)
+
+
+func career_level() -> int:
+	var lvl := 1
+	while career_xp >= xp_for_level(lvl + 1):
+		lvl += 1
+	return lvl
+
+
+func has_unlock(id: String) -> bool:
+	var lvl := career_level()
+	for u in META_UNLOCKS:
+		if u["id"] == id:
+			return lvl >= int(u["level"])
+	return false
+
+
+func start_points() -> int:
+	return 500 + (250 if has_unlock("points_250") else 0) + (500 if has_unlock("points_500") else 0)
+
+
+func run_score(outcome: String) -> int:
+	var s := total_kills * 10 + headshots * 5 + bosses_slain * 500 + current_round * 250
+	if outcome == "exfil":
+		s += 3000
+	elif outcome == "victory":
+		s += 10000
+	return int(float(s) * diff_score_mult())
+
+
+# Ends the run once: score -> career XP (1 XP per 10 score). Returns the
+# lines for the end screen.
+func finish_run(outcome: String) -> String:
+	var score := run_score(outcome)
+	var before := career_level()
+	var gained := 0
+	if not _run_finished:
+		_run_finished = true
+		clear_run_save()
+		gained = score / 10
+		career_xp += gained
+		record_run()
+		write_save()
+	var after := career_level()
+	var lines := "SCORE: %d   (%s)\n+%d XP   •   CAREER LEVEL %d   (%d / %d XP)" % [score, DIFFICULTY_NAMES[difficulty], gained, after, career_xp, xp_for_level(after + 1)]
+	for u in META_UNLOCKS:
+		if int(u["level"]) > before and int(u["level"]) <= after:
+			lines += "\n★ UNLOCKED: %s" % u["text"]
+	return lines
+
+
+# ---------------------------------------------------------------------------
+# RUN SAVE (resume after a host drop / quit, rejoin with your loadout)
+# ---------------------------------------------------------------------------
+const RUN_SAVE_PATH := "user://run_save.cfg"
+var run_id: int = 0
+var pending_resume: bool = false # this run continues a saved one
+var late_join: bool = false # joined a co-op game already in progress
+
+
+func new_run_id() -> int:
+	return randi() % 2000000000 + 1
+
+
+func save_world(data: Dictionary) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(RUN_SAVE_PATH)
+	cfg.set_value("world", "data", data)
+	cfg.save(RUN_SAVE_PATH)
+
+
+func load_world() -> Dictionary:
+	var cfg := ConfigFile.new()
+	if cfg.load(RUN_SAVE_PATH) != OK:
+		return {}
+	return cfg.get_value("world", "data", {})
+
+
+func save_player_state(data: Dictionary) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(RUN_SAVE_PATH)
+	cfg.set_value("player", "data", data)
+	cfg.save(RUN_SAVE_PATH)
+
+
+func load_player_state(for_run: int) -> Dictionary:
+	var cfg := ConfigFile.new()
+	if cfg.load(RUN_SAVE_PATH) != OK:
+		return {}
+	var d: Dictionary = cfg.get_value("player", "data", {})
+	return d if int(d.get("run_id", -1)) == for_run else {}
+
+
+func clear_run_save() -> void:
+	if FileAccess.file_exists(RUN_SAVE_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(RUN_SAVE_PATH))

@@ -20,6 +20,8 @@ var model_scale: float = 1.0
 var is_sprinter: bool = false
 var is_crawler: bool = false
 var is_bloater: bool = false
+var is_shielded: bool = false
+var is_spitter: bool = false
 var voice_pitch: float = 1.0
 const GasCloudScript := preload("res://scripts/world/gas_cloud.gd")
 
@@ -103,6 +105,7 @@ var _net_speed: float = 0.0
 var _net_attack_seen: bool = false
 var _net_hit_t: float = -10.0
 var _net_attacker: int = 1
+var dmg_by: Dictionary = {} # host, co-op: peer id -> damage dealt (assists)
 var _retarget_t: float = 0.0
 var _ng_cache: Node = null
 static var _flash_mat: StandardMaterial3D
@@ -143,6 +146,20 @@ func setup_regular(round_num: int, variant: String = "walker") -> void:
 		model_scale = 1.05
 		voice_pitch = 0.74
 		model = "res://assets/models/zombie_bloater.glb"
+	elif variant == "shielded":
+		is_shielded = true
+		display_name = "RIOT HUSK"
+		max_hp *= 1.4
+		base_speed -= 0.35
+		point_reward = 120
+		model = "res://assets/models/zombie_soldier_v2.glb"
+	elif variant == "spitter":
+		is_spitter = true
+		display_name = "ACID SPITTER"
+		max_hp *= 0.9
+		point_reward = 110
+		voice_pitch = 1.25
+		model = "res://assets/models/zombie_runner_v2.glb"
 	elif variant == "armored":
 		display_name = "BUNKER TROOPER"
 		max_hp *= 1.55
@@ -158,6 +175,10 @@ func setup_regular(round_num: int, variant: String = "walker") -> void:
 
 	hp = max_hp
 	_build_body(model, Color(1, 0.3, 0.2))
+	if is_shielded:
+		_add_riot_shield()
+	if is_spitter:
+		_tint_spitter()
 
 
 func setup_boss(config: Dictionary) -> void:
@@ -585,6 +606,9 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 	if entry_window and entry_stage < 3:
 		_process_window_entry(delta, speed_mult)
 		return
+	if is_spitter:
+		_process_spitter(delta, speed_mult)
+		return
 	var to_p := target_player.global_position - global_position
 	var flat_dist := Vector2(to_p.x, to_p.z).length()
 
@@ -856,22 +880,22 @@ func _launch_acid_pool(target_pos: Vector3) -> void:
 
 
 # Every machine shows the pool and hurts its own player standing in it.
-func _spawn_acid_pool(target_pos: Vector3, dmg_per_tick: float) -> void:
+func _spawn_acid_pool(target_pos: Vector3, dmg_per_tick: float, radius: float = 2.8) -> void:
 	GameState.play_sfx("pain_drug", -2.0, 0.65)
 	var pool := Area3D.new()
 	pool.collision_layer = 0
 	pool.collision_mask = 2
 	var cs := CollisionShape3D.new()
 	var cyl_s := CylinderShape3D.new()
-	cyl_s.radius = 2.8
+	cyl_s.radius = radius
 	cyl_s.height = 1.2
 	cs.shape = cyl_s
 	pool.add_child(cs)
 
 	var disc := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
-	cm.top_radius = 2.8
-	cm.bottom_radius = 2.8
+	cm.top_radius = radius
+	cm.bottom_radius = radius
 	cm.height = 0.08
 	disc.mesh = cm
 	disc.material_override = MaterialLib.get_emissive(Color(0.24, 1.0, 0.16), 3.8, 0.52)
@@ -885,7 +909,7 @@ func _spawn_acid_pool(target_pos: Vector3, dmg_per_tick: float) -> void:
 	for i in range(10):
 		tw.tween_callback(func():
 			if is_instance_valid(pool) and is_instance_valid(victim):
-				if pool.global_position.distance_to(victim.global_position) < 2.85:
+				if pool.global_position.distance_to(victim.global_position) < radius + 0.05:
 					victim.take_damage(dmg_per_tick, pool.global_position)
 		)
 		tw.tween_interval(0.55)
@@ -1070,6 +1094,16 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 			is_headshot = true
 			ignore_armor = true
 
+	# Riot shield: frontal body shots barely scratch it
+	if is_shielded and not is_headshot and (kind == "bullet" or kind == "melee"):
+		var to_s := _shooter_pos() - global_position
+		to_s.y = 0.0
+		if to_s.length() > 0.1 and (-global_basis.z).dot(to_s.normalized()) > 0.45:
+			dmg *= 0.15
+			if hit_pos != Vector3.ZERO:
+				FX.impact(hit_pos, to_s.normalized())
+				GameState.play_sfx("ricochet", -8.0, randf_range(0.9, 1.15))
+
 	# Pain Drug strips Boss Endurance AND grants +60% bonus vulnerability!
 	if pain_drug_timer > 0.0:
 		dmg *= 1.60
@@ -1083,6 +1117,8 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 	if net_puppet:
 		return _puppet_damage(dmg, raw_amount, hit_pos, ignore_armor, kind, is_headshot)
 
+	if Net.is_online():
+		dmg_by[_net_attacker] = float(dmg_by.get(_net_attacker, 0.0)) + minf(dmg, hp)
 	hp = maxf(0.0, hp - dmg)
 	if is_boss:
 		boss_damaged.emit(self)
@@ -1592,3 +1628,90 @@ func net_boss_fx(kind: String, on: bool, pos: Vector3, amount: float) -> void:
 				flame_cone.visible = on
 		"acid":
 			_spawn_acid_pool(pos, amount)
+		"spit":
+			_spit_visual(pos, amount)
+
+
+# ---------------------------------------------------------------------------
+# SPECIALS
+# ---------------------------------------------------------------------------
+func _shooter_pos() -> Vector3:
+	if Net.is_online() and not net_puppet and _net_attacker != Net.my_id():
+		var ng := _net_game()
+		if ng and ng.avatars.has(_net_attacker):
+			return (ng.avatars[_net_attacker] as Node3D).global_position
+	var lp := get_tree().get_first_node_in_group("player") as Node3D
+	return lp.global_position if lp else global_position - global_basis.z
+
+
+func _add_riot_shield() -> void:
+	var holder: Node3D = visual_root
+	if rig and rig.nodes.has("Chest"):
+		holder = rig.nodes["Chest"]
+	var shield := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.62, 1.0, 0.05)
+	shield.mesh = bm
+	shield.material_override = MaterialLib.get_pbr("rusted_metal", 1.6, Color(0.38, 0.4, 0.44), 0.7, 0.6, false)
+	holder.add_child(shield)
+	shield.position = Vector3(0.0, -0.12, -0.3)
+	var visor := MeshInstance3D.new()
+	var vm := BoxMesh.new()
+	vm.size = Vector3(0.42, 0.12, 0.02)
+	visor.mesh = vm
+	visor.material_override = MaterialLib.get_emissive(Color(0.25, 0.45, 0.6), 0.6, 0.6)
+	shield.add_child(visor)
+	visor.position = Vector3(0, 0.3, -0.03)
+
+
+func _tint_spitter() -> void:
+	for m in _meshes:
+		m.material_overlay = MaterialLib.get_emissive(Color(0.35, 1.0, 0.2), 0.35, 0.18)
+
+
+# Keeps its distance and lobs acid at the target.
+func _process_spitter(delta: float, speed_mult: float) -> void:
+	var to_p := target_player.global_position - global_position
+	var flat := Vector2(to_p.x, to_p.z).length()
+	var move := Vector3.ZERO
+	if flat > 11.0:
+		move = _get_nav_dir(target_player.global_position)
+	elif flat < 6.0:
+		move = Vector3(-to_p.x, 0.0, -to_p.z).normalized()
+	var spd := base_speed * speed_mult * 0.8 * _stagger_mult()
+	velocity.x = lerp(velocity.x, move.x * spd, 6.0 * delta)
+	velocity.z = lerp(velocity.z, move.z * spd, 6.0 * delta)
+	_face_direction(Vector3(to_p.x, 0.0, to_p.z).normalized(), delta * 8.0)
+	_animate_walk(delta, move.length() * spd)
+	if attack_cooldown <= 0.0 and flat < 16.0:
+		attack_cooldown = 3.4 / speed_mult
+		_play_3d_roar("zombie_attack_roar", 1.3)
+		var dmg := base_damage * 0.22
+		var tp := target_player.global_position
+		if Net.is_online():
+			var ng := _net_game()
+			if ng:
+				ng.boss_fx(self, "spit", true, tp, dmg)
+		_spit_visual(tp, dmg)
+
+
+func _spit_visual(target_pos: Vector3, dmg: float) -> void:
+	var glob := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.11
+	sm.height = 0.22
+	glob.mesh = sm
+	glob.material_override = MaterialLib.get_emissive(Color(0.35, 1.0, 0.2), 4.0)
+	get_tree().current_scene.add_child(glob)
+	var from := global_position + Vector3(0, 1.6 * model_scale, 0)
+	glob.global_position = from
+	var tw := glob.create_tween()
+	tw.tween_method(func(f: float):
+		if is_instance_valid(glob):
+			glob.global_position = from.lerp(target_pos, f) + Vector3(0, sin(f * PI) * 2.2, 0)
+	, 0.0, 1.0, 0.75)
+	tw.tween_callback(func():
+		glob.queue_free()
+		if is_inside_tree():
+			_spawn_acid_pool(target_pos, dmg, 1.6)
+	)

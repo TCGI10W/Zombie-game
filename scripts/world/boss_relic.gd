@@ -12,6 +12,7 @@ const RARITY_COLORS := [Color(0.92, 0.94, 1.0), Color(0.25, 0.55, 1.0), Color(0.
 const LIFETIME := 120.0
 
 var kind: String = ""
+var owner_peer: int = 0 # co-op: only this player can take it (0 = anyone)
 var _taken: bool = false
 var _t: float = 0.0
 var _gem: MeshInstance3D
@@ -96,6 +97,10 @@ func _ready() -> void:
 
 	var lbl := Label3D.new()
 	lbl.text = "%s RELIC\n%s" % [RARITY_NAMES[r], describe(kind)]
+	if owner_peer != 0:
+		lbl.text += "\nFOR %s" % Net.player_name(owner_peer)
+		if owner_peer != Net.my_id():
+			lbl.modulate.a = 0.55
 	lbl.font_size = 30
 	lbl.outline_size = 10
 	lbl.pixel_size = 0.004
@@ -121,6 +126,8 @@ func _process(delta: float) -> void:
 
 func _on_body_entered(body: Node3D) -> void:
 	if _taken or not body.is_in_group("player") or body.get("is_dead"):
+		return
+	if owner_peer != 0 and owner_peer != Net.my_id():
 		return
 	_taken = true
 	collected.emit(kind)

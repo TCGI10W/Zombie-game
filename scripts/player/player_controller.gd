@@ -180,7 +180,18 @@ func _ready() -> void:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = KEY_X
 		InputMap.action_add_event("borrowed_skill", ev)
+	if not InputMap.has_action("borrowed_skill_2"):
+		InputMap.add_action("borrowed_skill_2")
+		var ev2 := InputEventKey.new()
+		ev2.physical_keycode = KEY_Z
+		InputMap.action_add_event("borrowed_skill_2", ev2)
 	add_to_group("net_players")
+	if GameState.has_unlock("grenade"):
+		grenades += 1
+	if GameState.has_unlock("start_smg") and not weapons_owned.has("smg"):
+		weapons_owned.append("smg")
+		mag_ammo["smg"] = GameState.WEAPONS["smg"]["mag_size"]
+		reserve_ammo["smg"] = GameState.WEAPONS["smg"]["reserve_max"]
 	collision_layer = 2
 	collision_mask = 1 | 4 | 16 # World + Enemies + Window blockers
 
@@ -360,7 +371,7 @@ func _apply_stats() -> void:
 
 
 func dmg_mult() -> float:
-	return 1.0 + 0.08 * stat_level("strength")
+	return (1.0 + 0.08 * stat_level("strength")) * (1.06 if GameState.has_unlock("damage") else 1.0)
 
 
 func speed_mult() -> float:
@@ -397,6 +408,11 @@ func _update_timers(delta: float) -> void:
 	_hurt_sfx_cd = maxf(0.0, _hurt_sfx_cd - delta)
 	revive_invuln = maxf(0.0, revive_invuln - delta)
 	borrowed_cd = maxf(0.0, borrowed_cd - delta)
+	borrowed_cd2 = maxf(0.0, borrowed_cd2 - delta)
+	if pending_skill_t > 0.0:
+		pending_skill_t -= delta
+		if pending_skill_t <= 0.0:
+			status_banner_requested.emit("KEPT YOUR SKILLS", Color(0.7, 0.7, 0.75))
 	if is_downed:
 		if self_reviving:
 			downed_timer -= delta
@@ -712,8 +728,15 @@ func _handle_combat_inputs(delta: float) -> void:
 		_trigger_skill_q()
 	if Input.is_action_just_pressed("skill_2") and not is_downed:
 		_trigger_skill_f()
-	if Input.is_action_just_pressed("borrowed_skill") and not is_downed:
-		_use_borrowed_skill()
+	if pending_skill_t > 0.0:
+		if Input.is_action_just_pressed("borrowed_skill"):
+			_place_pending_skill(1)
+		elif Input.is_action_just_pressed("borrowed_skill_2") and GameState.has_unlock("skill_slot"):
+			_place_pending_skill(2)
+	elif Input.is_action_just_pressed("borrowed_skill") and not is_downed:
+		_use_borrowed_skill(1)
+	elif Input.is_action_just_pressed("borrowed_skill_2") and not is_downed:
+		_use_borrowed_skill(2)
 
 
 func _can_shoot() -> bool:
@@ -2015,6 +2038,12 @@ const BORROWED_SKILLS := {
 var borrowed_skill: String = ""
 var borrowed_cd: float = 0.0
 var borrowed_cd_max: float = 0.0
+var borrowed_skill2: String = "" # second slot [Z], a career unlock
+var borrowed_cd2: float = 0.0
+var borrowed_cd_max2: float = 0.0
+var pending_skill: String = ""
+var pending_mult: float = 1.0
+var pending_skill_t: float = 0.0
 
 
 # Raise a stat by whole levels (as if that many points went into the furnace).
@@ -2033,17 +2062,53 @@ func can_borrow(skill_id: String) -> bool:
 
 
 func grant_borrowed_skill(skill_id: String, cd_mult: float) -> void:
-	borrowed_skill = skill_id
-	borrowed_cd_max = float(BORROWED_SKILLS[skill_id]["cd"]) * cd_mult
-	borrowed_cd = 0.0
+	var sk_name: String = BORROWED_SKILLS[skill_id]["name"]
+	if borrowed_skill == "" or borrowed_skill == skill_id:
+		_set_slot(1, skill_id, cd_mult)
+		status_banner_requested.emit("NEW SKILL [X]: %s" % sk_name, Color(0.75, 0.5, 1.0))
+	elif GameState.has_unlock("skill_slot") and (borrowed_skill2 == "" or borrowed_skill2 == skill_id):
+		_set_slot(2, skill_id, cd_mult)
+		status_banner_requested.emit("NEW SKILL [Z]: %s" % sk_name, Color(0.75, 0.5, 1.0))
+	else:
+		# Slots full: let the player choose (8 seconds, ignore to keep)
+		pending_skill = skill_id
+		pending_mult = cd_mult
+		pending_skill_t = 8.0
+		var choice := "[X] REPLACE %s" % BORROWED_SKILLS[borrowed_skill]["name"]
+		if GameState.has_unlock("skill_slot"):
+			choice += "   [Z] REPLACE %s" % BORROWED_SKILLS[borrowed_skill2]["name"]
+		status_banner_requested.emit("NEW SKILL: %s — %s — OR IGNORE TO KEEP" % [sk_name, choice], Color(0.75, 0.5, 1.0))
+
+
+func _set_slot(slot: int, skill_id: String, cd_mult: float) -> void:
+	if slot == 1:
+		borrowed_skill = skill_id
+		borrowed_cd_max = float(BORROWED_SKILLS[skill_id]["cd"]) * cd_mult
+		borrowed_cd = 0.0
+	else:
+		borrowed_skill2 = skill_id
+		borrowed_cd_max2 = float(BORROWED_SKILLS[skill_id]["cd"]) * cd_mult
+		borrowed_cd2 = 0.0
 	stats_changed.emit()
 
 
-func _use_borrowed_skill() -> void:
-	if borrowed_skill == "" or borrowed_cd > 0.0 or is_monster_form:
+func _place_pending_skill(slot: int) -> void:
+	_set_slot(slot, pending_skill, pending_mult)
+	status_banner_requested.emit("SKILL %s: %s" % ["[X]" if slot == 1 else "[Z]", BORROWED_SKILLS[pending_skill]["name"]], Color(0.75, 0.5, 1.0))
+	pending_skill = ""
+	pending_skill_t = 0.0
+
+
+func _use_borrowed_skill(slot: int = 1) -> void:
+	var skill := borrowed_skill if slot == 1 else borrowed_skill2
+	var cd := borrowed_cd if slot == 1 else borrowed_cd2
+	if skill == "" or cd > 0.0 or is_monster_form:
 		return
-	borrowed_cd = borrowed_cd_max
-	match borrowed_skill:
+	if slot == 1:
+		borrowed_cd = borrowed_cd_max
+	else:
+		borrowed_cd2 = borrowed_cd_max2
+	match skill:
 		"feral_slash":
 			_perform_human_feral_slash()
 		"pain_dart":
@@ -2066,3 +2131,51 @@ func _use_borrowed_skill() -> void:
 			_emit_ammo()
 			GameState.play_sfx("buy_ching", 0.0, 0.85)
 			status_banner_requested.emit("ARC OVERCHARGE! 2.2x DAMAGE & INFINITE CLIP (12s)!", Color(0.92, 0.38, 1.0))
+
+
+# ---------------------------------------------------------------------------
+# RUN SAVE
+# ---------------------------------------------------------------------------
+func export_state() -> Dictionary:
+	return {
+		"run_id": GameState.run_id, "char": char_id, "points": GameState.points,
+		"kills": GameState.total_kills, "headshots": GameState.headshots, "bosses": GameState.bosses_slain,
+		"weapons": Array(weapons_owned), "slot": active_slot, "mag": mag_ammo.duplicate(),
+		"reserve": reserve_ammo.duplicate(), "upgraded": upgraded.duplicate(), "stats": stat_burned.duplicate(),
+		"revives": revives, "grenades": grenades,
+		"skill1": borrowed_skill, "skill1_cd": borrowed_cd_max, "skill2": borrowed_skill2, "skill2_cd": borrowed_cd_max2,
+	}
+
+
+func import_state(d: Dictionary) -> void:
+	if d.is_empty() or String(d.get("char", char_id)) != char_id:
+		return
+	GameState.points = int(d.get("points", GameState.points))
+	GameState.total_kills = int(d.get("kills", 0))
+	GameState.headshots = int(d.get("headshots", 0))
+	GameState.bosses_slain = int(d.get("bosses", 0))
+	GameState.points_changed.emit(GameState.points, 0)
+	var ws: Array[String] = []
+	for w in d.get("weapons", ["pistol"]):
+		if GameState.WEAPONS.has(String(w)):
+			ws.append(String(w))
+	if not ws.is_empty():
+		weapons_owned = ws
+	mag_ammo = d.get("mag", mag_ammo)
+	reserve_ammo = d.get("reserve", reserve_ammo)
+	upgraded = d.get("upgraded", upgraded)
+	stat_burned = d.get("stats", stat_burned)
+	revives = int(d.get("revives", revives))
+	grenades = int(d.get("grenades", grenades))
+	borrowed_skill = String(d.get("skill1", ""))
+	borrowed_cd_max = float(d.get("skill1_cd", 0.0))
+	borrowed_skill2 = String(d.get("skill2", ""))
+	borrowed_cd_max2 = float(d.get("skill2_cd", 0.0))
+	active_slot = clampi(int(d.get("slot", 0)), 0, weapons_owned.size() - 1)
+	_apply_stats()
+	hp = max_hp
+	_equip_weapon_model(get_current_weapon_id())
+	_emit_ammo()
+	stats_changed.emit()
+	hp_changed.emit(hp, max_hp, overshield)
+	status_banner_requested.emit("RUN RESTORED — YOUR LOADOUT IS BACK", Color(0.55, 0.9, 1.0))

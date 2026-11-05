@@ -370,6 +370,10 @@ func _build_courtyard() -> void:
 	add_child(furnace)
 
 	# Second Wind medical cabinet against the east wall
+	var depot: Node3D = (load("res://scripts/world/supply_depot.gd") as GDScript).new()
+	depot.position = Vector3(-11.0, 0.0, -3.5)
+	depot.rotation_degrees.y = -90.0
+	add_child(depot)
 	var med: Node3D = SecondWindScript.new()
 	med.position = Vector3(11.6, 0.0, 11.0)
 	med.rotation_degrees.y = 90.0

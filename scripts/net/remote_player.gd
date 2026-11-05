@@ -52,8 +52,12 @@ func setup(p_id: int, p_name: String, p_color: Color) -> void:
 	name = "Remote%d" % p_id
 
 
+const GIFT_POINTS := 500
+
+
 func _ready() -> void:
 	add_to_group("net_players")
+	add_to_group("wall_stations") # revive when down, give points when standing
 	collision_layer = 2
 	collision_mask = 0
 	var cs := CollisionShape3D.new()
@@ -183,10 +187,7 @@ func apply_state(t: float, pos: Vector3, yaw: float, s: Dictionary) -> void:
 	if w != weapon_id:
 		weapon_id = w
 		_set_gun_shape(w)
-	if is_downed and not was_down:
-		add_to_group("wall_stations")
-	elif not is_downed and was_down:
-		remove_from_group("wall_stations")
+	if not is_downed and was_down:
 		revive_progress = 0.0
 
 
@@ -255,13 +256,22 @@ func apply_stun(_d: float) -> void:
 # REVIVE (this machine's player holds [E] on a downed teammate)
 # ---------------------------------------------------------------------------
 func get_prompt(p: Node3D) -> String:
-	if not is_downed or is_dead or p.is_downed or p.is_dead:
+	if is_dead or extracted or p.is_downed or p.is_dead:
 		return ""
-	return "[HOLD E] REVIVE %s" % display_name
+	if is_downed:
+		return "[HOLD E] REVIVE %s  (+150 PTS)" % display_name
+	if GameState.points >= GIFT_POINTS:
+		return "[E] GIVE %d POINTS TO %s" % [GIFT_POINTS, display_name]
+	return ""
 
 
-func try_purchase(_p: Node3D) -> void:
-	pass
+func try_purchase(p: Node3D) -> void:
+	if is_downed or is_dead or GameState.points < GIFT_POINTS:
+		return
+	var ng := get_tree().get_first_node_in_group("net_game")
+	if ng and GameState.try_pay(p, GIFT_POINTS):
+		ng.send_points(peer_id, GIFT_POINTS)
+		p.status_banner_requested.emit("SENT %d POINTS TO %s" % [GIFT_POINTS, display_name], Color(0.95, 0.85, 0.35))
 
 
 func interact_hold(_p: Node3D, delta: float) -> void:
@@ -275,6 +285,12 @@ func interact_hold(_p: Node3D, delta: float) -> void:
 		if revive_progress >= 1.0:
 			revive_progress = 0.0
 			ng.send_revive(peer_id)
+			# Reward for the rescue
+			GameState.add_points(150)
+			if is_instance_valid(_p):
+				_p.hp = minf(_p.max_hp, _p.hp + 20.0)
+				_p.hp_changed.emit(_p.hp, _p.max_hp, _p.overshield)
+				_p.status_banner_requested.emit("REVIVED %s  +150" % display_name, Color(0.4, 1.0, 0.6))
 
 
 # ---------------------------------------------------------------------------

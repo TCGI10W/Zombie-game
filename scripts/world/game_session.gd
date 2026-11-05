@@ -42,6 +42,8 @@ func _ready() -> void:
 	wave_mgr.weather = weather
 
 	hud.setup(player, wave_mgr)
+	if GameState.pending_resume and not Net.is_online():
+		player.import_state(GameState.load_player_state(GameState.run_id))
 	wave_mgr.setup(arena, player, enemies_container)
 
 	GameState.apply_graphics()

@@ -212,6 +212,25 @@ UNIQUE BOSSES SLAIN: %d" % [
 		GameState.headshots,
 		GameState.bosses_slain,
 	]
+	modal_stats.text += "\n\n" + GameState.finish_run("exfil")
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _on_run_won() -> void:
+	if augment_menu:
+		augment_menu.close()
+	scope_canvas.visible = false
+	interact_lbl.text = ""
+	downed_box.visible = false
+	await get_tree().create_timer(2.5).timeout
+	modal_overlay.visible = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	resume_btn.visible = false
+	settings_box.visible = false
+	modal_title.text = "OUTBREAK CONTAINED"
+	modal_title.add_theme_color_override("font_color", Color(1.0, 0.82, 0.25))
+	modal_stats.text = "THE PROGENITOR IS DEAD. NACHT-7 IS SILENT.\n\nTOTAL ZOMBIE KILLS: %d\nHEADSHOTS: %d\nBOSSES SLAIN: %d\n\n%s" % [
+		GameState.total_kills, GameState.headshots, GameState.bosses_slain, GameState.finish_run("victory")]
 
 
 func _on_downed_changed(downed: bool) -> void:
@@ -769,6 +788,7 @@ func _connect_signals() -> void:
 	wave_mgr.boss_updated.connect(_update_boss_bar)
 	wave_mgr.boss_defeated.connect(_on_boss_defeated)
 	wave_mgr.exfil_won.connect(_on_exfil_won)
+	wave_mgr.run_won.connect(_on_run_won)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -814,13 +834,16 @@ func _process(delta: float) -> void:
 		if GameState.show_fps:
 			fps_lbl.text = "%d FPS" % Engine.get_frames_per_second()
 	if borrowed_lbl and is_instance_valid(player):
-		if player.borrowed_skill == "":
-			borrowed_lbl.text = ""
-		else:
-			var sk_name: String = PlayerController.BORROWED_SKILLS[player.borrowed_skill]["name"]
-			var ready := player.borrowed_cd <= 0.0
-			borrowed_lbl.text = "[X] %s — %s" % [sk_name, "READY" if ready else "%ds" % int(ceil(player.borrowed_cd))]
-			borrowed_lbl.add_theme_color_override("font_color", Color(0.75, 0.5, 1.0) if ready else Color(0.6, 0.6, 0.65))
+		var lines: Array[String] = []
+		for slot in [[player.borrowed_skill, player.borrowed_cd, "X"], [player.borrowed_skill2, player.borrowed_cd2, "Z"]]:
+			if slot[0] != "":
+				var sk_name: String = PlayerController.BORROWED_SKILLS[slot[0]]["name"]
+				lines.append("[%s] %s — %s" % [slot[2], sk_name, "READY" if slot[1] <= 0.0 else "%ds" % int(ceil(slot[1]))])
+		if player.pending_skill_t > 0.0:
+			lines.append("NEW: %s — PRESS [X]%s TO SWAP (%ds)" % [PlayerController.BORROWED_SKILLS[player.pending_skill]["name"], "/[Z]" if GameState.has_unlock("skill_slot") else "", int(ceil(player.pending_skill_t))])
+		borrowed_lbl.text = "\n".join(lines)
+		borrowed_lbl.offset_top = -300 - 24 * maxi(0, lines.size() - 1)
+		borrowed_lbl.add_theme_color_override("font_color", Color(0.75, 0.5, 1.0))
 	if hitmarker_timer > 0.0:
 		hitmarker_timer -= delta
 		hit_canvas.queue_redraw()
@@ -1207,3 +1230,4 @@ func _on_player_died() -> void:
 		GameState.headshots,
 		GameState.bosses_slain
 	]
+	modal_stats.text += "\n\n" + GameState.finish_run("death")

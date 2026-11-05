@@ -8,6 +8,7 @@ signal boss_updated(boss: ZombieEnemy)
 signal boss_defeated(boss_name: String)
 signal powerup_collected(kind: String)
 signal exfil_won()
+signal run_won()
 
 const PowerUpScript := preload("res://scripts/world/power_up.gd")
 const RelicScript := preload("res://scripts/world/boss_relic.gd")
@@ -61,7 +62,10 @@ func setup(p_arena: BunkerArena, p_player: PlayerController, p_container: Node3D
 		player.status_banner_requested.emit("%s OPENED — NEW WINDOWS ARE NOW ACTIVE" % arena.zone_names[zid], Color(1.0, 0.85, 0.4))
 	)
 	if not Net.is_online():
-		start_round(1) # online: NetGame starts round 1 once everyone has loaded
+		if GameState.pending_resume:
+			resume_saved_world()
+		else:
+			start_round(1) # online: NetGame starts round 1 once everyone has loaded
 
 
 func start_round(round_num: int) -> void:
@@ -109,11 +113,16 @@ func _present_round(round_num: int) -> void:
 		weather.set_storm(hound_round)
 	var boss_cfg := GameState.get_boss_config(round_num)
 	round_started.emit(round_num, boss_cfg)
-	if hound_round:
-		player.status_banner_requested.emit("HOUND RAID! THEY COME WITH THE LIGHTNING — THEN THE BOSS", Color(1.0, 0.5, 0.15))
+	if round_num == GameState.FINAL_ROUND:
+		player.status_banner_requested.emit("FINAL ROUND! KILL THE PROGENITOR TO END THE OUTBREAK", Color(1.0, 0.82, 0.25))
 	var ng := _ng()
 	if ng:
 		ng.on_round_start(round_num)
+	# Autosave at the top of every round
+	if is_instance_valid(player) and not player.is_dead:
+		GameState.save_player_state(player.export_state())
+	if Net.is_host():
+		GameState.save_world(world_state())
 
 
 func _ng() -> Node:
@@ -284,7 +293,11 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	var variant := forced_variant
 	if variant == "":
 		var roll := randf()
-		if round_num >= 6 and randf() < 0.07 and _count_alive("bloater") < 2:
+		if round_num >= 10 and randf() < 0.1 and _count_alive("spitter") < 3:
+			variant = "spitter"
+		elif round_num >= 10 and randf() < 0.12 and _count_alive("shielded") < 4:
+			variant = "shielded"
+		elif round_num >= 6 and randf() < 0.07 and _count_alive("bloater") < 2:
 			variant = "bloater"
 		elif round_num >= 3 and roll < 0.22:
 			variant = "armored"
@@ -307,8 +320,9 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	enemies_container.add_child(z)
 	z.global_position = sp
 	z.setup_regular(round_num, variant)
-	z.max_hp *= 1.0 + 0.12 * float(Net.player_count() - 1)
+	z.max_hp *= (1.0 + 0.12 * float(Net.player_count() - 1)) * GameState.diff_hp_mult()
 	z.hp = z.max_hp
+	z.base_damage *= GameState.diff_dmg_mult()
 	z.target_player = _nearest_player(sp)
 	if window:
 		z.set_entry_window(window)
@@ -365,7 +379,7 @@ func _count_alive(kind: String) -> int:
 	var n := 0
 	for node in get_tree().get_nodes_in_group("enemies"):
 		var z := node as ZombieEnemy
-		if z and not z.is_dead and ((kind == "bloater" and z.is_bloater) or (kind == "hound" and z.is_in_group("hounds"))):
+		if z and not z.is_dead and ((kind == "bloater" and z.is_bloater) or (kind == "hound" and z.is_in_group("hounds")) or (kind == "spitter" and z.is_spitter) or (kind == "shielded" and z.is_shielded)):
 			n += 1
 	return n
 
@@ -377,8 +391,10 @@ func _spawn_round_boss(round_num: int) -> void:
 	enemies_container.add_child(boss)
 	boss.global_position = arena.get_boss_spawn(_focus_pos())
 	boss.setup_boss(cfg)
-	boss.max_hp *= 1.0 + 0.65 * float(Net.player_count() - 1)
+	boss.max_hp *= (1.0 + 0.65 * float(Net.player_count() - 1)) * GameState.diff_hp_mult()
 	boss.hp = boss.max_hp
+	boss.base_damage *= GameState.diff_dmg_mult()
+	boss.set_meta("final", bool(cfg.get("final", false)))
 	boss.target_player = _nearest_player(boss.global_position)
 	if is_instance_valid(boss.target_player):
 		var tp := boss.target_player.global_position
@@ -404,8 +420,12 @@ func _on_enemy_died(enemy: ZombieEnemy, _was_headshot: bool) -> void:
 
 	if enemy.is_boss:
 		active_boss = null
-		if randf() < BOSS_RELIC_CHANCE:
-			_spawn_powerup(_roll_relic(), enemy.global_position)
+		if enemy.get_meta("final", false):
+			if Net.is_online():
+				_c_victory.rpc()
+			_victory()
+			return
+		_boss_relics(enemy.global_position)
 		if Net.is_online():
 			_c_boss_down.rpc(enemy.display_name)
 		_boss_down(enemy.display_name)
@@ -418,23 +438,44 @@ var _powerup_kinds: Dictionary = {}
 
 # Host decides drops; every machine shows them; whoever touches one first
 # (as the host sees it) triggers it for the whole squad.
-func _spawn_powerup(kind: String, pos: Vector3) -> void:
+func _spawn_powerup(kind: String, pos: Vector3, owner: int = 0) -> void:
 	var id := _next_powerup_id
 	_next_powerup_id += 1
 	_powerup_kinds[id] = kind
 	if Net.is_online():
-		_c_powerup.rpc(id, kind, pos)
-	_make_powerup(id, kind, pos)
+		_c_powerup.rpc(id, kind, pos, owner)
+	_make_powerup(id, kind, pos, owner)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _c_powerup(id: int, kind: String, pos: Vector3) -> void:
-	_make_powerup(id, kind, pos)
+func _c_powerup(id: int, kind: String, pos: Vector3, owner: int) -> void:
+	_make_powerup(id, kind, pos, owner)
 
 
-func _make_powerup(id: int, kind: String, pos: Vector3) -> void:
+var _relic_misses: Dictionary = {} # peer id -> bosses in a row without a relic
+
+
+# Every player rolls their own relic (25%); the third boss without one
+# always pays out.
+func _boss_relics(pos: Vector3) -> void:
+	var ids: Array = Net.players.keys() if Net.is_online() else [1]
+	ids.sort()
+	for i in range(ids.size()):
+		var pid := int(ids[i])
+		var miss := int(_relic_misses.get(pid, 0))
+		if randf() < BOSS_RELIC_CHANCE or miss >= 2:
+			_relic_misses[pid] = 0
+			var ang := float(i) / float(ids.size()) * TAU
+			_spawn_powerup(_roll_relic(), pos + Vector3(cos(ang), 0.0, sin(ang)) * (1.2 if ids.size() > 1 else 0.0), pid if Net.is_online() else 0)
+		else:
+			_relic_misses[pid] = miss + 1
+
+
+func _make_powerup(id: int, kind: String, pos: Vector3, owner: int = 0) -> void:
 	var pu: Area3D = RelicScript.new() if kind.begins_with("relic:") else PowerUpScript.new()
 	pu.kind = kind
+	if kind.begins_with("relic:"):
+		pu.owner_peer = owner
 	pu.set_meta("pu_id", id)
 	pu.add_to_group("net_powerups")
 	get_parent().add_child(pu)
@@ -493,8 +534,10 @@ func _powerup_taken(id: int, kind: String, collector: int) -> void:
 
 # Host: rarity 55% common, 28% rare, 13% epic, 4% legendary. Epic and
 # legendary relics can hold another operator's skill instead of stat levels.
-func _roll_relic() -> String:
+func _roll_relic(bonus: bool = false) -> String:
 	var roll := randf() * 100.0
+	if bonus:
+		roll = 35.0 + randf() * 65.0 # bought caches skip most commons
 	var rarity := 0 if roll < 55.0 else (1 if roll < 83.0 else (2 if roll < 96.0 else 3))
 	if rarity >= 2 and randf() < 0.4:
 		var skills: Array = PlayerController.BORROWED_SKILLS.keys()
@@ -509,11 +552,14 @@ func _apply_relic(kind: String) -> void:
 	var r := RelicScript.rarity_of(kind)
 	var col: Color = RelicScript.RARITY_COLORS[r]
 	var levels: int = [1, 2, 3, 5][r]
+	if p[2] == "stat" and r < 3 and GameState.has_unlock("relic_luck") and randf() < 0.25:
+		r += 1 # career unlock: a lucky upgrade
+		col = RelicScript.RARITY_COLORS[r]
+		p[4] = str([1, 2, 3, 5][r])
 	GameState.play_sfx("level_up", 0.0, 1.0 + 0.08 * float(r))
 	GameState.play_sfx("buy_ching", -2.0, 1.3)
 	if p[2] == "skill" and player.can_borrow(p[3]):
 		player.grant_borrowed_skill(p[3], float(p[4]) / 100.0)
-		player.status_banner_requested.emit("%s RELIC! NEW SKILL [X]: %s" % [RelicScript.RARITY_NAMES[r], PlayerController.BORROWED_SKILLS[p[3]]["name"]], col)
 		return
 	# A stat relic (or a skill you already have): levels into a stat that isn't maxed
 	var stat_id: String = p[3] if p[2] == "stat" else ""
@@ -843,3 +889,48 @@ func _make_lz_marker(pos: Vector3) -> Node3D:
 	tw.tween_property(light, "light_energy", 2.4, 0.09)
 	tw.tween_property(light, "light_energy", 3.8, 0.13)
 	return root
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_victory() -> void:
+	_victory()
+
+
+# The final boss is dead: the run is won for everyone still in it.
+func _victory() -> void:
+	set_process(false)
+	for z in get_tree().get_nodes_in_group("enemies"):
+		if is_instance_valid(z) and not z.is_dead and not z.net_puppet:
+			z.take_damage(1.0e9, Vector3.ZERO, true, "explosive")
+	GameState.play_sfx("exfil_success", 0.0, 1.0)
+	if is_instance_valid(player):
+		player.revive_invuln = 9999.0
+	run_won.emit()
+
+
+# ---------------------------------------------------------------------------
+# RUN SAVE / RESUME / LATE JOIN
+# ---------------------------------------------------------------------------
+func world_state() -> Dictionary:
+	var doors: Array = []
+	var power := false
+	for n in arena.find_children("*", "", true, false):
+		if "_opened" in n and "zone_id" in n and n._opened:
+			doors.append(String(n.zone_id))
+		if "_running" in n and n._running:
+			power = true
+	return {"run_id": GameState.run_id, "round": GameState.current_round, "difficulty": GameState.difficulty,
+		"doors": doors, "power": power, "players": Net.player_count()}
+
+
+# Host/solo: open the saved doors, restore power, start at the saved round.
+func resume_saved_world() -> void:
+	var w := GameState.load_world()
+	var start := maxi(1, int(w.get("round", 1)))
+	for n in arena.find_children("*", "", true, false):
+		if "_opened" in n and "zone_id" in n and String(n.zone_id) in w.get("doors", []):
+			Net.world(n, "open")
+		if "_running" in n and bool(w.get("power", false)) and not n._running:
+			Net.world(n, "start")
+	start_round(start)
+	_banner("RUN RESUMED — ROUND %d" % start, Color(0.55, 0.9, 1.0))

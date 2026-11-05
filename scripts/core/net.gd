@@ -20,7 +20,7 @@ enum Mode {OFFLINE, HOST, CLIENT}
 const MAX_PLAYERS := 8
 const PORT := 24680
 const STEAM_APP_ID := 480 # Valve's public test app ("Spacewar"); replace with your own App ID
-const NET_VERSION := "dp-coop-1"
+const NET_VERSION := "dp-coop-2"
 const COLORS := [Color(0.35, 0.8, 1.0), Color(1.0, 0.75, 0.25), Color(0.55, 1.0, 0.45), Color(1.0, 0.45, 0.75),
 	Color(0.75, 0.55, 1.0), Color(1.0, 0.45, 0.3), Color(0.3, 1.0, 0.85), Color(0.95, 0.95, 0.95)]
 
@@ -295,9 +295,6 @@ func _s_hello(pname: String, char_id: String, version: String) -> void:
 	if version != NET_VERSION:
 		_c_kick.rpc_id(id, "VERSION MISMATCH — EVERYONE NEEDS THE SAME BUILD")
 		return
-	if in_game:
-		_c_kick.rpc_id(id, "THAT GAME IS ALREADY IN PROGRESS")
-		return
 	if players.size() >= MAX_PLAYERS:
 		_c_kick.rpc_id(id, "LOBBY IS FULL")
 		return
@@ -313,6 +310,9 @@ func _s_hello(pname: String, char_id: String, version: String) -> void:
 	players[id] = {"name": clean, "char": char_id, "color": col}
 	_c_players.rpc(players)
 	lobby_changed.emit()
+	if in_game:
+		# Join in progress: load straight into the running game
+		_c_start_game.rpc_id(id, GameState.difficulty, GameState.run_id, false, true)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -348,18 +348,23 @@ func _s_set_char(char_id: String) -> void:
 		lobby_changed.emit()
 
 
-func start_game() -> void:
+func start_game(resume: bool = false) -> void:
 	if mode != Mode.HOST:
 		return
-	if steam_ok and lobby_id != 0:
-		steam.setLobbyJoinable(lobby_id, false)
-	_c_start_game.rpc()
+	var rid := int(GameState.load_world().get("run_id", 0)) if resume else GameState.new_run_id()
+	if resume:
+		GameState.difficulty = int(GameState.load_world().get("difficulty", GameState.difficulty))
+	_c_start_game.rpc(GameState.difficulty, rid, resume, false)
 
 
 @rpc("authority", "call_local", "reliable")
-func _c_start_game() -> void:
+func _c_start_game(diff: int, rid: int = 0, resume: bool = false, late: bool = false) -> void:
+	GameState.difficulty = clampi(diff, 0, 2)
 	in_game = true
 	GameState.reset_run()
+	GameState.run_id = rid
+	GameState.pending_resume = resume
+	GameState.late_join = late
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/game.tscn")
 
@@ -367,8 +372,6 @@ func _c_start_game() -> void:
 # Host: the run ended, everyone goes back to the lobby screen together
 func return_to_lobby() -> void:
 	if mode == Mode.HOST:
-		if steam_ok and lobby_id != 0:
-			steam.setLobbyJoinable(lobby_id, true)
 		_c_return_to_lobby.rpc()
 
 

@@ -78,6 +78,9 @@ func setup(p_player: PlayerController, p_wave: WaveManager, p_arena: BunkerArena
 	if Net.is_host():
 		_ready_peers[1] = true
 	render_delay = 0.12
+	# Coming back to a run (resume or rejoin): restore this player's loadout
+	if GameState.pending_resume or GameState.late_join:
+		player.import_state(GameState.load_player_state(GameState.run_id))
 
 
 # Interactables, numbered in tree order (identical on every machine)
@@ -117,6 +120,10 @@ func _add_avatar(id: int) -> void:
 
 
 func _on_roster_changed() -> void:
+	for id in Net.players.keys():
+		if int(id) != Net.my_id() and not avatars.has(int(id)):
+			_add_avatar(int(id))
+			player.status_banner_requested.emit("%s JOINED THE SQUAD" % Net.player_name(int(id)), Color(0.55, 0.9, 1.0))
 	for id in avatars.keys():
 		if not Net.players.has(id):
 			var av: Node = avatars[id]
@@ -147,7 +154,10 @@ func _process(delta: float) -> void:
 					all_in = false
 			if all_in or _wait_t > READY_TIMEOUT:
 				started = true
-				wave_mgr.start_round(1)
+				if GameState.pending_resume:
+					wave_mgr.resume_saved_world()
+				else:
+					wave_mgr.start_round(1)
 		_snap_t += delta
 		if _snap_t >= SNAP_INTERVAL:
 			_snap_t = 0.0
@@ -179,8 +189,53 @@ func _process(delta: float) -> void:
 @rpc("any_peer", "call_remote", "reliable")
 func _s_loaded() -> void:
 	var id := multiplayer.get_remote_sender_id()
+	var was_ready := _ready_peers.has(id)
 	_ready_peers[id] = true
 	_c_loaded_ack.rpc_id(id)
+	if started and not was_ready:
+		_send_late_state(id)
+
+
+# Host: bring a player who joined mid-run up to date.
+func _send_late_state(peer: int) -> void:
+	var boards := {}
+	var doors: Array = []
+	var power := false
+	for i in range(world_nodes.size()):
+		var n: Node = world_nodes[i]
+		if "boards" in n:
+			boards[i] = int(n.boards)
+		if "_opened" in n and n._opened:
+			doors.append(i)
+		if "_running" in n and n._running:
+			power = true
+	_c_late_state.rpc_id(peer, {"round": GameState.current_round, "boards": boards, "doors": doors, "power": power,
+		"intermission": wave_mgr.in_intermission})
+	for z in zombies.values():
+		if is_instance_valid(z) and not z.is_dead and z.has_meta("spawn"):
+			var d: Dictionary = (z.get_meta("spawn") as Dictionary).duplicate()
+			d["p"] = z.global_position
+			d["y"] = z.rotation.y
+			_c_spawn.rpc_id(peer, d)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_late_state(st: Dictionary) -> void:
+	started = true
+	for i in st.get("doors", []):
+		if int(i) < world_nodes.size():
+			world_nodes[int(i)].net_apply("open", [])
+	if bool(st.get("power", false)):
+		for n in world_nodes:
+			if "_running" in n and not n._running:
+				n.net_apply("start", [])
+	var boards: Dictionary = st.get("boards", {})
+	for k in boards.keys():
+		if int(k) < world_nodes.size():
+			world_nodes[int(k)].net_apply("set", [int(boards[k])])
+	wave_mgr.in_intermission = bool(st.get("intermission", false))
+	wave_mgr._present_round(int(st.get("round", 1)))
+	player.status_banner_requested.emit("JOINED THE SQUAD ON ROUND %d" % int(st.get("round", 1)), Color(0.55, 0.9, 1.0))
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -275,6 +330,7 @@ func register_zombie(z: ZombieEnemy, data: Dictionary) -> void:
 	z.tree_exiting.connect(func(): zombies.erase(id))
 	data["id"] = id
 	data["m"] = z.max_hp
+	z.set_meta("spawn", data)
 	data["p"] = z.global_position
 	data["y"] = z.rotation.y
 	_c_spawn.rpc(data)
@@ -397,6 +453,40 @@ func _c_hits(data: PackedByteArray) -> void:
 func zombie_died(z: ZombieEnemy, was_headshot: bool) -> void:
 	_c_died.rpc(z.net_id, was_headshot, z.last_hit_point, z.last_hit_from, z.last_damage_amount, z.last_damage_kind)
 	zombies.erase(z.net_id)
+	# Assists: everyone else who did real damage gets paid too
+	var killer := z._net_attacker
+	for pid in z.dmg_by.keys():
+		if int(pid) == killer or float(z.dmg_by[pid]) < z.max_hp * 0.15:
+			continue
+		var amount := int(z.point_reward * 0.4) if z.is_boss else 30
+		var why := "BOSS ASSIST" if z.is_boss else "ASSIST"
+		if int(pid) == Net.my_id():
+			_award(amount, why)
+		else:
+			_c_award.rpc_id(int(pid), amount, why)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_award(amount: int, why: String) -> void:
+	_award(amount, why)
+
+
+func _award(amount: int, why: String) -> void:
+	GameState.add_points(amount)
+	if why == "BOSS ASSIST":
+		player.status_banner_requested.emit("BOSS ASSIST  +%d" % amount, Color(0.95, 0.85, 0.35))
+
+
+func send_points(peer: int, amount: int) -> void:
+	_r_points.rpc_id(peer, amount)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _r_points(amount: int) -> void:
+	GameState.points += clampi(amount, 0, 5000)
+	GameState.points_changed.emit(GameState.points, amount)
+	GameState.play_sfx("buy_ching", -2.0, 1.2)
+	player.status_banner_requested.emit("%s SENT YOU %d POINTS" % [Net.player_name(multiplayer.get_remote_sender_id()), amount], Color(0.95, 0.85, 0.35))
 
 
 @rpc("authority", "call_remote", "reliable")
