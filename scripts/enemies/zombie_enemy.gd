@@ -307,11 +307,13 @@ func _build_3d_audio(height: float) -> void:
 	step_audio_3d.bus = &"Zombies"
 	step_audio_3d.position = Vector3(0, 0.15, 0)
 	step_audio_3d.max_polyphony = 2
-	step_audio_3d.unit_size = 8.0 if is_boss else 3.0
-	step_audio_3d.max_distance = 32.0 if is_boss else 16.5
-	step_audio_3d.volume_db = 1.0 if is_boss else -4.8
-	step_audio_3d.attenuation_filter_cutoff_hz = 3800.0 if is_boss else 2800.0
-	step_audio_3d.attenuation_filter_db = -12.0 if is_boss else -18.0
+	# Footsteps should be clearly heard: you can tell where the horde is coming from
+	step_audio_3d.unit_size = 10.0 if is_boss else 6.0
+	step_audio_3d.max_distance = 40.0 if is_boss else 26.0
+	step_audio_3d.volume_db = 5.0 if is_boss else 2.0
+	step_audio_3d.attenuation_filter_cutoff_hz = 6000.0 if is_boss else 5000.0
+	step_audio_3d.attenuation_filter_db = -8.0
+	step_audio_3d.max_polyphony = 3
 	add_child(step_audio_3d)
 
 	roar_audio_3d = AudioStreamPlayer3D.new()

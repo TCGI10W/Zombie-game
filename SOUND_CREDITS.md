@@ -11,7 +11,7 @@ All sound effects come from [Freesound](https://freesound.org) under the **Creat
 | board_tear | [Crack of branch 3.wav](https://freesound.org/people/deleted_user_2104797/sounds/164472/) | deleted_user_2104797 |
 | bolt_cycle | [guncock.wav](https://freesound.org/people/j1987/sounds/107793/) | j1987 |
 | boss_roar | [DRAGON_ROAR.wav](https://freesound.org/people/JoelAudio/sounds/85568/) | JoelAudio |
-| boss_step | [Big robot footstep](https://freesound.org/people/AudioPapkin/sounds/813056/) | AudioPapkin |
+| boss_step | [Big robot footstep 005](https://freesound.org/people/AudioPapkin/sounds/815039/) | AudioPapkin |
 | buy_ching | [Cash Register Purchase](https://freesound.org/people/Zott820/sounds/209578/) | Zott820 |
 | carpenter | [hammering 2.wav](https://freesound.org/people/cognito%20perceptu/sounds/17012/) | cognito perceptu |
 | crate_open | [Wooden Creak](https://freesound.org/people/Mafon2/sounds/377552/) | Mafon2 |
@@ -94,5 +94,5 @@ All sound effects come from [Freesound](https://freesound.org) under the **Creat
 | zombie_groan | [Burp Monster Zombie groan moan](https://freesound.org/people/EricsSoundschmiede/sounds/463721/) | EricsSoundschmiede |
 | zombie_roar_1 | [Zombie gargles](https://freesound.org/people/Breviceps/sounds/445983/) | Breviceps |
 | zombie_roar_2 | [Zombie Demon Scream](https://freesound.org/people/Wakerone/sounds/435651/) | Wakerone |
-| zombie_step_1 | [dirt/gravel footstep 1](https://freesound.org/people/Yoyodaman234/sounds/166511/) | Yoyodaman234 |
-| zombie_step_2 | [Step On Dirt](https://freesound.org/people/LilMati/sounds/370367/) | LilMati |
+| zombie_step_1 | [gravel scrape](https://freesound.org/people/wjb_88/sounds/828864/) | wjb_88 |
+| zombie_step_2 | [MUS136_YSwanson+ARaneses_Week2 Foot Drag.wav](https://freesound.org/people/araneses/sounds/617438/) | araneses |

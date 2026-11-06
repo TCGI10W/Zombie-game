@@ -37,7 +37,7 @@ S = {
     "board_tear": ("wood break crack", 0.3, 3, "shot", 0),
     "bolt_cycle": ("rifle bolt action", 0.3, 2.5, "shot", 0),
     "boss_roar": ("monster growl", 1, 6, "shot", 0),
-    "boss_step": ("giant footstep", 0.2, 2.5, "shot", 0),
+    "boss_step": ("heavy footstep stomp", 0.2, 2.5, "shot", 0),
     "buy_ching": ("cash register", 0.3, 3, "shot", 0),
     "carpenter": ("hammering nails", 1, 8, "shot", 0),
     "crate_open": ("chest open", 0.5, 4, "shot", 0),
@@ -120,12 +120,14 @@ S = {
     "zombie_groan": ("zombie moan", 1, 6, "shot", 0),
     "zombie_roar_1": ("zombie roar", 0.8, 4, "shot", 0),
     "zombie_roar_2": ("zombie scream", 0.8, 4, "shot", 0),
-    "zombie_step_1": ("footsteps dirt", 0.1, 1.5, "shot", 0),
-    "zombie_step_2": ("footsteps dirt", 0.1, 1.5, "shot", 1),
+    "zombie_step_1": ("footstep drag", 0.2, 1.5, "shot", 0),
+    "zombie_step_2": ("footstep drag", 0.2, 1.5, "shot", 1),
 }
 # Max kept length for one-shots (seconds); loops keep LOOP_LEN
-CAP = {"exfil_siren": 6.0, "bell_far": 6.0, "thunder_far": 7.0, "train_horn": 4.0, "lightning_strike": 4.0, "grenade_explode": 3.0,
+CAP = {"zombie_step_1": 0.32, "zombie_step_2": 0.32, "player_step_1": 0.35, "player_step_2": 0.35, "boss_step": 0.6, "exfil_siren": 6.0, "bell_far": 6.0, "thunder_far": 7.0, "train_horn": 4.0, "lightning_strike": 4.0, "grenade_explode": 3.0,
        "exfil_success": 6.0, "radio_call": 4.0, "boss_roar": 3.5, "monster_roar": 3.0}
+# Extra loudness on top of the old level (old synthesized steps were very quiet)
+GAIN = {"zombie_step_1": 2.2, "zombie_step_2": 2.2, "boss_step": 1.6}
 LOOP_LEN = {"heli_loop": 4.0, "hum_loop": 4.0, "flare_burn": 4.0}
 DEFAULT_SHOT_CAP = 2.5
 
@@ -269,7 +271,7 @@ def main():
                 x = trim(x)
                 x = x[: int(CAP.get(name, DEFAULT_SHOT_CAP) * SR)]
                 x = fade(x)
-            write(name, x, target if target else 0.18)
+            write(name, x, (target if target else 0.18) * GAIN.get(name, 1.0))
             if name == "rain_loop":  # indoor version: muffled
                 write("rain_indoor_loop", lowpass(x, 600.0), old_rms("rain_indoor_loop") or 0.12)
             print("ok %-20s <- #%d %s (%s)" % (name, p["id"], p["name"][:50], p["user"]))
