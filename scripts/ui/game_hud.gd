@@ -734,7 +734,7 @@ func _connect_signals() -> void:
 	player.hitmarker_triggered.connect(_on_hitmarker)
 	player.kill_streak.connect(_on_kill_streak)
 	player.status_banner_requested.connect(_show_banner)
-	player.interact_prompt_changed.connect(func(txt: String): interact_lbl.text = txt)
+	player.interact_prompt_changed.connect(func(txt: String): interact_lbl.text = GameState.keyify(txt))
 	player.player_died.connect(_on_player_died)
 	player.damaged.connect(_on_player_damaged)
 	player.stats_changed.connect(_refresh_stats_line)
@@ -996,19 +996,19 @@ func _update_skill_cards() -> void:
 				else:
 					skill_f_state.text = "AOE + 4.0s STUN (READY!)"
 			else:
-				skill_q_title.text = "[Q] FERAL LUNGE SLASH"
-				skill_q_state.text = ("CD %.1fs" % player.human_lunge_cd) if player.human_lunge_cd > 0.0 else "READY (-4s Beast CD)"
-				skill_f_title.text = "[F] MONSTER TRANSFORM"
+				skill_q_title.text = GameState.keyify("[Q] FERAL LUNGE SLASH")
+				skill_q_state.text = ("CD %.1fs" % player.human_lunge_cd) if player.human_lunge_cd > 0.0 else "READY"
+				skill_f_title.text = GameState.keyify("[F] MONSTER TRANSFORM")
 				skill_f_state.text = ("RECHARGING %.1fs" % player.monster_cd) if player.monster_cd > 0.0 else "READY — PRESS [F]!"
 
 		"alchemist":
-			skill_q_title.text = "[Q] NOCICEPT-X PAIN DRUG"
+			skill_q_title.text = GameState.keyify("[Q] NOCICEPT-X PAIN DRUG")
 			if player.pain_drug_charges > 0:
 				skill_q_state.text = "%d / %d DOSES READY (FOR BOSS!)" % [player.pain_drug_charges, player.pain_drug_max]
 			else:
 				var rem := maxf(0.0, player.pain_drug_synth_time - player.pain_drug_synth_progress)
 				skill_q_state.text = "SYNTHESIZING (%.1fs)" % rem
-			skill_f_title.text = "[F] PAINKILLER STIM"
+			skill_f_title.text = GameState.keyify("[F] PAINKILLER STIM")
 			if player.stim_timer > 0.0:
 				skill_f_state.text = "ACTIVE %.1fs" % player.stim_timer
 			elif player.stim_cd > 0.0:
@@ -1017,9 +1017,9 @@ func _update_skill_cards() -> void:
 				skill_f_state.text = "READY (+HEAL & +1 DRUG)"
 
 		"warden":
-			skill_q_title.text = "[Q] TESLA CONCUSSION"
+			skill_q_title.text = GameState.keyify("[Q] TESLA CONCUSSION")
 			skill_q_state.text = ("CD %.1fs" % player.tesla_cd) if player.tesla_cd > 0.0 else "READY (AOE + 2.5s STUN)"
-			skill_f_title.text = "[F] ARC OVERCHARGE"
+			skill_f_title.text = GameState.keyify("[F] ARC OVERCHARGE")
 			if player.pap_timer > 0.0:
 				skill_f_state.text = "ACTIVE %.1fs (2.2x DMG)" % player.pap_timer
 			elif player.pap_cd > 0.0:
@@ -1190,7 +1190,7 @@ func _on_kill_streak(count: int) -> void:
 
 
 func _show_banner(txt: String, col: Color) -> void:
-	banner_lbl.text = txt
+	banner_lbl.text = GameState.keyify(txt)
 	banner_lbl.add_theme_color_override("font_color", col)
 	banner_lbl.visible = true
 	banner_timer = 3.8

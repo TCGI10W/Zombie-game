@@ -110,10 +110,10 @@ var is_monster_form: bool = false
 var monster_timer: float = 0.0
 var monster_duration: float = 18.0
 var monster_cd: float = 0.0
-var monster_cd_max: float = 24.0
+var monster_cd_max: float = 60.0
 var monster_rend_cd: float = 0.0
 var monster_slam_cd: float = 0.0
-var monster_slam_cd_max: float = 5.0
+var monster_slam_cd_max: float = 8.0
 var human_lunge_cd: float = 0.0
 
 # 2. Alchemist (Pain Drug Producer for Round Bosses + Stim)
@@ -1209,14 +1209,14 @@ func _enter_monster_form() -> void:
 	monster_claw_rig.visible = true
 	add_camera_shake(0.35)
 	GameState.play_sfx("monster_roar", 1.5, 0.95)
-	status_banner_requested.emit("RAVAGER MONSTER UNLEASHED! [LMB] 1-TARGET 480 DMG | [RMB / Q] AOE + 4s STUN!", Color(1.0, 0.25, 0.14))
+	status_banner_requested.emit("RAVAGER MONSTER UNLEASHED! [LMB] 1-TARGET 480 DMG | [RMB / Q] AOE STUN (1s + 0.2s PER ENEMY)", Color(1.0, 0.25, 0.14))
 
 
 func _exit_monster_form() -> void:
 	is_monster_form = false
 	monster_claw_rig.visible = false
 	gun_rig.visible = true
-	status_banner_requested.emit("HUMAN FORM RESTORED — KILL ZOMBIES TO RECHARGE BEAST BLOOD", Color(0.85, 0.65, 0.55))
+	status_banner_requested.emit("HUMAN FORM RESTORED — BEAST BLOOD RECHARGES IN 60s", Color(0.85, 0.65, 0.55))
 
 
 func _perform_monster_rend() -> void:
@@ -1265,24 +1265,27 @@ func _perform_monster_seismic_slam() -> void:
 
 	_spawn_aoe_ring(global_position, 8.0, Color(1.0, 0.65, 0.12))
 
-	var stunned_count := 0
+	var caught: Array[ZombieEnemy] = []
 	var any_kill := false
 	for node in get_tree().get_nodes_in_group("enemies"):
 		var z_node := node as ZombieEnemy
-		if z_node and not z_node.is_dead:
-			var d := global_position.distance_to(z_node.global_position)
-			if d <= 8.0:
-				var res: Dictionary = z_node.take_damage(35.0 * dmg_mult(), z_node.global_position + Vector3(0, 1.0, 0), true)
-				z_node.apply_stun(4.0)
-				stunned_count += 1
-				if res["killed"]:
-					any_kill = true
-					_on_enemy_killed_by_player(z_node, false)
+		if z_node and not z_node.is_dead and global_position.distance_to(z_node.global_position) <= 8.0:
+			var res: Dictionary = z_node.take_damage(35.0 * dmg_mult(), z_node.global_position + Vector3(0, 1.0, 0), true)
+			if res["killed"]:
+				any_kill = true
+				_on_enemy_killed_by_player(z_node, false)
+			elif not z_node.is_boss:
+				caught.append(z_node)
+	# Stun grows with the crowd: 1 s base + 0.2 s for each enemy stunned
+	var stun := 1.0 + 0.2 * float(caught.size())
+	for z_node in caught:
+		z_node.apply_stun(stun)
 
-	if stunned_count > 0:
-		GameState.add_points(stunned_count * 15)
+	if not caught.is_empty() or any_kill:
+		GameState.add_points(caught.size() * 15)
 		hitmarker_triggered.emit(false, any_kill, true)
-		status_banner_requested.emit("SEISMIC SLAM! %d TARGETS STUNNED FOR 4.0 SECONDS!" % stunned_count, Color(1.0, 0.78, 0.18))
+	if not caught.is_empty():
+		status_banner_requested.emit("SEISMIC SLAM! %d STUNNED FOR %.1f s" % [caught.size(), stun], Color(1.0, 0.78, 0.18))
 
 
 func _perform_human_feral_slash() -> void:
@@ -1291,7 +1294,6 @@ func _perform_human_feral_slash() -> void:
 	var target := _find_single_melee_target(4.2, 0.45)
 	if target:
 		var res := target.take_damage(175.0 * dmg_mult(), target.global_position + Vector3(0, 1.2, 0), true)
-		monster_cd = maxf(0.0, monster_cd - 4.0)
 		_spawn_slash_burst(target.global_position + Vector3(0, 1.2, 0), Color(1.0, 0.25, 0.15))
 		if res["killed"]:
 			_on_enemy_killed_by_player(target, false)
@@ -1403,7 +1405,7 @@ func _fire_tesla_charge() -> void:
 		if z_node and not z_node.is_dead:
 			if z_node.global_position.distance_to(blast_pt) <= 6.2:
 				var res: Dictionary = z_node.take_damage(150.0 * dmg_mult(), z_node.global_position + Vector3(0, 1.1, 0), true, "electric")
-				z_node.apply_stun(2.5)
+				z_node.apply_stun(1.0 if z_node.is_boss else 2.5, true)
 				hit_cnt += 1
 				if res["killed"]:
 					any_kill = true
@@ -1437,9 +1439,7 @@ func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 	if was_headshot:
 		GameState.headshots += 1
 		GameState.play_sfx("headshot_ding", -2.5, randf_range(0.96, 1.05))
-	if char_id == "ravager" and not is_monster_form:
-		monster_cd = maxf(0.0, monster_cd - 1.8)
-	elif char_id == "alchemist" and pain_drug_charges < pain_drug_max:
+	if char_id == "alchemist" and pain_drug_charges < pain_drug_max:
 		pain_drug_synth_progress += 1.6
 
 

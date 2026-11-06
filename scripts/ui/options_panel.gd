@@ -31,6 +31,13 @@ func _ready() -> void:
 	_choice("GRAPHICS", ["LOW (FASTEST)", "MEDIUM", "HIGH"], GameState.graphics_quality, func(i: int):
 		GameState.graphics_quality = i
 		GameState.apply_graphics())
+	var res_opts: Array = GameState.resolution_options()
+	var res_names: Array = []
+	for r in res_opts:
+		res_names.append("NATIVE (SCREEN)" if r == "native" else String(r).replace("x", " x "))
+	_choice("RESOLUTION", res_names, maxi(0, res_opts.find(GameState.resolution)), func(i: int):
+		GameState.resolution = res_opts[i]
+		GameState.apply_graphics())
 	_toggle("FULLSCREEN", GameState.fullscreen, func(on: bool):
 		GameState.fullscreen = on
 		GameState.apply_graphics())
@@ -48,6 +55,82 @@ func _ready() -> void:
 		GameState.show_crosshair = on)
 	_toggle("DAMAGE NUMBERS", GameState.damage_numbers, func(on: bool):
 		GameState.damage_numbers = on)
+	_build_keys()
+
+
+# ---------------------------------------------------------------------------
+# KEY BINDINGS: click a key, then press the new key or mouse button (Esc cancels)
+# ---------------------------------------------------------------------------
+var _listening: String = ""
+var _listen_btn: Button
+var _key_buttons: Dictionary = {}
+
+
+func _build_keys() -> void:
+	_section("KEY BINDINGS")
+	var hint := Label.new()
+	hint.text = "Click a key, then press the new key or mouse button. Esc cancels. Taken keys swap."
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", Color(0.6, 0.64, 0.7))
+	add_child(hint)
+	for pair in GameState.REBINDABLE:
+		var action: String = pair[0]
+		var h := _row(pair[1])
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(160, 30)
+		b.focus_mode = Control.FOCUS_NONE
+		b.text = GameState.key_label(action)
+		b.pressed.connect(func(): _start_listen(action, b))
+		h.add_child(b)
+		_key_buttons[action] = b
+	var reset := Button.new()
+	reset.text = "RESET KEYS TO DEFAULT"
+	reset.custom_minimum_size = Vector2(0, 32)
+	reset.focus_mode = Control.FOCUS_NONE
+	reset.pressed.connect(func():
+		GameState.reset_key_binds()
+		_refresh_keys())
+	add_child(reset)
+
+
+func _start_listen(action: String, b: Button) -> void:
+	if _listen_btn:
+		_listen_btn.text = GameState.key_label(_listening)
+	_listening = action
+	_listen_btn = b
+	b.text = "PRESS A KEY..."
+
+
+func _refresh_keys() -> void:
+	for action in _key_buttons:
+		(_key_buttons[action] as Button).text = GameState.key_label(action)
+
+
+func _input(event: InputEvent) -> void:
+	if _listening == "" or not is_visible_in_tree():
+		return
+	var code := ""
+	if event is InputEventKey and event.pressed and not event.echo:
+		var k := event as InputEventKey
+		if k.physical_keycode == KEY_ESCAPE:
+			get_viewport().set_input_as_handled()
+			_listen_btn.text = GameState.key_label(_listening)
+			_listening = ""
+			_listen_btn = null
+			return
+		code = "k:%d" % (k.physical_keycode if k.physical_keycode != 0 else k.keycode)
+	elif event is InputEventMouseButton and event.pressed:
+		var mb := (event as InputEventMouseButton).button_index
+		if mb == MOUSE_BUTTON_WHEEL_UP or mb == MOUSE_BUTTON_WHEEL_DOWN:
+			return
+		code = "m:%d" % mb
+	if code == "":
+		return
+	get_viewport().set_input_as_handled()
+	GameState.rebind(_listening, code)
+	_listening = ""
+	_listen_btn = null
+	_refresh_keys()
 
 
 func _row(label: String) -> HBoxContainer:

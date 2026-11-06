@@ -510,6 +510,8 @@ func _physics_process(delta: float) -> void:
 
 	var speed_mult := 0.55 if pain_drug_timer > 0.0 else 1.0
 	var rate_mult := 0.55 if pain_drug_timer > 0.0 else 1.0
+	if is_boss:
+		rate_mult *= 1.2 # bosses attack 20% more often
 
 	# Periodic 3D Zombie & Boss Roars while hunting the player!
 	roar_timer -= delta
@@ -1180,13 +1182,14 @@ func _hit_region(p: Vector3) -> String:
 	return "torso"
 
 
-func apply_stun(duration: float) -> void:
-	if is_dead:
+# Bosses shrug off stuns; only a special operator ability (boss_ok) holds them.
+func apply_stun(duration: float, boss_ok: bool = false) -> void:
+	if is_dead or (is_boss and not boss_ok):
 		return
 	if net_puppet:
 		var ng := _net_game()
 		if ng:
-			ng.forward_status(self, "stun", duration)
+			ng.forward_status(self, "boss_stun" if boss_ok else "stun", duration)
 		return
 	stun_timer = maxf(stun_timer, duration)
 	# Interrupt any Boss windup / laser lock immediately!

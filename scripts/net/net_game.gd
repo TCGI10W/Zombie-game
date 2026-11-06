@@ -556,6 +556,8 @@ func _s_status(id: int, kind: String, duration: float) -> void:
 		return
 	if kind == "stun":
 		z.apply_stun(duration)
+	elif kind == "boss_stun":
+		z.apply_stun(duration, true)
 	else:
 		z.apply_pain_drug(duration)
 

@@ -393,9 +393,12 @@ func _spawn_round_boss(round_num: int) -> void:
 	enemies_container.add_child(boss)
 	boss.global_position = arena.get_boss_spawn(_focus_pos())
 	boss.setup_boss(cfg)
-	boss.max_hp *= (1.0 + 0.65 * float(Net.player_count() - 1)) * GameState.diff_hp_mult()
+	# Bosses are tougher: +70% health, +30% damage, faster, more armor
+	boss.max_hp *= 1.7 * (1.0 + 0.65 * float(Net.player_count() - 1)) * GameState.diff_hp_mult()
 	boss.hp = boss.max_hp
-	boss.base_damage *= GameState.diff_dmg_mult()
+	boss.base_damage *= 1.3 * GameState.diff_dmg_mult()
+	boss.base_speed *= 1.12
+	boss.endurance = minf(0.6, boss.endurance + 0.08)
 	boss.set_meta("final", bool(cfg.get("final", false)))
 	boss.target_player = _nearest_player(boss.global_position)
 	if is_instance_valid(boss.target_player):

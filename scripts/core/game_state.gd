@@ -28,6 +28,8 @@ var master_volume: float = 0.8
 var sfx_volume: float = 1.0
 var invert_y: bool = false
 var fullscreen: bool = false
+var resolution: String = "native" # "native" or "WxH"
+var key_binds: Dictionary = {} # action -> "k:<physical keycode>" or "m:<mouse button>"
 var show_crosshair: bool = true
 var damage_numbers: bool = true
 var game_mode: String = "casual" # "casual" (ends at round 20) or "infinite"
@@ -301,6 +303,9 @@ func load_save() -> void:
 		sfx_volume = float(cfg.get_value("settings", "sfx_volume", 1.0))
 		invert_y = bool(cfg.get_value("settings", "invert_y", false))
 		fullscreen = bool(cfg.get_value("settings", "fullscreen", false))
+		resolution = String(cfg.get_value("settings", "resolution", "native"))
+		key_binds = cfg.get_value("settings", "key_binds", {})
+		_apply_key_binds()
 		show_crosshair = bool(cfg.get_value("settings", "show_crosshair", true))
 		damage_numbers = bool(cfg.get_value("settings", "damage_numbers", true))
 		game_mode = String(cfg.get_value("settings", "game_mode", "casual"))
@@ -326,6 +331,8 @@ func write_save() -> void:
 	cfg.set_value("settings", "sfx_volume", sfx_volume)
 	cfg.set_value("settings", "invert_y", invert_y)
 	cfg.set_value("settings", "fullscreen", fullscreen)
+	cfg.set_value("settings", "resolution", resolution)
+	cfg.set_value("settings", "key_binds", key_binds)
 	cfg.set_value("settings", "show_crosshair", show_crosshair)
 	cfg.set_value("settings", "damage_numbers", damage_numbers)
 	cfg.set_value("settings", "game_mode", game_mode)
@@ -387,8 +394,155 @@ func _setup_input_map() -> void:
 	_bind_keys("crouch", [KEY_C, KEY_CTRL])
 	_bind_keys("melee", [KEY_V])
 	_bind_keys("grenade", [KEY_G])
+	_bind_keys("throw_c4", [KEY_T])
+	_bind_keys("place_mine", [KEY_B])
+	_bind_keys("borrowed_skill", [KEY_X])
+	_bind_keys("borrowed_skill_2", [KEY_Z])
 	_bind_mouse("fire", MOUSE_BUTTON_LEFT)
 	_bind_mouse("aim", MOUSE_BUTTON_RIGHT)
+
+
+# ---------------------------------------------------------------------------
+# KEY BINDINGS: the first binding of each action can be changed in Options
+# ---------------------------------------------------------------------------
+const REBINDABLE := [
+	["move_forward", "MOVE FORWARD"], ["move_back", "MOVE BACK"], ["move_left", "MOVE LEFT"], ["move_right", "MOVE RIGHT"],
+	["jump", "JUMP"], ["sprint", "SPRINT"], ["crouch", "CROUCH / SLIDE"], ["fire", "SHOOT"], ["aim", "AIM"],
+	["reload", "RELOAD"], ["interact", "INTERACT / BUY"], ["melee", "KNIFE"], ["grenade", "GRENADE"],
+	["skill_1", "SKILL 1"], ["skill_2", "SKILL 2 (ULTIMATE)"], ["weapon_1", "WEAPON 1"], ["weapon_2", "WEAPON 2"],
+	["throw_c4", "C4 (TAP / HOLD)"], ["place_mine", "PLACE MINE"], ["borrowed_skill", "RELIC SKILL 1"], ["borrowed_skill_2", "RELIC SKILL 2"],
+]
+var _default_events: Dictionary = {}
+
+
+func _event_code(ev: InputEvent) -> String:
+	if ev is InputEventKey:
+		var k := ev as InputEventKey
+		return "k:%d" % (k.physical_keycode if k.physical_keycode != 0 else k.keycode)
+	if ev is InputEventMouseButton:
+		return "m:%d" % (ev as InputEventMouseButton).button_index
+	return ""
+
+
+func _event_from_code(code: String) -> InputEvent:
+	var parts := code.split(":")
+	if parts.size() != 2:
+		return null
+	if parts[0] == "k":
+		var k := InputEventKey.new()
+		k.physical_keycode = int(parts[1]) as Key
+		return k
+	var m := InputEventMouseButton.new()
+	m.button_index = int(parts[1]) as MouseButton
+	return m
+
+
+func key_code(action: String) -> String:
+	if key_binds.has(action):
+		return String(key_binds[action])
+	var evs: Array = InputMap.action_get_events(action) if InputMap.has_action(action) else []
+	return _event_code(evs[0]) if not evs.is_empty() else ""
+
+
+func key_label(action: String) -> String:
+	var code := key_code(action)
+	if code.begins_with("m:"):
+		match int(code.substr(2)):
+			MOUSE_BUTTON_LEFT: return "LMB"
+			MOUSE_BUTTON_RIGHT: return "RMB"
+			MOUSE_BUTTON_MIDDLE: return "MMB"
+			MOUSE_BUTTON_XBUTTON1: return "MOUSE 4"
+			MOUSE_BUTTON_XBUTTON2: return "MOUSE 5"
+		return "MOUSE %s" % code.substr(2)
+	if code.begins_with("k:"):
+		var phys := int(code.substr(2)) as Key
+		var shown := DisplayServer.keyboard_get_keycode_from_physical(phys) if DisplayServer.get_name() != "headless" else phys
+		return OS.get_keycode_string(shown).to_upper()
+	return "?"
+
+
+# Puts `code` on `action`. If another action used that input, it gets this
+# action's old input (a swap), so nothing is left unbound.
+func rebind(action: String, code: String) -> void:
+	var old := key_code(action)
+	for pair in REBINDABLE:
+		var other: String = pair[0]
+		if other != action and key_code(other) == code:
+			key_binds[other] = old
+	key_binds[action] = code
+	_apply_key_binds()
+	write_save()
+
+
+func reset_key_binds() -> void:
+	key_binds.clear()
+	_apply_key_binds()
+	write_save()
+
+
+func _apply_key_binds() -> void:
+	for pair in REBINDABLE:
+		var action: String = pair[0]
+		if not InputMap.has_action(action):
+			continue
+		if not _default_events.has(action):
+			_default_events[action] = InputMap.action_get_events(action)
+		InputMap.action_erase_events(action)
+		var defaults: Array = _default_events[action]
+		if key_binds.has(action):
+			var ev := _event_from_code(String(key_binds[action]))
+			if ev:
+				InputMap.action_add_event(action, ev)
+			# keep the alternate default keys (arrow keys, Ctrl) unless taken elsewhere
+			for i in range(1, defaults.size()):
+				InputMap.action_add_event(action, defaults[i])
+		else:
+			for d in defaults:
+				InputMap.action_add_event(action, d)
+
+
+# Swaps default key letters like "[E]" in on-screen text for the player's keys.
+const _KEY_HINTS := {"E": "interact", "Q": "skill_1", "F": "skill_2", "R": "reload", "G": "grenade", "V": "melee",
+	"T": "throw_c4", "B": "place_mine", "X": "borrowed_skill", "Z": "borrowed_skill_2"}
+
+
+func keyify(text: String) -> String:
+	if key_binds.is_empty() or text.find("[") < 0:
+		return text
+	# One pass over the text so swapped keys don't undo each other
+	var re := RegEx.create_from_string("\\[([A-Z])(?=[\\] /])")
+	var out := ""
+	var last := 0
+	for m in re.search_all(text):
+		var letter := m.get_string(1)
+		var action: String = _KEY_HINTS.get(letter, "")
+		if action != "" and key_binds.has(action):
+			out += text.substr(last, m.get_start() - last) + "[" + key_label(action)
+			last = m.get_end()
+	return out + text.substr(last)
+
+
+# ---------------------------------------------------------------------------
+# RESOLUTION: window size when windowed; 3D render resolution when fullscreen
+# ---------------------------------------------------------------------------
+const RESOLUTIONS := ["1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160"]
+
+
+func resolution_options() -> Array:
+	var out := ["native"]
+	var scr := DisplayServer.screen_get_size() if DisplayServer.get_name() != "headless" else Vector2i(1920, 1080)
+	for r in RESOLUTIONS:
+		var p: PackedStringArray = r.split("x")
+		if int(p[0]) <= scr.x and int(p[1]) <= scr.y:
+			out.append(r)
+	return out
+
+
+func _resolution_size() -> Vector2i:
+	if resolution == "native" or not "x" in resolution:
+		return Vector2i.ZERO
+	var p := resolution.split("x")
+	return Vector2i(int(p[0]), int(p[1]))
 
 
 func _bind_keys(action: String, keys: Array) -> void:
@@ -630,7 +784,19 @@ func apply_graphics() -> void:
 	vp.msaa_3d = Viewport.MSAA_2X if q == 2 else Viewport.MSAA_DISABLED
 	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
 	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR if q == 0 else Viewport.SCALING_3D_MODE_BILINEAR
-	vp.scaling_3d_scale = 0.75 if q == 0 else 1.0
+	var res := _resolution_size()
+	var render_scale := 1.0
+	if DisplayServer.get_name() != "headless":
+		var scr := DisplayServer.screen_get_size()
+		if res != Vector2i.ZERO and not fullscreen:
+			# Windowed: the window itself is that size, centred on the screen
+			if DisplayServer.window_get_size() != res:
+				DisplayServer.window_set_size(res)
+				DisplayServer.window_set_position(DisplayServer.screen_get_position() + (scr - res) / 2)
+		elif res != Vector2i.ZERO and fullscreen and scr.y > 0:
+			# Fullscreen: the game renders at that resolution and is scaled to the screen
+			render_scale = clampf(float(res.y) / float(scr.y), 0.25, 1.0)
+	vp.scaling_3d_scale = render_scale * (0.75 if q == 0 else 1.0)
 	vp.positional_shadow_atlas_size = [1024, 2048, 4096][q]
 	RenderingServer.directional_shadow_atlas_set_size([1024, 2048, 4096][q], true)
 	var scene := get_tree().current_scene
