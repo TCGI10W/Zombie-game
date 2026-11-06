@@ -423,6 +423,8 @@ func _preload_audio() -> void:
 		"flesh_hit", "hit_flesh", "headshot_ding", "ricochet", "gore_splat", "shell_tink", "zombie_death", "pump_rack", "bolt_cycle",
 		"mag_out", "mag_in", "power_on", "trap_zap", "electrocute", "skull_shatter",
 		"heartbeat", "hit_tick", "kill_confirm", "low_ammo_tick", "streak_sting",
+		"rain_loop", "rain_indoor_loop", "roof_rain_loop", "wind_loop", "fire_loop", "hum_loop", "drone_loop",
+		"creak", "drip", "crow", "bell_far", "train_horn", "scream_far",
 		"hound_growl", "hound_bark", "hound_howl", "hound_bite", "hound_death", "hound_round_sting",
 		"lightning_strike", "thunder_far", "bloater_pop", "player_cough", "player_downed", "second_wind",
 		"heli_loop", "flare_ignite", "flare_burn", "radio_call", "radio_beep", "exfil_siren", "exfil_success",

@@ -40,6 +40,10 @@ func _ready() -> void:
 	add_child(weather)
 	weather.setup(arena.world_env)
 	wave_mgr.weather = weather
+	var atmo: Node3D = (load("res://scripts/world/atmosphere.gd") as GDScript).new()
+	atmo.name = "Atmosphere"
+	add_child(atmo)
+	atmo.setup(arena, weather)
 
 	hud.setup(player, wave_mgr)
 	if GameState.pending_resume and not Net.is_online():
