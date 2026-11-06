@@ -572,6 +572,7 @@ func _handle_movement(delta: float) -> void:
 			is_crouching = false
 		else:
 			velocity.y = JUMP_VEL
+			_try_vault(wish)
 			vm_vel.y -= 0.32
 			cam_spring_vel.y -= 0.25
 			if is_sliding:
@@ -580,6 +581,9 @@ func _handle_movement(delta: float) -> void:
 
 	if not on_floor:
 		velocity.y -= GRAVITY * delta
+		air_grace = 0.2
+	else:
+		air_grace = maxf(0.0, air_grace - delta)
 
 	if is_sliding:
 		# Momentum slide: keeps the speed you came in with and loses it to friction,
@@ -2285,6 +2289,7 @@ var c4_count: int = 0
 var perks: Dictionary = {}
 var adrenaline_timer: float = 0.0
 var trap_slow_t: float = 0.0 # standing in a zombie trap
+var air_grace: float = 0.0 # counts as in the air (dodging ground attacks) a moment after landing
 var mag_lv: int = 0 # Supply Depot: bigger magazines
 var reserve_lv: int = 0 # Supply Depot: more spare ammo
 var last_stand_cd: float = 0.0
@@ -2310,6 +2315,44 @@ func hit_stop(dur: float, scale: float) -> void:
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
+
+
+# Jumping into a waist/chest-high obstacle vaults over it: enough lift to clear
+# the top plus a push forward so you carry over instead of bumping into it.
+func _try_vault(wish: Vector3) -> void:
+	var fwd := wish if wish != Vector3.ZERO else -global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var space := get_world_3d().direct_space_state
+	var feet := global_position
+	var ex := [get_rid()]
+	var near := 99.0
+	for h in [0.35, 0.8]:
+		var q := PhysicsRayQueryParameters3D.create(feet + Vector3(0, h, 0), feet + Vector3(0, h, 0) + fwd * 2.2, 1, ex)
+		var r := space.intersect_ray(q)
+		if not r.is_empty():
+			near = minf(near, (r["position"] - feet).length())
+	if near > 2.2:
+		return
+	# Something at head height means a wall, not a vault
+	var qh := PhysicsRayQueryParameters3D.create(feet + Vector3(0, 2.05, 0), feet + Vector3(0, 2.05, 0) + fwd * (near + 0.6), 1, ex)
+	if not space.intersect_ray(qh).is_empty():
+		return
+	# Find the top of the obstacle
+	var probe := feet + fwd * (near + 0.3) + Vector3(0, 2.2, 0)
+	var qd := PhysicsRayQueryParameters3D.create(probe, probe - Vector3(0, 2.4, 0), 1, ex)
+	var hit := space.intersect_ray(qd)
+	if hit.is_empty():
+		return
+	var rise: float = hit["position"].y - feet.y
+	if rise < 0.3 or rise > 1.8:
+		return
+	velocity.y = maxf(velocity.y, sqrt(2.0 * GRAVITY * (rise + 0.4)))
+	var flat := Vector3(velocity.x, 0, velocity.z)
+	var push := maxf(flat.dot(fwd), 4.6)
+	velocity.x = fwd.x * push
+	velocity.z = fwd.z * push
+	GameState.play_sfx("slide", -10.0, 1.3)
 
 
 func has_perk(id: String) -> bool:

@@ -873,7 +873,7 @@ func _execute_gorilla_slam() -> void:
 	_spawn_shockwave_ring(slam_target_pos, 5.0, Color(1.0, 0.36, 0.10))
 	if is_instance_valid(target_player):
 		var d := Vector2(target_player.global_position.x - slam_target_pos.x, target_player.global_position.z - slam_target_pos.z).length()
-		if d <= 5.0:
+		if d <= 5.0 and not ZombieEnemy.is_airborne(target_player):
 			var dmg := base_damage * (0.45 if pain_drug_timer > 0.0 else 1.0)
 			if target_player.has_method("take_damage"):
 				target_player.take_damage(dmg, slam_target_pos)
@@ -939,7 +939,9 @@ func _spawn_acid_pool(target_pos: Vector3, dmg_per_tick: float, radius: float = 
 	for i in range(10):
 		tw.tween_callback(func():
 			if is_instance_valid(pool) and is_instance_valid(victim):
-				if pool.global_position.distance_to(victim.global_position) < radius + 0.05:
+				var flat := Vector2(victim.global_position.x - pool.global_position.x, victim.global_position.z - pool.global_position.z).length()
+				# Jumping over the acid dodges it
+				if flat < radius + 0.05 and not ZombieEnemy.is_airborne(victim):
 					victim.take_damage(dmg_per_tick, pool.global_position)
 		)
 		tw.tween_interval(0.55)
@@ -1879,3 +1881,11 @@ func _smart_dir(move_dir: Vector3, flat_dist: float, delta: float) -> Vector3:
 				var side := move_dir.cross(Vector3.UP).normalized()
 				return (move_dir + side * sin(_zig) * (0.6 + 0.15 * float(tier))).normalized()
 	return move_dir
+
+
+
+# In the air (jumping) = ground attacks like acid pools and slams miss you
+static func is_airborne(p: Node3D) -> bool:
+	if p is CharacterBody3D:
+		return not (p as CharacterBody3D).is_on_floor() or float(p.get("air_grace") if p.get("air_grace") != null else 0.0) > 0.0
+	return p.global_position.y > 0.6 # teammates' avatars: judge by height
