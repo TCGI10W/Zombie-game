@@ -360,7 +360,7 @@ func start_game(resume: bool = false) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func _c_start_game(diff: int, rid: int = 0, resume: bool = false, late: bool = false, mode: String = "casual") -> void:
-	GameState.difficulty = clampi(diff, 0, 2)
+	GameState.difficulty = clampi(diff, 0, GameState.DIFFICULTIES.size() - 1)
 	GameState.game_mode = mode if mode in ["casual", "infinite"] else "casual"
 	in_game = true
 	GameState.reset_run()

@@ -21,6 +21,7 @@ var _content_title: Label
 var _char_cards: Dictionary = {}
 var _mode_cards: Dictionary = {}
 var _diff_buttons: Array[Button] = []
+var _diff_info: Label
 var _detail_name: Label
 var _detail_code: Label
 var _detail_summary: Label
@@ -348,15 +349,18 @@ func _build_play_page() -> Control:
 		_mode_cards[mid] = b
 
 	_header(v, "DIFFICULTY")
-	var drow := HBoxContainer.new()
-	drow.add_theme_constant_override("separation", 8)
+	var drow := GridContainer.new()
+	drow.columns = 4
+	drow.add_theme_constant_override("h_separation", 8)
+	drow.add_theme_constant_override("v_separation", 8)
 	v.add_child(drow)
-	var notes := ["x0.75 SCORE", "x1 SCORE", "x1.5 SCORE"]
-	for i in range(3):
+	for i in range(GameState.DIFFICULTIES.size()):
 		var b := Button.new()
-		b.text = "%s\n%s" % [GameState.DIFFICULTY_NAMES[i], notes[i]]
-		b.custom_minimum_size = Vector2(0, 54)
+		b.text = "%s\nSCORE x%s" % [GameState.DIFFICULTY_NAMES[i], str(snappedf(float(GameState.DIFFICULTIES[i]["score"]), 0.01))]
+		b.custom_minimum_size = Vector2(0, 50)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if i >= 3:
+			b.add_theme_color_override("font_color", Color(1.0, 0.55, 0.4).lerp(Color(1.0, 0.2, 0.2), float(i - 3) / 3.0))
 		var idx := i
 		b.pressed.connect(func():
 			GameState.difficulty = idx
@@ -364,6 +368,11 @@ func _build_play_page() -> Control:
 			_refresh_play())
 		drow.add_child(b)
 		_diff_buttons.append(b)
+	_diff_info = Label.new()
+	_diff_info.add_theme_font_size_override("font_size", 14)
+	_diff_info.add_theme_color_override("font_color", Color(0.82, 0.85, 0.9))
+	_diff_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(_diff_info)
 
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 6)
@@ -394,6 +403,8 @@ func _refresh_play() -> void:
 	for i in range(_diff_buttons.size()):
 		var on: bool = i == GameState.difficulty
 		_diff_buttons[i].add_theme_stylebox_override("normal", _box(Color(0.2, 0.08, 0.07, 0.95) if on else Color(0.07, 0.08, 0.1, 0.92), ACCENT if on else Color(1, 1, 1, 0.08), 2 if on else 1))
+	if _diff_info:
+		_diff_info.text = "%s:   %s" % [GameState.DIFFICULTY_NAMES[GameState.difficulty], "   •   ".join(GameState.diff_lines(GameState.difficulty))]
 	if _coop_settings:
 		_coop_settings.text = "SQUAD SETTINGS (HOST'S CHOICE, SET ON THE PLAY PAGE): %s • %s • YOUR OPERATOR: %s" % [MODES[GameState.game_mode]["name"], GameState.DIFFICULTY_NAMES[GameState.difficulty], GameState.CHARACTERS[GameState.selected_character]["name"]]
 

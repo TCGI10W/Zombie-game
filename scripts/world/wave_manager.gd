@@ -78,7 +78,7 @@ func start_round(round_num: int) -> void:
 	var crowd := 1.0 + 0.55 * float(n - 1)
 	in_intermission = false
 	drops_this_round = 0
-	zombies_to_spawn = int(round(float(6 + round_num * 3) * crowd))
+	zombies_to_spawn = int(round(float(6 + round_num * 3) * crowd * GameState.diff("crowd")))
 	hounds_to_spawn = 0
 	if hound_round:
 		zombies_to_spawn = 0
@@ -295,11 +295,12 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	var variant := forced_variant
 	if variant == "":
 		var roll := randf()
-		if round_num >= 10 and randf() < 0.1 and _count_alive("spitter") < 3:
+		var sp := GameState.diff("special")
+		if round_num >= 10 and randf() < 0.1 * sp and _count_alive("spitter") < int(3 * sp):
 			variant = "spitter"
-		elif round_num >= 10 and randf() < 0.12 and _count_alive("shielded") < 4:
+		elif round_num >= 10 and randf() < 0.12 * sp and _count_alive("shielded") < int(4 * sp):
 			variant = "shielded"
-		elif round_num >= 6 and randf() < 0.07 and _count_alive("bloater") < 2:
+		elif round_num >= 6 and randf() < 0.07 * sp and _count_alive("bloater") < int(2 * sp):
 			variant = "bloater"
 		elif round_num >= 3 and roll < 0.22:
 			variant = "armored"
@@ -325,6 +326,7 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	z.max_hp *= (1.0 + 0.12 * float(Net.player_count() - 1)) * GameState.diff_hp_mult()
 	z.hp = z.max_hp
 	z.base_damage *= GameState.diff_dmg_mult()
+	z.base_speed *= GameState.diff("speed")
 	z.target_player = _nearest_player(sp)
 	if window:
 		z.set_entry_window(window)
@@ -394,10 +396,10 @@ func _spawn_round_boss(round_num: int) -> void:
 	boss.global_position = arena.get_boss_spawn(_focus_pos())
 	boss.setup_boss(cfg)
 	# Bosses are tougher: +70% health, +30% damage, faster, more armor
-	boss.max_hp *= 1.7 * (1.0 + 0.65 * float(Net.player_count() - 1)) * GameState.diff_hp_mult()
+	boss.max_hp *= 1.7 * (1.0 + 0.65 * float(Net.player_count() - 1)) * GameState.diff_hp_mult() * GameState.diff("boss")
 	boss.hp = boss.max_hp
 	boss.base_damage *= 1.3 * GameState.diff_dmg_mult()
-	boss.base_speed *= 1.12
+	boss.base_speed *= 1.12 * minf(GameState.diff("speed"), 1.15)
 	boss.endurance = minf(0.6, boss.endurance + 0.08)
 	boss.set_meta("final", bool(cfg.get("final", false)))
 	boss.target_player = _nearest_player(boss.global_position)

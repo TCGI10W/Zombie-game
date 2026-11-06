@@ -507,7 +507,7 @@ func _update_timers(delta: float) -> void:
 	if regen_delay_timer > 0.0:
 		regen_delay_timer -= delta
 	elif hp < max_hp and not is_downed:
-		hp = minf(max_hp, hp + 26.0 * (1.0 + 0.15 * vit) * delta)
+		hp = minf(max_hp, hp + 26.0 * (1.0 + 0.15 * vit) * GameState.diff("regen") * delta)
 		hp_changed.emit(hp, max_hp, overshield)
 
 	if overshield > 0.0 and stim_timer <= 0.0:

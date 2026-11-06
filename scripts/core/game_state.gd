@@ -53,9 +53,9 @@ const CHARACTERS := {
 		"move_speed": 6.4,
 		"summary": "Cursed bio-soldier who mutates into a ferocious clawed Monster with 2 dedicated beast skills.",
 		"skills": [
-			"[F] MONSTER TRANSFORMATION: Morph into the Ravager Beast (18s, kills reduce CD). Swaps guns for 2 Monster Skills:",
+			"[F] MONSTER TRANSFORMATION: Morph into the Ravager Beast for 18s (60s cooldown). Swaps guns for 2 Monster Skills:",
 			"  • MONSTER SKILL 1 [LMB] — SAVAGE REND: Single-target lethal lunge dealing 480 HIGH DAMAGE to 1 target.",
-			"  • MONSTER SKILL 2 [RMB / Q] — SEISMIC SLAM: Multi-zombie shockwave dealing 35 LOW DAMAGE + 4.0s STUN!",
+			"  • MONSTER SKILL 2 [RMB / Q] — SEISMIC SLAM: Shockwave dealing 35 damage and a stun of 1s + 0.2s per zombie hit (8s cooldown, bosses immune).",
 		]
 	},
 	"alchemist": {
@@ -81,7 +81,7 @@ const CHARACTERS := {
 		"move_speed": 6.3,
 		"summary": "Veteran bunker shock-trooper armed with crowd-control arc charges and an arc weapon overcharge.",
 		"skills": [
-			"[Q] TESLA CONCUSSION CHARGE: Hurls a high-voltage arc charge dealing 150 AoE damage + 2.5s shock stun.",
+			"[Q] TESLA CONCUSSION CHARGE: Hurls a high-voltage arc charge dealing 150 AoE damage + 2.5s shock stun. The only stun that can hold a BOSS (1s).",
 			"[F] ARC OVERCHARGE: Infuses your firearm for 12s with 2.2x plasma damage & bottomless clip!",
 		]
 	}
@@ -315,7 +315,7 @@ func load_save() -> void:
 		graphics_quality = int(cfg.get_value("settings", "graphics", 2))
 		vsync_on = bool(cfg.get_value("settings", "vsync", true))
 		show_fps = bool(cfg.get_value("settings", "show_fps", false))
-		difficulty = clampi(int(cfg.get_value("settings", "difficulty", 1)), 0, 2)
+		difficulty = clampi(int(cfg.get_value("settings", "difficulty", 1)), 0, DIFFICULTIES.size() - 1)
 		career_xp = int(cfg.get_value("records", "career_xp", 0))
 	apply_volume()
 
@@ -638,7 +638,7 @@ func reset_run() -> void:
 
 func add_points(amount: int) -> void:
 	if amount > 0:
-		amount = int(round(float(amount) * points_mult))
+		amount = int(round(float(amount) * points_mult * diff("points")))
 		if is_powerup_active("double_points"):
 			amount *= 2
 	points += amount
@@ -813,7 +813,20 @@ func apply_graphics() -> void:
 # ---------------------------------------------------------------------------
 # DIFFICULTY, RUN SCORE AND CAREER PROGRESSION
 # ---------------------------------------------------------------------------
-const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD"]
+const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD", "VETERAN", "NIGHTMARE", "APOCALYPSE", "EXTINCTION"]
+# Every rule a difficulty changes, as multipliers (1.0 = Normal).
+#  hp/dmg/speed: zombies   crowd: zombies per round   special: how often special
+#  zombies appear   boss: extra boss health   regen: your health regen
+#  points: points you earn   score: run score at the end
+const DIFFICULTIES := [
+	{"hp": 0.75, "dmg": 0.7, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 0.75},
+	{"hp": 1.0, "dmg": 1.0, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.0},
+	{"hp": 1.35, "dmg": 1.3, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.5},
+	{"hp": 1.7, "dmg": 1.55, "speed": 1.08, "crowd": 1.2, "special": 1.25, "boss": 1.1, "regen": 1.0, "points": 1.0, "score": 2.0},
+	{"hp": 2.2, "dmg": 1.85, "speed": 1.15, "crowd": 1.4, "special": 1.5, "boss": 1.25, "regen": 0.8, "points": 1.0, "score": 2.75},
+	{"hp": 2.8, "dmg": 2.2, "speed": 1.22, "crowd": 1.6, "special": 2.0, "boss": 1.4, "regen": 0.65, "points": 0.9, "score": 3.5},
+	{"hp": 3.6, "dmg": 2.6, "speed": 1.3, "crowd": 1.8, "special": 2.5, "boss": 1.6, "regen": 0.5, "points": 0.8, "score": 4.5},
+]
 const FINAL_ROUND := 20
 const META_UNLOCKS := [
 	{"level": 2, "id": "points_250", "text": "+250 STARTING POINTS"},
@@ -829,16 +842,43 @@ var career_xp: int = 0
 var _run_finished: bool = false
 
 
+func diff(key: String) -> float:
+	return float(DIFFICULTIES[clampi(difficulty, 0, DIFFICULTIES.size() - 1)].get(key, 1.0))
+
+
 func diff_hp_mult() -> float:
-	return [0.75, 1.0, 1.35][difficulty]
+	return diff("hp")
 
 
 func diff_dmg_mult() -> float:
-	return [0.7, 1.0, 1.3][difficulty]
+	return diff("dmg")
 
 
 func diff_score_mult() -> float:
-	return [0.75, 1.0, 1.5][difficulty]
+	return diff("score")
+
+
+# Plain lines describing what a difficulty changes compared to Normal.
+func diff_lines(i: int) -> Array[String]:
+	var d: Dictionary = DIFFICULTIES[i]
+	var out: Array[String] = []
+	var pct := func(label: String, key: String) -> void:
+		var v := float(d.get(key, 1.0))
+		if absf(v - 1.0) > 0.001:
+			out.append("%s %s%d%%" % [label, "+" if v > 1.0 else "-", roundi(absf(v - 1.0) * 100.0)])
+	pct.call("Zombie health", "hp")
+	pct.call("Zombie damage", "dmg")
+	pct.call("Zombie speed", "speed")
+	pct.call("Zombies per round", "crowd")
+	if absf(float(d["special"]) - 1.0) > 0.001:
+		out.append("Special zombies x%s as often" % str(snappedf(float(d["special"]), 0.01)))
+	pct.call("Boss health", "boss")
+	pct.call("Your health regen", "regen")
+	pct.call("Points earned", "points")
+	if out.is_empty():
+		out.append("The standard experience")
+	out.append("Score x%s" % str(snappedf(float(d["score"]), 0.01)))
+	return out
 
 
 static func xp_for_level(level: int) -> int:
