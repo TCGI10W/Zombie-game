@@ -18,6 +18,24 @@ var base_damage: float = 22.0
 var point_reward: int = 60
 var model_scale: float = 1.0
 var _pre_hit_hp: float = 0.0
+
+# --- TIERS: 1-2 normal horde, 3+ commanders that think, talk and give orders
+const TIER_COLORS := [Color(0, 0, 0), Color(0.9, 0.9, 0.9), Color(1.0, 0.85, 0.2), Color(1.0, 0.5, 0.1), Color(1.0, 0.15, 0.12), Color(0.75, 0.25, 1.0)]
+const TIER_HP := [1.0, 1.0, 1.35, 2.4, 3.2, 4.2]
+const TIER_DMG := [1.0, 1.0, 1.2, 1.5, 1.8, 2.2]
+const TIER_SPEED := [1.0, 1.0, 1.06, 1.1, 1.15, 1.2]
+var tier: int = 1
+var commander_name: String = ""
+var commander: Node = null # CommanderBrain, tier 3+
+# Orders (from a commander or the brain feast): walk to order_pos instead of hunting
+var order_kind: String = ""
+var order_pos: Vector3 = Vector3.ZERO
+var order_t: float = 0.0
+var order_from: Node3D = null
+var buff_t: float = 0.0 # rally: faster and harder hitting
+var _tier_light: OmniLight3D
+var _tier_label: Label3D
+var _zig: float = 0.0
 var is_sprinter: bool = false
 var is_crawler: bool = false
 var is_bloater: bool = false
@@ -609,6 +627,13 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 	if entry_window and entry_stage < 3:
 		_process_window_entry(delta, speed_mult)
 		return
+	if buff_t > 0.0:
+		buff_t -= delta
+		speed_mult *= 1.15
+	if order_t > 0.0:
+		order_t -= delta
+		if _process_order(delta, speed_mult):
+			return
 	if is_spitter:
 		_process_spitter(delta, speed_mult)
 		return
@@ -619,7 +644,9 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 		var move_dir := _get_nav_dir(target_player.global_position)
 		if flat_dist < 6.0:
 			move_dir = (move_dir + _separation_push() * 0.9).normalized()
-		var spd := base_speed * speed_mult * _stagger_mult()
+		if tier >= 2:
+			move_dir = _smart_dir(move_dir, flat_dist, delta)
+		var spd := base_speed * speed_mult * _stagger_mult() * (1.35 if order_kind == "flank_run" else 1.0)
 		velocity.x = lerp(velocity.x, move_dir.x * spd, 8.0 * delta)
 		velocity.z = lerp(velocity.z, move_dir.z * spd, 8.0 * delta)
 		_face_direction(move_dir, delta * 8.0)
@@ -648,7 +675,7 @@ func _resolve_melee_hit() -> void:
 		return
 	var flat := Vector2(target_player.global_position.x - global_position.x, target_player.global_position.z - global_position.z).length()
 	if flat < 2.15 and target_player.has_method("take_damage"):
-		target_player.take_damage(base_damage * (0.45 if pain_drug_timer > 0.0 else 1.0), global_position)
+		target_player.take_damage(base_damage * (0.45 if pain_drug_timer > 0.0 else 1.0) * (1.25 if buff_t > 0.0 else 1.0), global_position)
 
 
 func _separation_push() -> Vector3:
@@ -1113,6 +1140,10 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 		dmg *= 1.60
 	elif not ignore_armor and endurance > 0.0:
 		dmg *= (1.0 - endurance)
+
+	# A commander with bodyguards around him takes half damage
+	if commander and commander.has_method("guard_count") and commander.guard_count() >= 2:
+		dmg *= 0.5
 
 	# Insta-Kill power-up: any hit drops a regular zombie.
 	if not is_boss and GameState.is_powerup_active("insta_kill"):
@@ -1722,3 +1753,129 @@ func _spit_visual(target_pos: Vector3, dmg: float) -> void:
 		if is_inside_tree():
 			_spawn_acid_pool(target_pos, dmg, 1.6)
 	)
+
+
+
+# ---------------------------------------------------------------------------
+# TIERS
+# ---------------------------------------------------------------------------
+# Sets the tier: stats scale on the host; everyone sees the glow and the name.
+func apply_tier(t: int, scale_stats: bool = true) -> void:
+	t = clampi(t, 1, 5)
+	if scale_stats and not is_boss:
+		var ratio := hp / maxf(1.0, max_hp)
+		max_hp = max_hp / TIER_HP[tier] * TIER_HP[t]
+		hp = maxf(1.0, max_hp * maxf(ratio, 0.6 if t > tier else ratio))
+		base_damage = base_damage / TIER_DMG[tier] * TIER_DMG[t]
+		base_speed = base_speed / TIER_SPEED[tier] * TIER_SPEED[t]
+		point_reward = 60 + 120 * (t - 1) * (t - 1)
+	tier = t
+	_tier_visuals()
+	if tier >= 3 and commander == null and not is_boss:
+		var brain: Node = load("res://scripts/enemies/commander_brain.gd").new()
+		brain.name = "Commander"
+		add_child(brain)
+		commander = brain
+		brain.setup(self)
+	if Net.is_online() and not net_puppet and net_id > 0:
+		var ng := _net_game()
+		if ng:
+			ng.zombie_tier(self, tier, commander_name)
+
+
+func _tier_visuals() -> void:
+	if tier <= 1:
+		return
+	var col: Color = TIER_COLORS[tier]
+	if visual_root:
+		visual_root.scale = Vector3.ONE * (1.0 + 0.07 * float(tier - 1))
+	for m in _meshes:
+		if is_instance_valid(m):
+			m.material_overlay = MaterialLib.get_emissive(col, 0.35 + 0.08 * float(tier), 0.06)
+	if _tier_light == null:
+		_tier_light = OmniLight3D.new()
+		_tier_light.omni_range = 3.0
+		_tier_light.position = Vector3(0, 1.6 * model_scale, 0)
+		add_child(_tier_light)
+	_tier_light.light_color = col
+	_tier_light.light_energy = 0.6 + 0.3 * float(tier)
+	if tier >= 3:
+		if _tier_label == null:
+			_tier_label = Label3D.new()
+			_tier_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			_tier_label.no_depth_test = false
+			_tier_label.font_size = 40
+			_tier_label.outline_size = 10
+			_tier_label.pixel_size = 0.004
+			_tier_label.position = Vector3(0, 2.45 * model_scale * (1.0 + 0.07 * float(tier - 1)), 0)
+			add_child(_tier_label)
+		_tier_label.modulate = col
+		_tier_label.text = "%s\n%s" % [commander_name if commander_name != "" else "COMMANDER", "★".repeat(tier)]
+
+
+# Commander orders and the brain feast: go somewhere else than the player.
+# Returns true while the order is running this frame.
+func _process_order(delta: float, speed_mult: float) -> bool:
+	if order_kind == "flank_run":
+		return false # handled by the normal chase with extra speed
+	var goal := order_pos
+	if order_kind == "guard" and is_instance_valid(order_from):
+		goal = order_from.global_position + order_pos # ring offset around the commander
+	var off := goal - global_position
+	off.y = 0.0
+	var reach := 1.6 if order_kind != "guard" else 1.0
+	if off.length() > reach:
+		var dir := _get_nav_dir(goal)
+		dir = (dir + _separation_push() * 0.6).normalized()
+		var spd := base_speed * speed_mult * _stagger_mult() * (1.25 if order_kind == "feast" else 1.0)
+		velocity.x = lerp(velocity.x, dir.x * spd, 8.0 * delta)
+		velocity.z = lerp(velocity.z, dir.z * spd, 8.0 * delta)
+		_face_direction(dir, delta * 8.0)
+		_animate_walk(delta, spd)
+	else:
+		velocity.x = move_toward(velocity.x, 0.0, 14.0 * delta)
+		velocity.z = move_toward(velocity.z, 0.0, 14.0 * delta)
+		if order_kind == "feast" or order_kind == "build":
+			# Hunched over the body / the trap, clawing
+			_face_direction((order_pos - global_position).normalized() if (order_pos - global_position).length() > 0.2 else -global_basis.z, delta * 6.0)
+			_animate_melee_swipe(delta)
+		elif order_kind == "guard" and is_instance_valid(target_player):
+			_face_direction((target_player.global_position - global_position).normalized(), delta * 6.0)
+			_animate_walk(delta, 0.0)
+	if order_t <= 0.0:
+		order_kind = ""
+	return order_kind != ""
+
+
+func give_order(kind: String, pos: Vector3, duration: float, from: Node3D = null) -> void:
+	if is_dead or is_boss:
+		return
+	order_kind = kind
+	order_pos = pos
+	order_t = duration
+	order_from = from
+
+
+func at_order_spot(dist: float = 1.8) -> bool:
+	var off := order_pos - global_position
+	off.y = 0.0
+	return order_t > 0.0 and off.length() <= dist
+
+
+# Tier 2+: zig-zag when the player aims at you, get away from live explosives
+func _smart_dir(move_dir: Vector3, flat_dist: float, delta: float) -> Vector3:
+	for g in get_tree().get_nodes_in_group("live_explosives"):
+		var off := global_position - (g as Node3D).global_position
+		off.y = 0.0
+		if off.length() < 6.5:
+			return (off.normalized() * 1.4 + move_dir * 0.3).normalized()
+	if flat_dist > 4.0 and target_player is PlayerController:
+		var pc := target_player as PlayerController
+		if pc.is_ads and is_instance_valid(pc.camera):
+			var look := -pc.camera.global_basis.z
+			var to_me := (global_position + Vector3(0, 1.2, 0) - pc.camera.global_position).normalized()
+			if look.dot(to_me) > 0.985:
+				_zig += delta * (3.5 + float(tier))
+				var side := move_dir.cross(Vector3.UP).normalized()
+				return (move_dir + side * sin(_zig) * (0.6 + 0.15 * float(tier))).normalized()
+	return move_dir

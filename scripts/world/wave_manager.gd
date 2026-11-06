@@ -74,6 +74,7 @@ func start_round(round_num: int) -> void:
 	if Net.is_online():
 		_c_round.rpc(round_num)
 	_present_round(round_num)
+	_commander_due = round_num >= 8 and randf() < 0.3 + 0.04 * float(GameState.difficulty)
 	var n := Net.player_count()
 	var crowd := 1.0 + 0.55 * float(n - 1)
 	in_intermission = false
@@ -205,6 +206,8 @@ func _process(delta: float) -> void:
 	if Net.is_client():
 		_client_process(delta)
 		return
+	_watch_downs()
+	_process_feast(delta)
 	if not _any_player_alive():
 		return
 
@@ -331,7 +334,14 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	if window:
 		z.set_entry_window(window)
 	z.died.connect(_on_enemy_died)
-	_net_register(z, {"k": "z", "v": variant, "r": round_num, "w": arena.windows.find(window) if window else -1})
+	# Tiers: most are tier 1, some tier 2 (more on harder difficulties).
+	# From round 8 a commander can turn up on its own.
+	if _commander_due and _count_commanders() == 0 and variant != "spitter":
+		_commander_due = false
+		z.apply_tier(3)
+	elif randf() < clampf(0.25 + 0.05 * float(GameState.difficulty - 1) + 0.01 * float(round_num), 0.15, 0.6):
+		z.apply_tier(2)
+	_net_register(z, {"k": "z", "v": variant, "r": round_num, "w": arena.windows.find(window) if window else -1, "t": z.tier, "cn": z.commander_name})
 
 	alive_enemies += 1
 	_emit_wave_status()
@@ -424,6 +434,8 @@ func _spawn_round_boss(round_num: int) -> void:
 func _on_enemy_died(enemy: ZombieEnemy, _was_headshot: bool) -> void:
 	alive_enemies = maxi(0, alive_enemies - 1)
 	_emit_wave_status()
+	if enemy.tier >= 3 and not enemy.is_boss:
+		_commander_slain(enemy)
 
 	if enemy.is_boss:
 		active_boss = null
@@ -941,3 +953,141 @@ func resume_saved_world() -> void:
 			Net.world(n, "start")
 	start_round(start)
 	_banner("RUN RESUMED — ROUND %d" % start, Color(0.55, 0.9, 1.0))
+
+
+
+# ---------------------------------------------------------------------------
+# ZOMBIE TIERS: the brain feast and commanders
+# ---------------------------------------------------------------------------
+const MAX_COMMANDERS := 2
+const TrapScript := preload("res://scripts/world/zombie_trap.gd")
+var _commander_due: bool = false
+var _was_down: Dictionary = {}
+var _feast_pos: Vector3 = Vector3.INF
+var _feasters: Array = []
+var _feast_t: float = 0.0
+var _feast_fight: float = -1.0
+
+
+func _count_commanders() -> int:
+	var n := 0
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if not e.is_dead and not e.is_boss and e.tier >= 3:
+			n += 1
+	return n
+
+
+# A player just went down: the nearest zombies run for the body and fight
+# over the brain. The winner ranks up one tier.
+func _watch_downs() -> void:
+	for p in get_tree().get_nodes_in_group("net_players"):
+		var down: bool = bool(p.get("is_downed")) or bool(p.get("is_dead"))
+		var key := p.get_instance_id()
+		if down and not _was_down.get(key, false):
+			_start_feast(p.global_position)
+		_was_down[key] = down
+
+
+func _start_feast(pos: Vector3) -> void:
+	if _feast_pos != Vector3.INF:
+		return
+	var list: Array = []
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e.is_dead or e.is_boss or e.entry_stage < 3 or e.rise_timer > 0.0:
+			continue
+		var d: float = e.global_position.distance_to(pos)
+		if d < 30.0:
+			list.append([d, e])
+		if e.commander:
+			e.commander.on_player_down()
+	if list.size() < 2:
+		return
+	list.sort_custom(func(a, b): return a[0] < b[0])
+	_feasters.clear()
+	for i in range(mini(4, list.size())):
+		var e: ZombieEnemy = list[i][1]
+		e.give_order("feast", pos + Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.8, 0.8)), 12.0)
+		_feasters.append(e)
+	_feast_pos = pos
+	_feast_t = 12.0
+	_feast_fight = -1.0
+	_banner_all("THEY'RE FIGHTING OVER YOUR BRAIN...", Color(1.0, 0.45, 0.35))
+
+
+func _process_feast(delta: float) -> void:
+	if _feast_pos == Vector3.INF:
+		return
+	_feasters = _feasters.filter(func(e): return is_instance_valid(e) and not e.is_dead)
+	_feast_t -= delta
+	if _feasters.is_empty() or _feast_t <= 0.0:
+		_feast_pos = Vector3.INF
+		return
+	var arrived: Array = _feasters.filter(func(e): return e.at_order_spot(2.2))
+	if _feast_fight < 0.0 and arrived.size() >= 1:
+		_feast_fight = 3.5 # they claw at each other over the head
+	if _feast_fight >= 0.0:
+		_feast_fight -= delta
+		for e in arrived:
+			e.order_t = maxf(e.order_t, 1.0)
+		if _feast_fight <= 0.0:
+			_finish_feast(arrived if not arrived.is_empty() else _feasters)
+
+
+func _finish_feast(contenders: Array) -> void:
+	# Higher tiers win more often
+	var total := 0.0
+	for e in contenders:
+		total += float(e.tier + 1)
+	var r := randf() * total
+	var winner: ZombieEnemy = contenders[0]
+	for e in contenders:
+		r -= float(e.tier + 1)
+		if r <= 0.0:
+			winner = e
+			break
+	for e in _feasters:
+		e.order_t = 0.0
+		e.order_kind = ""
+	_feast_pos = Vector3.INF
+	var new_tier := mini(5, winner.tier + 1)
+	if new_tier >= 3 and winner.tier < 3 and _count_commanders() >= MAX_COMMANDERS:
+		new_tier = winner.tier # the horde has enough leaders already
+	if new_tier == winner.tier:
+		winner.hp = winner.max_hp
+		_banner_all("A ZOMBIE ATE YOUR BRAIN", Color(1.0, 0.6, 0.4))
+		return
+	winner.apply_tier(new_tier)
+	winner.hp = winner.max_hp
+	if new_tier >= 3:
+		_banner_all("%s ATE YOUR BRAIN — TIER %d COMMANDER" % [winner.commander_name, new_tier], ZombieEnemy.TIER_COLORS[new_tier])
+	else:
+		_banner_all("A ZOMBIE ATE YOUR BRAIN — NOW TIER %d" % new_tier, ZombieEnemy.TIER_COLORS[new_tier])
+
+
+func _commander_slain(z: ZombieEnemy) -> void:
+	if z.commander:
+		z.commander.on_death()
+	_boss_relics(z.global_position)
+	_banner_all("COMMANDER %s SLAIN! RELIC DROPPED" % z.commander_name, Color(0.5, 1.0, 0.6))
+
+
+func spawn_zombie_trap(pos: Vector3, t: int) -> void:
+	_place_trap(pos, t)
+	var ng := _ng()
+	if ng:
+		ng.zombie_trap(pos, t)
+
+
+func _place_trap(pos: Vector3, t: int) -> void:
+	var trap: Node3D = TrapScript.new()
+	trap.tier = t
+	get_tree().current_scene.add_child(trap)
+	trap.global_position = pos
+
+
+func _banner_all(text: String, col: Color) -> void:
+	if is_instance_valid(player):
+		player.status_banner_requested.emit(text, col)
+	if Net.is_online():
+		_c_banner.rpc(text, col)
+

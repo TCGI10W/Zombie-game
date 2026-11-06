@@ -22,6 +22,7 @@ var banner_timer: float = 0.0
 var crosshair_root: Control
 var hit_canvas: Control
 var streak_lbl: Label
+var sub_lbl: Label
 var _tick_cd: float = 0.0
 var hitmarker_timer: float = 0.0
 var hitmarker_color: Color = Color.WHITE
@@ -424,6 +425,29 @@ func _build_ui() -> void:
 	streak_lbl.pivot_offset = Vector2(300, 25)
 	streak_lbl.modulate.a = 0.0
 	root.add_child(streak_lbl)
+
+	# Commander speech subtitles
+	sub_lbl = Label.new()
+	sub_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sub_lbl.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	sub_lbl.offset_left = -560
+	sub_lbl.offset_right = 560
+	sub_lbl.offset_top = -210
+	sub_lbl.offset_bottom = -150
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub_lbl.add_theme_font_size_override("font_size", 20)
+	sub_lbl.add_theme_constant_override("outline_size", 7)
+	sub_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	sub_lbl.modulate.a = 0.0
+	root.add_child(sub_lbl)
+	GameState.subtitle.connect(func(text: String, col: Color):
+		sub_lbl.text = text
+		sub_lbl.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.35))
+		sub_lbl.modulate.a = 1.0
+		var tw := sub_lbl.create_tween()
+		tw.tween_interval(3.8)
+		tw.tween_property(sub_lbl, "modulate:a", 0.0, 0.6))
 
 	dmg_canvas = Control.new()
 	dmg_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)

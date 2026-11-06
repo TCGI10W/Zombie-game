@@ -394,7 +394,7 @@ func dmg_mult() -> float:
 
 
 func speed_mult() -> float:
-	return (1.0 + 0.04 * stat_eff("speed")) * (1.3 if adrenaline_timer > 0.0 else 1.0)
+	return (1.0 + 0.04 * stat_eff("speed")) * (1.3 if adrenaline_timer > 0.0 else 1.0) * (0.5 if trap_slow_t > 0.0 else 1.0)
 
 
 func dex_mult() -> float:
@@ -475,6 +475,8 @@ func _update_timers(delta: float) -> void:
 		stim_timer = maxf(0.0, stim_timer - delta)
 	if adrenaline_timer > 0.0:
 		adrenaline_timer = maxf(0.0, adrenaline_timer - delta)
+	if trap_slow_t > 0.0:
+		trap_slow_t = maxf(0.0, trap_slow_t - delta)
 	if last_stand_cd > 0.0:
 		last_stand_cd = maxf(0.0, last_stand_cd - delta)
 	if pap_timer > 0.0:
@@ -2282,6 +2284,7 @@ var c4_count: int = 0
 # Supply Depot perks (permanent for the run) and timed boosts
 var perks: Dictionary = {}
 var adrenaline_timer: float = 0.0
+var trap_slow_t: float = 0.0 # standing in a zombie trap
 var mag_lv: int = 0 # Supply Depot: bigger magazines
 var reserve_lv: int = 0 # Supply Depot: more spare ammo
 var last_stand_cd: float = 0.0

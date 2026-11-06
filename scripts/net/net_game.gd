@@ -364,6 +364,9 @@ func _c_spawn(data: Dictionary) -> void:
 				z._play_3d_roar("zombie_roar_1", randf_range(0.88, 1.12))
 	z.max_hp = float(data["m"])
 	z.hp = z.max_hp
+	if int(data.get("t", 1)) > 1:
+		z.commander_name = String(data.get("cn", ""))
+		z.apply_tier(int(data["t"]), false)
 	z.rise_timer = 0.0
 	var id := z.net_id
 	zombies[id] = z
@@ -813,3 +816,39 @@ func _update_hud(delta: float) -> void:
 		_center_lbl.text = text
 	elif not player.is_dead or game_over:
 		_center_lbl.text = ""
+
+
+
+# --- Zombie tiers: rank-ups, commander speech and traps for every client
+func zombie_tier(z: ZombieEnemy, t: int, cname: String) -> void:
+	_c_zombie_tier.rpc(z.net_id, t, cname)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_zombie_tier(id: int, t: int, cname: String) -> void:
+	var z: ZombieEnemy = zombies.get(id)
+	if z and is_instance_valid(z) and not z.is_dead:
+		z.commander_name = cname
+		z.apply_tier(t, false)
+
+
+func zombie_say(z: ZombieEnemy, line: String) -> void:
+	_c_zombie_say.rpc(z.net_id, line)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_zombie_say(id: int, line: String) -> void:
+	var z: ZombieEnemy = zombies.get(id)
+	if z and is_instance_valid(z) and z.commander:
+		z.commander.show_line(line)
+
+
+func zombie_trap(pos: Vector3, t: int) -> void:
+	_c_zombie_trap.rpc(pos, t)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_zombie_trap(pos: Vector3, t: int) -> void:
+	var wm := get_tree().current_scene.get_node_or_null("WaveManager")
+	if wm:
+		wm._place_trap(pos, t)

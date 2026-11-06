@@ -1,5 +1,6 @@
 extends Node
 
+signal subtitle(text: String, color: Color)
 signal points_changed(new_points: int, delta: int)
 signal round_changed(new_round: int)
 signal powerups_changed()

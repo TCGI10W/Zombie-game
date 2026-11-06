@@ -15,6 +15,8 @@ var damage: float = DAMAGE
 
 
 func _ready() -> void:
+	if not ("mode" in self): # thrown grenades only; zombies don't see placed C4 / mines
+		add_to_group("live_explosives")
 	collision_layer = 0
 	collision_mask = 1 # World only
 	mass = 0.4
@@ -83,6 +85,8 @@ func _explode() -> void:
 			thrower.add_camera_shake(clampf(0.6 - pd * 0.04, 0.1, 0.6))
 
 	_spawn_fx(center)
+	for tr in get_tree().get_nodes_in_group("zombie_traps"):
+		tr.blast(center, radius)
 	var ng := get_tree().get_first_node_in_group("net_game")
 	if ng and Net.is_online():
 		ng.broadcast_explosion(center)
