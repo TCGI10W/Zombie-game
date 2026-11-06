@@ -10,3 +10,4 @@ build/
 tools/__pycache__/
 # Raw photo-scan sources (66 MB; only needed to re-run tools/import_scanned_textures.py)
 tools/scans/
+godot_path.txt
