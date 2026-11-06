@@ -22,6 +22,7 @@ var _char_cards: Dictionary = {}
 var _mode_cards: Dictionary = {}
 var _diff_buttons: Array[Button] = []
 var _diff_info: Label
+var _deploy_btn: Button
 var _detail_name: Label
 var _detail_code: Label
 var _detail_summary: Label
@@ -383,8 +384,14 @@ func _build_play_page() -> Control:
 	deploy.add_theme_font_size_override("font_size", 24)
 	deploy.add_theme_stylebox_override("normal", _box(Color(0.72, 0.12, 0.1), Color(1.0, 0.4, 0.3), 1))
 	deploy.add_theme_stylebox_override("hover", _box(Color(0.88, 0.18, 0.14), Color(1.0, 0.6, 0.4), 1))
+	_deploy_btn = deploy
 	deploy.pressed.connect(func():
 		GameState.play_sfx("round_sting", -2.0, 1.0)
+		# Hosting a squad: start the co-op game so everyone loads in together
+		if Net.is_online():
+			if Net.is_host():
+				Net.start_game(false)
+			return
 		GameState.reset_run()
 		GameState.run_id = GameState.new_run_id()
 		GameState.pending_resume = false
@@ -403,6 +410,16 @@ func _refresh_play() -> void:
 	for i in range(_diff_buttons.size()):
 		var on: bool = i == GameState.difficulty
 		_diff_buttons[i].add_theme_stylebox_override("normal", _box(Color(0.2, 0.08, 0.07, 0.95) if on else Color(0.07, 0.08, 0.1, 0.92), ACCENT if on else Color(1, 1, 1, 0.08), 2 if on else 1))
+	if _deploy_btn:
+		if Net.is_online() and Net.is_host():
+			_deploy_btn.text = "START CO-OP GAME  (%d PLAYERS)" % Net.players.size()
+			_deploy_btn.disabled = false
+		elif Net.is_online():
+			_deploy_btn.text = "WAITING FOR THE HOST TO START..."
+			_deploy_btn.disabled = true
+		else:
+			_deploy_btn.text = "DEPLOY"
+			_deploy_btn.disabled = false
 	if _diff_info:
 		_diff_info.text = "%s:   %s" % [GameState.DIFFICULTY_NAMES[GameState.difficulty], "   •   ".join(GameState.diff_lines(GameState.difficulty))]
 	if _coop_settings:
@@ -530,6 +547,7 @@ func _build_coop_page() -> Control:
 		_refresh_coop()
 	, bottom)
 	Net.lobby_changed.connect(_refresh_coop)
+	Net.lobby_changed.connect(_refresh_play)
 	Net.status_changed.connect(func(_t: String): _refresh_coop())
 	v.visible = false
 	return v
