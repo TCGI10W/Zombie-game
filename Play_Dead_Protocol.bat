@@ -21,6 +21,15 @@ if not defined GODOT goto nogodot
 if not exist "!GODOT!" goto nogodot
 > "%~dp0godot_path.txt" echo !GODOT!
 echo Using Godot: !GODOT!
+rem Godot must import the models, textures and sounds before the game can run.
+rem A fresh download has none imported (that shows as a plain gray window).
+if not exist "%~dp0.godot\imported" (
+  echo.
+  echo First launch: preparing game files. This takes a few minutes, please wait...
+) else (
+  echo Checking game files...
+)
+start "" /wait "!GODOT!" --headless --import --path .
 start "" "!GODOT!" --path .
 exit /b 0
 :nogodot
