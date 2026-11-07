@@ -94,5 +94,5 @@ All sound effects come from [Freesound](https://freesound.org) under the **Creat
 | zombie_groan | [Burp Monster Zombie groan moan](https://freesound.org/people/EricsSoundschmiede/sounds/463721/) | EricsSoundschmiede |
 | zombie_roar_1 | [Zombie gargles](https://freesound.org/people/Breviceps/sounds/445983/) | Breviceps |
 | zombie_roar_2 | [Zombie Demon Scream](https://freesound.org/people/Wakerone/sounds/435651/) | Wakerone |
-| zombie_step_1 | [gravel scrape](https://freesound.org/people/wjb_88/sounds/828864/) | wjb_88 |
-| zombie_step_2 | [MUS136_YSwanson+ARaneses_Week2 Foot Drag.wav](https://freesound.org/people/araneses/sounds/617438/) | araneses |
+| zombie_step_1 | [Footstep_Walk_HardSurface_6.wav](https://freesound.org/people/nicholasdaryl/sounds/563473/) | nicholasdaryl |
+| zombie_step_2 | [Footstep_Walk_HardSurface_5.wav](https://freesound.org/people/nicholasdaryl/sounds/563472/) | nicholasdaryl |

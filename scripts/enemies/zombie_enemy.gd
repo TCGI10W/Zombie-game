@@ -344,7 +344,7 @@ func _play_3d_footstep(step_index: int) -> void:
 	var stream := GameState.get_sfx_stream(clip)
 	if stream:
 		step_audio_3d.stream = stream
-		var base_p := 0.88 if is_boss else (1.18 if is_sprinter else 1.0)
+		var base_p := 0.88 if is_boss else (1.0 if is_sprinter else 0.86) # lower = heavier, dragging walk
 		step_audio_3d.pitch_scale = base_p * randf_range(0.92, 1.08)
 		step_audio_3d.play()
 	if is_boss and (boss_type == "gorilla" or boss_type == "juggernaut") and is_instance_valid(target_player):
