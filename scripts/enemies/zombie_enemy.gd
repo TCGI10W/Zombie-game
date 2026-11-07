@@ -307,13 +307,16 @@ func _build_3d_audio(height: float) -> void:
 	step_audio_3d.bus = &"Zombies"
 	step_audio_3d.position = Vector3(0, 0.15, 0)
 	step_audio_3d.max_polyphony = 2
-	# Footsteps should be clearly heard: you can tell where the horde is coming from
-	step_audio_3d.unit_size = 10.0 if is_boss else 6.0
-	step_audio_3d.max_distance = 40.0 if is_boss else 26.0
-	step_audio_3d.volume_db = 5.0 if is_boss else 2.0
-	step_audio_3d.attenuation_filter_cutoff_hz = 6000.0 if is_boss else 5000.0
-	step_audio_3d.attenuation_filter_db = -8.0
-	step_audio_3d.max_polyphony = 3
+	# Footsteps tell you WHERE zombies are: loud and crisp right next to you,
+	# quickly quieter and muffled with distance (inverse-square, like real sound)
+	step_audio_3d.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_SQUARE_DISTANCE
+	step_audio_3d.unit_size = 4.0 if is_boss else 2.2
+	step_audio_3d.max_distance = 40.0 if is_boss else 24.0
+	step_audio_3d.volume_db = 6.0 if is_boss else 4.0
+	step_audio_3d.attenuation_filter_cutoff_hz = 2200.0
+	step_audio_3d.attenuation_filter_db = -30.0
+	step_audio_3d.panning_strength = 1.4
+	step_audio_3d.max_polyphony = 2
 	add_child(step_audio_3d)
 
 	roar_audio_3d = AudioStreamPlayer3D.new()
@@ -340,6 +343,13 @@ func _play_3d_roar(clip_name: String, pitch: float = 1.0) -> void:
 func _play_3d_footstep(step_index: int) -> void:
 	if not step_audio_3d or is_dead or not is_on_floor():
 		return
+	# Far-away zombies only play some of their steps, so the close ones stand out
+	if not is_boss:
+		var cam := get_viewport().get_camera_3d()
+		if cam:
+			var d := cam.global_position.distance_to(global_position)
+			if (d > 10.0 and step_index % 2 == 1) or (d > 16.0 and step_index % 4 != 0):
+				return
 	var clip := "boss_step" if is_boss else ("zombie_step_1" if (step_index % 2 == 0) else "zombie_step_2")
 	var stream := GameState.get_sfx_stream(clip)
 	if stream:

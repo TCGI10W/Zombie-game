@@ -59,6 +59,13 @@ func _ready() -> void:
 		ng.setup(player, wave_mgr, arena, enemies_container)
 
 
+	# First match after launching: draw everything once so the graphics card
+	# prepares its shaders now instead of stuttering mid-fight
+	if not Engine.has_meta("shaders_warmed"):
+		var warm: Node = (load("res://scripts/world/shader_warmup.gd") as GDScript).new()
+		add_child(warm)
+		warm.start(self)
+
 	# Camera finishing pass (grain, vignette, grade) under the HUD
 	if true:
 		var layer := CanvasLayer.new()
