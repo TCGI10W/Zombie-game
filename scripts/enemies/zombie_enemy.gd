@@ -310,9 +310,9 @@ func _build_3d_audio(height: float) -> void:
 	# Footsteps tell you WHERE zombies are: loud and crisp right next to you,
 	# quickly quieter and muffled with distance (inverse-square, like real sound)
 	step_audio_3d.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_SQUARE_DISTANCE
-	step_audio_3d.unit_size = 4.0 if is_boss else 2.2
+	step_audio_3d.unit_size = 5.0 if is_boss else 3.0
 	step_audio_3d.max_distance = 40.0 if is_boss else 24.0
-	step_audio_3d.volume_db = 6.0 if is_boss else 4.0
+	step_audio_3d.volume_db = 12.0 if is_boss else 10.0
 	step_audio_3d.attenuation_filter_cutoff_hz = 2200.0
 	step_audio_3d.attenuation_filter_db = -30.0
 	step_audio_3d.panning_strength = 1.4
@@ -356,6 +356,9 @@ func _play_3d_footstep(step_index: int) -> void:
 		step_audio_3d.stream = stream
 		var base_p := 0.88 if is_boss else (1.0 if is_sprinter else 0.86) # lower = heavier, dragging walk
 		step_audio_3d.pitch_scale = base_p * randf_range(0.92, 1.08)
+		if GameState.step_volume <= 0.001:
+			return
+		step_audio_3d.volume_db = (12.0 if is_boss else 10.0) + linear_to_db(GameState.step_volume)
 		step_audio_3d.play()
 	if is_boss and (boss_type == "gorilla" or boss_type == "juggernaut") and is_instance_valid(target_player):
 		if global_position.distance_to(target_player.global_position) < 9.5 and target_player.has_method("add_camera_shake"):

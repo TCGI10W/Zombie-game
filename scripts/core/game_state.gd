@@ -27,6 +27,7 @@ var mouse_sens_mult: float = 1.0
 var points_mult: float = 1.0 # Fortune stat bonus, set by the player
 var master_volume: float = 0.8
 var sfx_volume: float = 1.0
+var step_volume: float = 1.0 # zombie footsteps, 0..2
 var invert_y: bool = false
 var fullscreen: bool = false
 var resolution: String = "native" # "native" or "WxH"
@@ -302,6 +303,7 @@ func load_save() -> void:
 		mouse_sens_mult = float(cfg.get_value("settings", "mouse_sens_mult", 1.0))
 		master_volume = float(cfg.get_value("settings", "master_volume", 0.8))
 		sfx_volume = float(cfg.get_value("settings", "sfx_volume", 1.0))
+		step_volume = float(cfg.get_value("settings", "step_volume", 1.0))
 		invert_y = bool(cfg.get_value("settings", "invert_y", false))
 		fullscreen = bool(cfg.get_value("settings", "fullscreen", false))
 		resolution = String(cfg.get_value("settings", "resolution", "native"))
@@ -330,6 +332,7 @@ func write_save() -> void:
 	cfg.set_value("settings", "mouse_sens_mult", mouse_sens_mult)
 	cfg.set_value("settings", "master_volume", master_volume)
 	cfg.set_value("settings", "sfx_volume", sfx_volume)
+	cfg.set_value("settings", "step_volume", step_volume)
 	cfg.set_value("settings", "invert_y", invert_y)
 	cfg.set_value("settings", "fullscreen", fullscreen)
 	cfg.set_value("settings", "resolution", resolution)

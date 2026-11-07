@@ -15,6 +15,9 @@ func _ready() -> void:
 	_slider("EFFECTS VOLUME", 0.0, 1.0, GameState.sfx_volume, func(v: float):
 		GameState.sfx_volume = v
 		GameState.apply_volume())
+	_slider("ZOMBIE FOOTSTEPS", 0.0, 2.0, GameState.step_volume, func(v: float):
+		GameState.step_volume = v
+		GameState.write_save())
 
 	_section("CONTROLS")
 	_slider("MOUSE SENSITIVITY", 0.2, 3.0, GameState.mouse_sens_mult, func(v: float):
