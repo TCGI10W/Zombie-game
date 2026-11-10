@@ -14,3 +14,6 @@ godot_path.txt
 
 tools/.freesound_key
 tools/freesound_cache/
+
+import_log.txt
+game_log.txt
