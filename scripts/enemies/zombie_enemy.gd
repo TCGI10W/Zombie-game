@@ -2032,7 +2032,7 @@ func _start_dodge() -> void:
 # Zombies that hurt players get a taste for it and grow smarter
 func _taste_blood() -> void:
 	blood_hits += 1
-	if blood_hits < (2 if tier == 1 else 5):
+	if blood_hits < (3 if tier == 1 else 6):
 		return
 	blood_hits = 0
 	var wm := get_tree().current_scene.get_node_or_null("WaveManager")

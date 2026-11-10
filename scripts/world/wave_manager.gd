@@ -164,6 +164,9 @@ func _present_round(round_num: int, ev: String = "") -> void:
 	else:
 		GameState.play_sfx("round_sting", 0.0, 1.0)
 	GameState.rebuild_points_round = 0
+	if GameState.has_unlock("armor") and is_instance_valid(player) and not player.is_dead and player.overshield < 25.0:
+		player.overshield = 25.0
+		player.hp_changed.emit(player.hp, player.max_hp, player.overshield)
 	if round_num > 1:
 		GameState.record_run()
 		player.add_grenades(2)
@@ -258,6 +261,7 @@ func _client_process(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	GameState.run_time += delta
 	if Net.is_client():
 		_client_process(delta)
 		return
@@ -1200,9 +1204,9 @@ func blood_evolve(z: ZombieEnemy) -> void:
 	if nt >= 3 and (_count_commanders() >= MAX_COMMANDERS or GameState.current_round < 3):
 		return
 	z.apply_tier(nt)
-	z.hp = z.max_hp
 	z.tier_up_fx()
 	if nt >= 3:
+		z.hp = z.max_hp
 		_banner_all("%s TASTED BLOOD AND LEARNED TO THINK — %s %s" % [z.commander_name, "★".repeat(nt), ZombieEnemy.TIER_NAMES[nt]], ZombieEnemy.TIER_COLORS[nt])
 
 

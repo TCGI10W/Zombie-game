@@ -47,7 +47,7 @@ func _on_round(round_num: int, _boss_cfg: Dictionary) -> void:
 	target = mini(int(current["cap"]), int(round(float(current["base"]) + float(current["grow"]) * float(round_num))))
 	progress = 0
 	done = false
-	reward = 300 + 60 * round_num
+	reward = int((300 + 60 * round_num) * (1.5 if GameState.has_unlock("challenge_pay") else 1.0))
 	changed.emit()
 
 

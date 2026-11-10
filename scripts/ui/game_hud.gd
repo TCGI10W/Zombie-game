@@ -118,6 +118,12 @@ func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	_build_ui()
 	_build_commander_bar()
 	_build_objectives()
+	_build_scoreboard()
+	minimap = (load("res://scripts/ui/minimap.gd") as GDScript).new()
+	minimap.name = "Minimap"
+	add_child(minimap)
+	move_child(minimap, 1)
+	minimap.setup(player, get_tree().get_first_node_in_group("arena"), wave_mgr)
 	_build_downed_overlay()
 	_build_exfil_label()
 	_connect_signals()
@@ -726,6 +732,117 @@ func _build_ui() -> void:
 
 
 # ---------------------------------------------------------------------------
+# SCOREBOARD (hold TAB): the squad and this run so far
+# ---------------------------------------------------------------------------
+var minimap: Control
+var score_panel: PanelContainer
+var score_title: Label
+var score_grid: GridContainer
+var score_summary: Label
+var _score_t: float = 0.0
+
+
+func _build_scoreboard() -> void:
+	score_panel = PanelContainer.new()
+	score_panel.anchor_left = 0.5
+	score_panel.anchor_right = 0.5
+	score_panel.anchor_top = 0.5
+	score_panel.anchor_bottom = 0.5
+	score_panel.offset_left = -430
+	score_panel.offset_right = 430
+	score_panel.offset_top = -230
+	score_panel.grow_vertical = Control.GROW_DIRECTION_END
+	score_panel.visible = false
+	score_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := _make_panel_style(Color(0.03, 0.04, 0.055, 0.93), Color(0.85, 0.2, 0.15), 8, 2)
+	sb.content_margin_left = 22
+	sb.content_margin_right = 22
+	sb.content_margin_top = 16
+	sb.content_margin_bottom = 16
+	score_panel.add_theme_stylebox_override("panel", sb)
+	add_child(score_panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	score_panel.add_child(v)
+	score_title = Label.new()
+	score_title.add_theme_font_size_override("font_size", 20)
+	score_title.add_theme_color_override("font_color", Color(0.97, 0.97, 0.99))
+	v.add_child(score_title)
+	score_grid = GridContainer.new()
+	score_grid.columns = 6
+	score_grid.add_theme_constant_override("h_separation", 26)
+	score_grid.add_theme_constant_override("v_separation", 6)
+	v.add_child(score_grid)
+	score_summary = Label.new()
+	score_summary.add_theme_font_size_override("font_size", 14)
+	score_summary.add_theme_color_override("font_color", Color(0.78, 0.8, 0.86))
+	score_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	score_summary.custom_minimum_size = Vector2(810, 0)
+	v.add_child(score_summary)
+
+
+func _score_cell(text: String, col: Color, wide: bool = false) -> void:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 15)
+	l.add_theme_color_override("font_color", col)
+	if wide:
+		l.custom_minimum_size = Vector2(200, 0)
+	score_grid.add_child(l)
+
+
+func _update_scoreboard(delta: float) -> void:
+	if score_panel == null:
+		return
+	var want := Input.is_action_pressed("scoreboard") and not modal_overlay.visible
+	if want != score_panel.visible:
+		score_panel.visible = want
+		_score_t = 0.0
+	if not want:
+		return
+	_score_t -= delta
+	if _score_t > 0.0:
+		return
+	_score_t = 0.3
+	var secs := int(GameState.run_time)
+	score_title.text = "ROUND %d   •   %s   •   %s   •   %02d:%02d" % [GameState.current_round, GameState.DIFFICULTY_NAMES[GameState.difficulty],
+		"CASUAL" if GameState.game_mode == "casual" else "INFINITE", secs / 60, secs % 60]
+	for c in score_grid.get_children():
+		c.queue_free()
+	var head := Color(0.6, 0.63, 0.7)
+	for h in ["PLAYER", "OPERATOR", "KILLS", "POINTS", "DOWNS", "STATUS"]:
+		_score_cell(h, head, h == "PLAYER")
+	var me_col := Color(1.0, 0.9, 0.5)
+	var my_name: String = Net.player_name(Net.my_id()) if Net.is_online() else "YOU"
+	var state := "DEAD" if player.is_dead else ("DOWN" if player.is_downed else "ALIVE")
+	_score_cell(my_name, me_col, true)
+	_score_cell(player.char_id.to_upper(), me_col)
+	_score_cell(str(GameState.total_kills), me_col)
+	_score_cell(str(GameState.points), me_col)
+	_score_cell(str(GameState.downs), me_col)
+	_score_cell(state, Color(1.0, 0.4, 0.35) if state != "ALIVE" else Color(0.5, 1.0, 0.6))
+	var ng := get_tree().get_first_node_in_group("net_game")
+	if Net.is_online() and ng:
+		for av in ng.avatars.values():
+			if not is_instance_valid(av):
+				continue
+			var st := "EXTRACTED" if av.extracted else ("DEAD" if av.is_dead else ("DOWN" if av.is_downed else "ALIVE"))
+			var op := String((Net.players.get(av.peer_id, {}) as Dictionary).get("char", "")).to_upper()
+			_score_cell(av.display_name, av.color, true)
+			_score_cell(op, av.color)
+			_score_cell(str(av.kills), av.color)
+			_score_cell(str(av.points), av.color)
+			_score_cell(str(av.downs), av.color)
+			_score_cell(st, Color(1.0, 0.4, 0.35) if st == "DEAD" or st == "DOWN" else Color(0.5, 1.0, 0.6))
+	var hs_pct := int(round(100.0 * float(GameState.headshots) / float(maxi(1, GameState.total_kills))))
+	var lines := "YOUR RUN:  %d KILLS  •  %d HEADSHOTS (%d%%)  •  %d BOSSES  •  %d COMMANDERS  •  %d CHALLENGES  •  SCORE %d" % [
+		GameState.total_kills, GameState.headshots, hs_pct, GameState.bosses_slain, GameState.commanders_slain, GameState.challenges_done, GameState.run_score("")]
+	if not GameState.nemesis.is_empty():
+		lines += "\nNEMESIS: %s %s — killed you %d time(s). It hunts you from round 4." % [String(GameState.nemesis.get("name", "")), "★".repeat(int(GameState.nemesis.get("tier", 3))), int(GameState.nemesis.get("kills", 1))]
+	score_summary.text = lines
+
+
+# ---------------------------------------------------------------------------
 # OBJECTIVES (top-left): the round's special event and your challenge
 # ---------------------------------------------------------------------------
 var event_lbl: Label
@@ -1009,6 +1126,9 @@ func _process(delta: float) -> void:
 	_update_exfil_label()
 	_update_commander_bar(delta)
 	_update_objectives()
+	_update_scoreboard(delta)
+	if minimap:
+		minimap.visible = GameState.show_minimap and not player.is_dead
 	if player.is_downed:
 		if player.self_reviving:
 			downed_bar.value = 1.0 - player.downed_timer / PlayerController.DOWNED_TIME

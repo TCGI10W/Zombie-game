@@ -280,6 +280,8 @@ func _send_state() -> void:
 	b.put_u8(maxi(0, weapon_keys.find(player.get_current_weapon_id())))
 	b.put_u32(maxi(0, GameState.points))
 	b.put_u8(int(clampf(player.bleedout_timer, 0.0, 255.0)))
+	b.put_u16(clampi(GameState.total_kills, 0, 65535))
+	b.put_u8(clampi(GameState.downs, 0, 255))
 	_r_state.rpc(b.data_array)
 
 
@@ -299,6 +301,9 @@ func _r_state(data: PackedByteArray) -> void:
 	var widx := b.get_u8()
 	var pts := b.get_u32()
 	var bleed := float(b.get_u8())
+	if data.size() >= 39:
+		av.kills = b.get_u16()
+		av.downs = b.get_u8()
 	av.apply_state(t, pos, yaw, {"pitch": pitch, "downed": (f & 1) != 0, "dead": (f & 2) != 0,
 		"extracted": (f & 4) != 0, "crouch": (f & 8) != 0, "self_revive": (f & 16) != 0, "hp": hp,
 		"weapon": weapon_keys[widx] if widx < weapon_keys.size() else "pistol", "points": pts, "bleed": bleed})

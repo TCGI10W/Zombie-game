@@ -16,6 +16,8 @@ var headshots: int = 0
 var bosses_slain: int = 0
 var commanders_slain: int = 0
 var challenges_done: int = 0
+var downs: int = 0
+var run_time: float = 0.0 # seconds played this run
 # Special rounds: now and then a round changes the rules (see ROUND_EVENTS)
 var round_event: String = ""
 const ROUND_EVENTS := {
@@ -55,6 +57,7 @@ var resolution: String = "native" # "native" or "WxH"
 var key_binds: Dictionary = {} # action -> "k:<physical keycode>" or "m:<mouse button>"
 var show_crosshair: bool = true
 var damage_numbers: bool = true
+var show_minimap: bool = true
 var game_mode: String = "casual" # "casual" (ends at round 20) or "infinite"
 var best_round_infinite: int = 0
 var fov_setting: float = 80.0
@@ -332,6 +335,7 @@ func load_save() -> void:
 		_apply_key_binds()
 		show_crosshair = bool(cfg.get_value("settings", "show_crosshair", true))
 		damage_numbers = bool(cfg.get_value("settings", "damage_numbers", true))
+		show_minimap = bool(cfg.get_value("settings", "show_minimap", true))
 		game_mode = String(cfg.get_value("settings", "game_mode", "casual"))
 		best_round_infinite = int(cfg.get_value("records", "best_round_infinite", 0))
 		fov_setting = float(cfg.get_value("settings", "fov", 80.0))
@@ -366,6 +370,7 @@ func write_save() -> void:
 	cfg.set_value("settings", "key_binds", key_binds)
 	cfg.set_value("settings", "show_crosshair", show_crosshair)
 	cfg.set_value("settings", "damage_numbers", damage_numbers)
+	cfg.set_value("settings", "show_minimap", show_minimap)
 	cfg.set_value("settings", "game_mode", game_mode)
 	cfg.set_value("records", "best_round_infinite", best_round_infinite)
 	cfg.set_value("settings", "fov", fov_setting)
@@ -435,6 +440,8 @@ func _setup_input_map() -> void:
 	_bind_keys("place_mine", [KEY_B])
 	_bind_keys("borrowed_skill", [KEY_X])
 	_bind_keys("borrowed_skill_2", [KEY_Z])
+	_bind_keys("map", [KEY_M])
+	_bind_keys("scoreboard", [KEY_TAB])
 	_bind_mouse("fire", MOUSE_BUTTON_LEFT)
 	_bind_mouse("aim", MOUSE_BUTTON_RIGHT)
 
@@ -448,6 +455,7 @@ const REBINDABLE := [
 	["reload", "RELOAD"], ["interact", "INTERACT / BUY"], ["melee", "KNIFE"], ["grenade", "GRENADE"],
 	["skill_1", "SKILL 1"], ["skill_2", "SKILL 2 (ULTIMATE)"], ["weapon_1", "WEAPON 1"], ["weapon_2", "WEAPON 2"],
 	["throw_c4", "C4 (TAP / HOLD)"], ["place_mine", "PLACE MINE"], ["borrowed_skill", "RELIC SKILL 1"], ["borrowed_skill_2", "RELIC SKILL 2"],
+	["map", "FULL MAP"], ["scoreboard", "SCOREBOARD (HOLD)"],
 ]
 var _default_events: Dictionary = {}
 
@@ -668,6 +676,8 @@ func reset_run() -> void:
 	bosses_slain = 0
 	commanders_slain = 0
 	challenges_done = 0
+	downs = 0
+	run_time = 0.0
 	round_event = ""
 	for k in powerup_timers.keys():
 		powerup_timers[k] = 0.0
@@ -885,6 +895,11 @@ const META_UNLOCKS := [
 	{"level": 6, "id": "relic_luck", "text": "RELIC LUCK: STAT RELICS MAY UPGRADE A RARITY"},
 	{"level": 8, "id": "start_smg", "text": "START WITH THE KURZ-9 SMG"},
 	{"level": 10, "id": "damage", "text": "+6% WEAPON DAMAGE"},
+	{"level": 12, "id": "challenge_pay", "text": "ROUND CHALLENGES PAY +50%"},
+	{"level": 14, "id": "second_wind", "text": "START EVERY RUN WITH 1 SECOND WIND"},
+	{"level": 16, "id": "armor", "text": "25 OVERSHIELD AT THE START OF EVERY ROUND"},
+	{"level": 18, "id": "points_1250", "text": "+750 MORE STARTING POINTS"},
+	{"level": 20, "id": "reload", "text": "+10% RELOAD & WEAPON SWAP SPEED"},
 ]
 var difficulty: int = 1 # 0 easy, 1 normal, 2 hard (the host's choice in co-op)
 var career_xp: int = 0
@@ -950,7 +965,7 @@ func has_unlock(id: String) -> bool:
 
 
 func start_points() -> int:
-	return 500 + (250 if has_unlock("points_250") else 0) + (500 if has_unlock("points_500") else 0)
+	return 500 + (250 if has_unlock("points_250") else 0) + (500 if has_unlock("points_500") else 0) + (750 if has_unlock("points_1250") else 0)
 
 
 func run_score(outcome: String) -> int:

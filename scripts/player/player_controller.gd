@@ -198,6 +198,8 @@ func _ready() -> void:
 	add_to_group("net_players")
 	if GameState.has_unlock("grenade"):
 		grenades += 1
+	if GameState.has_unlock("second_wind"):
+		revives += 1
 	if GameState.has_unlock("start_smg") and not weapons_owned.has("smg"):
 		weapons_owned.append("smg")
 		mag_ammo["smg"] = GameState.WEAPONS["smg"]["mag_size"]
@@ -399,7 +401,7 @@ func speed_mult() -> float:
 
 
 func dex_mult() -> float:
-	return (1.0 + 0.07 * stat_eff("dexterity")) * (1.25 if has_perk("hands") else 1.0) * (1.2 if adrenaline_timer > 0.0 else 1.0)
+	return (1.0 + 0.07 * stat_eff("dexterity")) * (1.25 if has_perk("hands") else 1.0) * (1.2 if adrenaline_timer > 0.0 else 1.0) * (1.1 if GameState.has_unlock("reload") else 1.0)
 
 
 func stamina_duration() -> float:
@@ -1533,6 +1535,7 @@ func _go_down(self_revive: bool = true) -> void:
 		revives -= 1
 	self_reviving = self_revive
 	is_downed = true
+	GameState.downs += 1
 	downed_timer = DOWNED_TIME
 	bleedout_timer = BLEEDOUT_TIME
 	if is_monster_form:

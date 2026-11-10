@@ -58,6 +58,8 @@ func _ready() -> void:
 		GameState.show_crosshair = on)
 	_toggle("DAMAGE NUMBERS", GameState.damage_numbers, func(on: bool):
 		GameState.damage_numbers = on)
+	_toggle("MINIMAP", GameState.show_minimap, func(on: bool):
+		GameState.show_minimap = on)
 	_build_keys()
 
 
