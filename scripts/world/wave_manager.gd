@@ -71,15 +71,20 @@ func setup(p_arena: BunkerArena, p_player: PlayerController, p_container: Node3D
 
 
 func start_round(round_num: int) -> void:
+	var ev := _pick_event(round_num)
 	if Net.is_online():
-		_c_round.rpc(round_num)
-	_present_round(round_num)
+		_c_round.rpc(round_num, ev)
+	_present_round(round_num, ev)
 	_roll_round_leaders(round_num)
+	if ev == "cunning":
+		_commander_due = true
+	elif ev == "relic_drop":
+		_event_relic_drop()
 	var n := Net.player_count()
 	var crowd := 1.0 + 0.55 * float(n - 1)
 	in_intermission = false
 	drops_this_round = 0
-	zombies_to_spawn = int(round(float(6 + round_num * 3) * crowd * GameState.diff("crowd")))
+	zombies_to_spawn = int(round(float(6 + round_num * 3) * crowd * GameState.diff("crowd") * (1.8 if ev == "swarm" else 1.0)))
 	hounds_to_spawn = 0
 	if hound_round:
 		zombies_to_spawn = 0
@@ -93,14 +98,64 @@ func start_round(round_num: int) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func _c_round(round_num: int) -> void:
+func _c_round(round_num: int, ev: String = "") -> void:
 	in_intermission = false
-	_present_round(round_num)
+	_present_round(round_num, ev)
+
+
+# Special rounds: from round 4, about two rounds in five change the rules.
+var _last_event_round: int = -9
+
+
+func _pick_event(round_num: int) -> String:
+	if round_num < 4 or (round_num == GameState.FINAL_ROUND and GameState.game_mode == "casual"):
+		return ""
+	if round_num - _last_event_round < 2 or randf() > 0.42:
+		return ""
+	var pool := ["blood_moon", "swarm", "dead_fog", "relic_drop"]
+	if round_num >= 6:
+		pool.append("cunning")
+	if round_num >= 8:
+		pool.append("toxic")
+	_last_event_round = round_num
+	return pool[randi() % pool.size()]
+
+
+# A relic for every player lands in an open part of the map, away from them
+func _event_relic_drop() -> void:
+	var focus := _focus_pos()
+	var spots: Array = []
+	for zid in arena.boss_points:
+		if not arena.is_zone_open(zid):
+			continue
+		for p in arena.boss_points[zid]:
+			if (p as Vector3).distance_to(focus) > 16.0:
+				spots.append([p, zid])
+	var pos: Vector3 = arena.get_boss_spawn(focus)
+	var zone := String(arena.zone_at(pos))
+	if not spots.is_empty():
+		var pick: Array = spots[randi() % spots.size()]
+		pos = pick[0]
+		zone = String(pick[1])
+	_boss_relics(pos, 1.0)
+	var where: String = arena.zone_names.get(zone, "MAP")
+	get_tree().create_timer(3.0).timeout.connect(func():
+		_banner_all("RELIC DROP — A RELIC FELL IN THE %s. GRAB IT WITHIN 2 MINUTES" % where, GameState.ROUND_EVENTS["relic_drop"]["color"]))
 
 
 # What every player sees and gets when a round begins.
-func _present_round(round_num: int) -> void:
+func _present_round(round_num: int, ev: String = "") -> void:
 	GameState.current_round = round_num
+	GameState.round_event = ev
+	var atmo := get_parent().get_node_or_null("Atmosphere")
+	if atmo and atmo.has_method("set_event"):
+		atmo.set_event(ev)
+	if ev != "" and ev != "relic_drop":
+		var info: Dictionary = GameState.ROUND_EVENTS[ev]
+		get_tree().create_timer(3.0).timeout.connect(func():
+			if GameState.round_event == ev and is_instance_valid(player):
+				GameState.play_sfx("hound_round_sting", -2.0, 1.0)
+				player.status_banner_requested.emit("%s — %s" % [info["name"], info["desc"]], info["color"]))
 	GameState.round_changed.emit(round_num)
 	hound_round = false # hound raids removed
 	if hound_round:
@@ -180,7 +235,7 @@ func _nearest_player(pos: Vector3) -> Node3D:
 
 
 func _max_alive() -> int:
-	return mini(MAX_ALIVE + 3 * (Net.player_count() - 1), 36)
+	return mini(MAX_ALIVE + 3 * (Net.player_count() - 1) + (6 if GameState.round_event == "swarm" else 0), 36)
 
 
 func _net_register(z: ZombieEnemy, data: Dictionary) -> void:
@@ -225,7 +280,7 @@ func _process(delta: float) -> void:
 	if zombies_to_spawn > 0 and alive_enemies < _max_alive():
 		spawn_timer -= delta
 		if spawn_timer <= 0.0:
-			spawn_timer = maxf(0.55, 1.9 - float(GameState.current_round) * 0.12)
+			spawn_timer = maxf(0.55, 1.9 - float(GameState.current_round) * 0.12) * (0.6 if GameState.round_event == "swarm" else 1.0)
 			zombies_to_spawn -= 1
 			_spawn_regular_zombie(GameState.current_round)
 
@@ -296,10 +351,13 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	z.add_to_group("enemies")
 
 	var variant := forced_variant
+	var ev := GameState.round_event if forced_pos == Vector3.INF else ""
 	if variant == "":
 		var roll := randf()
 		var sp := GameState.diff("special")
-		if round_num >= 10 and randf() < 0.1 * sp and _count_alive("spitter") < int(3 * sp):
+		if ev == "toxic" and randf() < 0.32 and _count_alive("bloater") + _count_alive("spitter") < 8:
+			variant = "bloater" if randf() < 0.5 else "spitter"
+		elif round_num >= 10 and randf() < 0.1 * sp and _count_alive("spitter") < int(3 * sp):
 			variant = "spitter"
 		elif round_num >= 10 and randf() < 0.12 * sp and _count_alive("shielded") < int(4 * sp):
 			variant = "shielded"
@@ -326,10 +384,10 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	enemies_container.add_child(z)
 	z.global_position = sp
 	z.setup_regular(round_num, variant)
-	z.max_hp *= (1.0 + 0.12 * float(Net.player_count() - 1)) * GameState.diff_hp_mult()
+	z.max_hp *= (1.0 + 0.12 * float(Net.player_count() - 1)) * GameState.diff_hp_mult() * (0.5 if ev == "swarm" else 1.0)
 	z.hp = z.max_hp
 	z.base_damage *= GameState.diff_dmg_mult()
-	z.base_speed *= GameState.diff("speed")
+	z.base_speed *= GameState.diff("speed") * (1.15 if ev == "blood_moon" else 1.0)
 	z.target_player = _nearest_player(sp)
 	if window:
 		z.set_entry_window(window)
@@ -343,7 +401,7 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	elif _commander_due and leader_ok and _count_commanders() == 0:
 		_commander_due = false
 		z.apply_tier(_natural_commander_tier(round_num))
-	elif randf() < clampf(0.25 + 0.05 * float(GameState.difficulty - 1) + 0.01 * float(round_num), 0.15, 0.6):
+	elif ev == "cunning" or randf() < clampf(0.25 + 0.05 * float(GameState.difficulty - 1) + 0.01 * float(round_num), 0.15, 0.6):
 		z.apply_tier(2)
 	_net_register(z, {"k": "z", "v": variant, "r": round_num, "w": arena.windows.find(window) if window else -1,
 		"t": z.tier, "cn": z.commander_name, "sk": z.stolen_skill, "nm": z.is_nemesis})

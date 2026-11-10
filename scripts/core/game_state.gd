@@ -15,6 +15,17 @@ var total_kills: int = 0
 var headshots: int = 0
 var bosses_slain: int = 0
 var commanders_slain: int = 0
+var challenges_done: int = 0
+# Special rounds: now and then a round changes the rules (see ROUND_EVENTS)
+var round_event: String = ""
+const ROUND_EVENTS := {
+	"blood_moon": {"name": "BLOOD MOON", "desc": "ZOMBIES ARE FASTER  •  ALL POINTS x1.5", "color": Color(1.0, 0.25, 0.2)},
+	"swarm": {"name": "THE SWARM", "desc": "ALMOST TWICE AS MANY ZOMBIES, EACH ONE WEAKER", "color": Color(1.0, 0.7, 0.25)},
+	"dead_fog": {"name": "DEAD FOG", "desc": "YOU CAN BARELY SEE  •  HEADSHOT BONUS x3", "color": Color(0.72, 0.82, 0.88)},
+	"cunning": {"name": "NIGHT OF THE CUNNING", "desc": "EVERY ZOMBIE IS A STALKER, LED BY A COMMANDER  •  POINTS x1.25", "color": Color(1.0, 0.85, 0.2)},
+	"toxic": {"name": "TOXIC TIDE", "desc": "BLOATERS AND SPITTERS EVERYWHERE  •  POINTS x1.25", "color": Color(0.45, 1.0, 0.35)},
+	"relic_drop": {"name": "RELIC DROP", "desc": "A RELIC FELL SOMEWHERE ON THE MAP", "color": Color(0.78, 0.55, 1.0)},
+}
 # The commander that killed you last: {"name", "tier", "skill", "kills"}.
 # It returns in later runs until you kill it.
 var nemesis: Dictionary = {}
@@ -656,6 +667,8 @@ func reset_run() -> void:
 	headshots = 0
 	bosses_slain = 0
 	commanders_slain = 0
+	challenges_done = 0
+	round_event = ""
 	for k in powerup_timers.keys():
 		powerup_timers[k] = 0.0
 	powerups_changed.emit()
@@ -663,9 +676,18 @@ func reset_run() -> void:
 	round_changed.emit(current_round)
 
 
+func event_points_mult() -> float:
+	match round_event:
+		"blood_moon":
+			return 1.5
+		"cunning", "toxic":
+			return 1.25
+	return 1.0
+
+
 func add_points(amount: int) -> void:
 	if amount > 0:
-		amount = int(round(float(amount) * points_mult * diff("points")))
+		amount = int(round(float(amount) * points_mult * diff("points") * event_points_mult()))
 		if is_powerup_active("double_points"):
 			amount *= 2
 	points += amount
@@ -932,7 +954,7 @@ func start_points() -> int:
 
 
 func run_score(outcome: String) -> int:
-	var s := total_kills * 10 + headshots * 5 + bosses_slain * 500 + commanders_slain * 300 + current_round * 250
+	var s := total_kills * 10 + headshots * 5 + bosses_slain * 500 + commanders_slain * 300 + challenges_done * 150 + current_round * 250
 	if outcome == "exfil":
 		s += 3000
 	elif outcome == "victory":

@@ -209,7 +209,7 @@ func _send_late_state(peer: int) -> void:
 			doors.append(i)
 		if "_running" in n and n._running:
 			power = true
-	_c_late_state.rpc_id(peer, {"round": GameState.current_round, "boards": boards, "doors": doors, "power": power,
+	_c_late_state.rpc_id(peer, {"round": GameState.current_round, "event": GameState.round_event, "boards": boards, "doors": doors, "power": power,
 		"intermission": wave_mgr.in_intermission})
 	for z in zombies.values():
 		if is_instance_valid(z) and not z.is_dead and z.has_meta("spawn"):
@@ -237,7 +237,7 @@ func _c_late_state(st: Dictionary) -> void:
 		if int(k) < world_nodes.size():
 			world_nodes[int(k)].net_apply("set", [int(boards[k])])
 	wave_mgr.in_intermission = bool(st.get("intermission", false))
-	wave_mgr._present_round(int(st.get("round", 1)))
+	wave_mgr._present_round(int(st.get("round", 1)), String(st.get("event", "")))
 	player.status_banner_requested.emit("JOINED THE SQUAD ON ROUND %d" % int(st.get("round", 1)), Color(0.55, 0.9, 1.0))
 
 

@@ -46,6 +46,10 @@ func _ready() -> void:
 	atmo.setup(arena, weather)
 
 	hud.setup(player, wave_mgr)
+	var challenge: Node = (load("res://scripts/world/round_challenge.gd") as GDScript).new()
+	challenge.name = "RoundChallenge"
+	add_child(challenge)
+	challenge.setup(player, wave_mgr)
 	if GameState.pending_resume and not Net.is_online():
 		player.import_state(GameState.load_player_state(GameState.run_id))
 	wave_mgr.setup(arena, player, enemies_container)

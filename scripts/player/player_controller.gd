@@ -10,6 +10,7 @@ signal player_died()
 signal damaged(from_pos: Vector3)
 signal stats_changed()
 signal kill_streak(count: int)
+signal enemy_killed(z: ZombieEnemy, headshot: bool)
 signal downed_changed(is_downed: bool)
 
 const FragGrenadeScript := preload("res://scripts/player/frag_grenade.gd")
@@ -1425,8 +1426,9 @@ func _fire_tesla_charge() -> void:
 # DAMAGE, REWARDS & LOADOUT
 # ---------------------------------------------------------------------------
 func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
-	var pts := z.point_reward + (40 if was_headshot else 0)
+	var pts := z.point_reward + ((120 if GameState.round_event == "dead_fog" else 40) if was_headshot else 0)
 	GameState.add_points(pts)
+	enemy_killed.emit(z, was_headshot)
 	GameState.total_kills += 1
 	var now := Time.get_ticks_msec() / 1000.0
 	_streak = _streak + 1 if now - _streak_t < 1.6 else 1

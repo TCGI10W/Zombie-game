@@ -74,7 +74,9 @@ func _process(delta: float) -> void:
 
 	# Haze thickens with the rain
 	if _env:
-		_env.fog_density = 0.0035 + 0.011 * intensity
+		_env.fog_density = 0.0035 + 0.011 * intensity + _event_fog
+	if _moon and _moon.visible and cam:
+		_moon.global_position = cam.global_position + Vector3(60.0, 50.0, -122.0)
 
 	# Storm lightning in heavy rain
 	if intensity > 0.7 and weather:
@@ -435,3 +437,60 @@ func _ambient_event(cam_pos: Vector3) -> void:
 				_one_shot("bell_far", Vector3(1, 12, -50), -6.0, 1.0)
 			else:
 				_one_shot("train_horn", Vector3(-90, 4, 30), -4.0, _rng.randf_range(0.95, 1.05))
+
+
+# ---------------------------------------------------------------------------
+# SPECIAL ROUNDS: the sky and the air change with the round's event
+# ---------------------------------------------------------------------------
+var _event_fog: float = 0.0
+var _event_tw: Tween
+var _moon: MeshInstance3D
+var _base_amb: Color = Color(-1, 0, 0)
+var _base_fogc: Color
+
+
+func set_event(kind: String) -> void:
+	if _env == null:
+		return
+	if _base_amb.r < 0.0:
+		_base_amb = _env.ambient_light_color
+		_base_fogc = _env.fog_light_color
+	var amb := _base_amb
+	var fogc := _base_fogc
+	var fog := 0.0
+	match kind:
+		"blood_moon":
+			amb = Color(0.44, 0.1, 0.08)
+			fogc = Color(0.32, 0.05, 0.04)
+			fog = 0.004
+		"dead_fog":
+			fog = 0.06
+			fogc = Color(0.3, 0.33, 0.36)
+		"toxic":
+			amb = Color(0.12, 0.23, 0.11)
+			fogc = Color(0.06, 0.14, 0.05)
+			fog = 0.008
+		"cunning":
+			amb = Color(0.22, 0.19, 0.1)
+	if _event_tw:
+		_event_tw.kill()
+	_event_tw = create_tween().set_parallel(true)
+	_event_tw.tween_property(_env, "ambient_light_color", amb, 3.0)
+	_event_tw.tween_property(_env, "fog_light_color", fogc, 3.0)
+	_event_tw.tween_property(self, "_event_fog", fog, 3.0)
+	if kind == "blood_moon" and _moon == null:
+		_moon = MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 9.0
+		sm.height = 18.0
+		_moon.mesh = sm
+		var mm := StandardMaterial3D.new()
+		mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mm.albedo_color = Color(1.5, 0.13, 0.08) # a little brighter than white so it glows
+		mm.disable_fog = true
+		_moon.material_override = mm
+		_moon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_moon.top_level = true
+		add_child(_moon)
+	if _moon:
+		_moon.visible = kind == "blood_moon"

@@ -117,6 +117,7 @@ func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	add_to_group("hud")
 	_build_ui()
 	_build_commander_bar()
+	_build_objectives()
 	_build_downed_overlay()
 	_build_exfil_label()
 	_connect_signals()
@@ -725,6 +726,50 @@ func _build_ui() -> void:
 
 
 # ---------------------------------------------------------------------------
+# OBJECTIVES (top-left): the round's special event and your challenge
+# ---------------------------------------------------------------------------
+var event_lbl: Label
+var challenge_lbl: Label
+var _challenge: Node
+
+
+func _objective_label(y: float, size: int) -> Label:
+	var l := Label.new()
+	l.position = Vector2(14, y)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_constant_override("outline_size", 6)
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	add_child(l)
+	move_child(l, 1)
+	return l
+
+
+func _build_objectives() -> void:
+	event_lbl = _objective_label(30, 16)
+	challenge_lbl = _objective_label(54, 15)
+
+
+func _update_objectives() -> void:
+	if event_lbl == null:
+		return
+	var ev := GameState.round_event
+	if ev != "" and GameState.ROUND_EVENTS.has(ev):
+		var info: Dictionary = GameState.ROUND_EVENTS[ev]
+		event_lbl.text = "⚠ %s — %s" % [info["name"], info["desc"]]
+		event_lbl.add_theme_color_override("font_color", info["color"])
+		event_lbl.visible = true
+	else:
+		event_lbl.visible = false
+	challenge_lbl.position.y = 54 if event_lbl.visible else 30
+	if not is_instance_valid(_challenge):
+		_challenge = get_parent().get_node_or_null("RoundChallenge")
+	if _challenge:
+		challenge_lbl.text = _challenge.hud_text()
+		challenge_lbl.add_theme_color_override("font_color", _challenge.hud_color())
+
+
+# ---------------------------------------------------------------------------
 # COMMANDER BAR: the nearest thinking zombie - rank, health, what it is doing
 # ---------------------------------------------------------------------------
 var cmd_panel: PanelContainer
@@ -963,6 +1008,7 @@ func _process(delta: float) -> void:
 	_update_heartbeat(delta)
 	_update_exfil_label()
 	_update_commander_bar(delta)
+	_update_objectives()
 	if player.is_downed:
 		if player.self_reviving:
 			downed_bar.value = 1.0 - player.downed_timer / PlayerController.DOWNED_TIME
@@ -1110,7 +1156,7 @@ func _update_skill_cards() -> void:
 				if player.monster_slam_cd > 0.0:
 					skill_f_state.text = "COOLDOWN %.1fs" % player.monster_slam_cd
 				else:
-					skill_f_state.text = "AOE + 4.0s STUN (READY!)"
+					skill_f_state.text = "AOE STUN: 1s + 0.2s PER ZOMBIE (READY!)"
 			else:
 				skill_q_title.text = GameState.keyify("[Q] FERAL LUNGE SLASH")
 				skill_q_state.text = ("CD %.1fs" % player.human_lunge_cd) if player.human_lunge_cd > 0.0 else "READY"
