@@ -274,7 +274,7 @@ func _draw_mini() -> void:
 func _draw_big() -> void:
 	if not is_instance_valid(player) or arena == null:
 		return
-	var vp := _big_canvas.size
+	var vp := get_viewport_rect().size
 	var span := MAP_MAX - MAP_MIN
 	var scale_px := minf((vp.x * 0.62) / span.x, (vp.y * 0.78) / span.y)
 	var size_px := span * scale_px
@@ -282,7 +282,7 @@ func _draw_big() -> void:
 	var to_map := func(w: Vector2) -> Vector2:
 		return top_left + (w - MAP_MIN) * scale_px
 	var frame := Rect2(top_left - Vector2(18, 44), size_px + Vector2(36, 96))
-	_big_canvas.draw_rect(frame, Color(0.02, 0.03, 0.045, 0.9))
+	_big_canvas.draw_rect(frame, Color(0.02, 0.03, 0.045, 0.96))
 	_big_canvas.draw_rect(frame, Color(0.75, 0.2, 0.16, 0.9), false, 2.0)
 	_big_canvas.draw_string(_font, frame.position + Vector2(16, 28), "OUTPOST NACHT-7  —  TACTICAL MAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
 	_big_canvas.draw_string(_font, frame.position + Vector2(frame.size.x - 150, 28), "%s TO CLOSE" % GameState.key_label("map"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.72, 0.78))
@@ -322,5 +322,6 @@ func _draw_big() -> void:
 	_big_canvas.draw_colored_polygon(tri, Color(1, 1, 1))
 	tri.append(tri[0])
 	_big_canvas.draw_polyline(tri, Color.BLACK, 1.5)
-	var legend := "A AMMO   W WEAPON   F FURNACE   $ SUPPLY DEPOT   + SECOND WIND   ? MYSTERY CRATE   G GENERATOR   U WEAPON FORGE   R RADIO   D LOCKED DOOR      ◆ COMMANDER   ● BOSS   ✦ RELIC"
-	_big_canvas.draw_string(_font, Vector2(frame.position.x + 16, frame.end.y - 16), legend, HORIZONTAL_ALIGNMENT_LEFT, frame.size.x - 32, 12, Color(0.75, 0.78, 0.84))
+	var lc := Color(0.75, 0.78, 0.84)
+	_big_canvas.draw_string(_font, Vector2(frame.position.x + 16, frame.end.y - 30), "A AMMO   W WEAPON   F FURNACE   $ SUPPLY DEPOT   + SECOND WIND   ? MYSTERY CRATE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, lc)
+	_big_canvas.draw_string(_font, Vector2(frame.position.x + 16, frame.end.y - 12), "G GENERATOR   U WEAPON FORGE   R RADIO   D LOCKED DOOR   DIAMOND = COMMANDER   RED DOT = BOSS   STAR = RELIC", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, lc)

@@ -59,7 +59,10 @@ func _spawn_all() -> void:
 		z.process_mode = Node.PROCESS_MODE_DISABLED
 		if i % 2 == 1:
 			z.tier = 2 + (i % 4)
-			z._tier_visuals() # tier glow materials
+			z._tier_visuals() # tier outline, aura ring and shield bubble
+			if z._shield_mesh:
+				z._shield_mesh.visible = true
+				z._warn_ring(z.global_position, 1.5, Color(1.0, 0.4, 0.1), 1.0)
 		_things.append(z)
 		i += 1
 	for r in range(1, 6):

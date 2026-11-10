@@ -122,7 +122,6 @@ func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	minimap = (load("res://scripts/ui/minimap.gd") as GDScript).new()
 	minimap.name = "Minimap"
 	add_child(minimap)
-	move_child(minimap, 1)
 	minimap.setup(player, get_tree().get_first_node_in_group("arena"), wave_mgr)
 	_build_downed_overlay()
 	_build_exfil_label()
@@ -751,6 +750,7 @@ func _build_scoreboard() -> void:
 	score_panel.offset_left = -430
 	score_panel.offset_right = 430
 	score_panel.offset_top = -230
+	score_panel.offset_bottom = -230
 	score_panel.grow_vertical = Control.GROW_DIRECTION_END
 	score_panel.visible = false
 	score_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1128,7 +1128,7 @@ func _process(delta: float) -> void:
 	_update_objectives()
 	_update_scoreboard(delta)
 	if minimap:
-		minimap.visible = GameState.show_minimap and not player.is_dead
+		minimap.visible = GameState.show_minimap and not player.is_dead and not modal_overlay.visible
 	if player.is_downed:
 		if player.self_reviving:
 			downed_bar.value = 1.0 - player.downed_timer / PlayerController.DOWNED_TIME

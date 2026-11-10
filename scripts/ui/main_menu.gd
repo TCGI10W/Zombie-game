@@ -209,6 +209,7 @@ func _build_ui() -> void:
 	_nav_button(rail, "play", "PLAY", "SOLO RUN", func(): _show_page("play"))
 	_nav_button(rail, "coop", "CO-OP", "UP TO 8 PLAYERS", func(): _show_page("coop"))
 	_nav_button(rail, "career", "CAREER", "LEVEL, UNLOCKS & RECORDS", func(): _show_page("career"))
+	_nav_button(rail, "intel", "INTEL", "ZOMBIE RANKS, EVENTS & TIPS", func(): _show_page("intel"))
 	_nav_button(rail, "options", "OPTIONS", "AUDIO, CONTROLS, VIDEO", func(): _show_page("options"))
 	_nav_button(rail, "quit", "QUIT", "", func(): get_tree().quit())
 
@@ -253,6 +254,7 @@ func _build_ui() -> void:
 	_pages["play"] = _build_play_page()
 	_pages["coop"] = _build_coop_page()
 	_pages["career"] = _build_career_page()
+	_pages["intel"] = _build_intel_page()
 	var opts := OptionsPanel.new()
 	opts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pages["options"] = opts
@@ -278,7 +280,7 @@ func _nav_button(parent: Control, key: String, title: String, sub: String, on_pr
 
 
 func _show_page(key: String) -> void:
-	var titles := {"play": "PLAY", "coop": "CO-OP SQUAD", "career": "CAREER", "options": "OPTIONS"}
+	var titles := {"play": "PLAY", "coop": "CO-OP SQUAD", "career": "CAREER", "intel": "INTEL", "options": "OPTIONS"}
 	_content_title.text = titles.get(key, "")
 	for k in _pages:
 		_pages[k].visible = k == key
@@ -483,11 +485,66 @@ func _build_career_page() -> Control:
 	for u in GameState.META_UNLOCKS:
 		var got: bool = lvl >= int(u["level"])
 		v.add_child(_label("%s  LEVEL %d  —  %s" % ["■" if got else "□", u["level"], u["text"]], 14, Color(0.55, 1.0, 0.6) if got else Color(0.55, 0.57, 0.62)))
+	_header(v, "NEMESIS")
+	if GameState.nemesis.is_empty():
+		v.add_child(_label("None. Die while a commander is still standing and it will remember you.", 14, Color(0.7, 0.73, 0.78), true))
+	else:
+		var nm: Dictionary = GameState.nemesis
+		var nt := clampi(int(nm.get("tier", 3)), 3, 5)
+		v.add_child(_label("%s  %s %s" % [String(nm.get("name", "")), "★".repeat(nt), ZombieEnemy.TIER_NAMES[nt]], 18, ZombieEnemy.TIER_COLORS[nt]))
+		v.add_child(_label("Killed you %d time(s). It hunts you from round 4 of your next runs. Kill it for +2500 points and a relic." % int(nm.get("kills", 1)), 13, Color(0.7, 0.73, 0.78), true))
+	_header(v, "LIFETIME")
+	v.add_child(_label("RUNS: %d   •   ZOMBIES KILLED: %d   •   BOSSES: %d" % [GameState.life_runs, GameState.life_kills, GameState.life_bosses], 14))
+	v.add_child(_label("COMMANDERS SLAIN: %d   •   NEMESES SLAIN: %d" % [GameState.life_commanders, GameState.life_nemesis_slain], 14))
 	_header(v, "RECORDS")
 	v.add_child(_label("BEST ROUND (CASUAL): %d" % GameState.best_round, 14))
 	v.add_child(_label("BEST ROUND (INFINITE): %d" % GameState.best_round_infinite, 14))
 	v.add_child(_label("MOST KILLS IN A RUN: %d" % GameState.best_kills, 14))
 	v.add_child(_label("SUCCESSFUL EXTRACTIONS: %d" % GameState.exfils, 14))
+	v.visible = false
+	return v
+
+
+# ---------------------------------------------------------------------------
+# INTEL: how the zombie ranks, special rounds and challenges work
+# ---------------------------------------------------------------------------
+func _build_intel_page() -> Control:
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var body := Color(0.8, 0.82, 0.87)
+	var add := func(text: String, col: Color = body, size: int = 13) -> void:
+		v.add_child(_label(text, size, col, true))
+	_header(v, "ZOMBIE RANKS")
+	var ranks := [
+		[1, "Mindless. Walks straight at you."],
+		[2, "Yellow outline. Sidesteps when shot, leaps the last few metres and runs from grenades."],
+		[3, "Talks. Leads from behind, gives orders (traps, flanks, bodyguards, rushes when you reload) and uses a skill stolen from an operator's brain. Zombies inside its ring fight harder."],
+		[4, "Also rallies the horde, raises crawlers from the ground and eats its own zombies to heal."],
+		[5, "Also summons more zombies and lets out a psychic scream. Shoot its head to interrupt the scream."],
+	]
+	for r in ranks:
+		var t := int(r[0])
+		add.call("%s %s" % ["★".repeat(t), ZombieEnemy.TIER_NAMES[t]], ZombieEnemy.TIER_COLORS[t] if t > 1 else Color(0.9, 0.9, 0.9), 15)
+		add.call(String(r[1]))
+	_header(v, "HOW THEY RANK UP")
+	add.call("• BRAIN FEAST: when a player goes down, the nearest zombies fight over the brain. The winner goes up one rank and learns that operator's skill. Kill them before one eats it.")
+	add.call("• TASTE OF BLOOD: a zombie that hits you 3 times becomes a Stalker; a Stalker that hits 6 more times becomes a Commander.")
+	add.call("• From round 6 commanders also arrive on their own, later even Warlords and Overlords.")
+	_header(v, "FIGHTING A COMMANDER")
+	add.call("• BODYGUARDS: a glowing bubble means its guards are close and it takes far less damage. Kill the guards first.")
+	add.call("• SEISMIC SLAM (orange circle): jump to dodge.   TOXIN FLASK (green pool): step out.   ARC CHARGE (blue circle): leave before it bursts.")
+	add.call("• When its horde is dead it stops hiding and charges.")
+	add.call("• Killing it stuns every zombie around it and can drop a relic.")
+	_header(v, "NEMESIS")
+	add.call("If you die while a commander is still standing, it remembers you and returns in later runs (from round 4). Kill it for +2500 points and a guaranteed relic. If it kills you again it gains a rank.")
+	_header(v, "SPECIAL ROUNDS (FROM ROUND 4)")
+	for k in GameState.ROUND_EVENTS:
+		var ev: Dictionary = GameState.ROUND_EVENTS[k]
+		add.call("%s — %s" % [ev["name"], String(ev["desc"]).to_lower().capitalize()], ev["color"])
+	_header(v, "CHALLENGES, MAP AND SCOREBOARD")
+	add.call("• Every round gives you one optional challenge (top-left). Finishing it pays points; every 4th one in a run gives a free stat level.")
+	add.call("• The minimap shows zones, stations, your squad, relics, bosses and commanders, but not regular zombies. Press [M] for the full map, hold [TAB] for the scoreboard.")
 	v.visible = false
 	return v
 
