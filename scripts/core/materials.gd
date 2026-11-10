@@ -39,6 +39,8 @@ func get_pbr(prefix: String, uv_scale: float = 0.35, tint: Color = Color.WHITE, 
 
 
 const WorldShader := preload("res://assets/shaders/world_surface.gdshader")
+const RimShader := preload("res://assets/shaders/rim_glow.gdshader")
+const WarnShader := preload("res://assets/shaders/warn_zone.gdshader")
 
 
 # Map surfaces (walls, floors, ground): world-space triplanar textures with
@@ -109,4 +111,32 @@ func get_emissive(color: Color, energy: float = 3.5, alpha: float = 1.0) -> Stan
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_cache[key] = mat
+	return mat
+
+
+# Glowing outline overlay (tiered zombies) / energy bubble (bands = 1).
+func get_rim(color: Color, strength: float = 1.2, power: float = 2.2, base: float = 0.0, bands: float = 0.0) -> ShaderMaterial:
+	var key := "rim_%s_%.2f_%.2f_%.2f_%.1f" % [color.to_html(), strength, power, base, bands]
+	if _cache.has(key):
+		return _cache[key]
+	var mat := ShaderMaterial.new()
+	mat.shader = RimShader
+	mat.set_shader_parameter("color", color)
+	mat.set_shader_parameter("strength", strength)
+	mat.set_shader_parameter("power", power)
+	mat.set_shader_parameter("base", base)
+	mat.set_shader_parameter("bands", bands)
+	_cache[key] = mat
+	return mat
+
+
+# Danger circle for a flat PlaneMesh. Not cached: every circle animates its
+# own "fill" (0..1) while the attack charges.
+func new_warn_zone(color: Color, rim: float = 0.05, pulse: float = 1.0) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = WarnShader
+	mat.set_shader_parameter("color", color)
+	mat.set_shader_parameter("rim", rim)
+	mat.set_shader_parameter("pulse", pulse)
+	mat.set_shader_parameter("fill", 0.0)
 	return mat

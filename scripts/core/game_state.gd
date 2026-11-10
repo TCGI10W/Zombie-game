@@ -14,6 +14,16 @@ var current_round: int = 1
 var total_kills: int = 0
 var headshots: int = 0
 var bosses_slain: int = 0
+var commanders_slain: int = 0
+# The commander that killed you last: {"name", "tier", "skill", "kills"}.
+# It returns in later runs until you kill it.
+var nemesis: Dictionary = {}
+# Lifetime totals (career page)
+var life_kills: int = 0
+var life_bosses: int = 0
+var life_commanders: int = 0
+var life_runs: int = 0
+var life_nemesis_slain: int = 0
 
 # Timed power-ups dropped by zombies (seconds remaining)
 var powerup_timers: Dictionary = {"insta_kill": 0.0, "double_points": 0.0, "fire_sale": 0.0}
@@ -320,6 +330,12 @@ func load_save() -> void:
 		show_fps = bool(cfg.get_value("settings", "show_fps", false))
 		difficulty = clampi(int(cfg.get_value("settings", "difficulty", 1)), 0, DIFFICULTIES.size() - 1)
 		career_xp = int(cfg.get_value("records", "career_xp", 0))
+		nemesis = cfg.get_value("records", "nemesis", {})
+		life_kills = int(cfg.get_value("records", "life_kills", 0))
+		life_bosses = int(cfg.get_value("records", "life_bosses", 0))
+		life_commanders = int(cfg.get_value("records", "life_commanders", 0))
+		life_runs = int(cfg.get_value("records", "life_runs", 0))
+		life_nemesis_slain = int(cfg.get_value("records", "life_nemesis_slain", 0))
 	apply_volume()
 
 
@@ -348,6 +364,12 @@ func write_save() -> void:
 	cfg.set_value("settings", "show_fps", show_fps)
 	cfg.set_value("settings", "difficulty", difficulty)
 	cfg.set_value("records", "career_xp", career_xp)
+	cfg.set_value("records", "nemesis", nemesis)
+	cfg.set_value("records", "life_kills", life_kills)
+	cfg.set_value("records", "life_bosses", life_bosses)
+	cfg.set_value("records", "life_commanders", life_commanders)
+	cfg.set_value("records", "life_runs", life_runs)
+	cfg.set_value("records", "life_nemesis_slain", life_nemesis_slain)
 	cfg.save(SAVE_PATH)
 
 
@@ -633,6 +655,7 @@ func reset_run() -> void:
 	total_kills = 0
 	headshots = 0
 	bosses_slain = 0
+	commanders_slain = 0
 	for k in powerup_timers.keys():
 		powerup_timers[k] = 0.0
 	powerups_changed.emit()
@@ -909,7 +932,7 @@ func start_points() -> int:
 
 
 func run_score(outcome: String) -> int:
-	var s := total_kills * 10 + headshots * 5 + bosses_slain * 500 + current_round * 250
+	var s := total_kills * 10 + headshots * 5 + bosses_slain * 500 + commanders_slain * 300 + current_round * 250
 	if outcome == "exfil":
 		s += 3000
 	elif outcome == "victory":
@@ -923,11 +946,18 @@ func finish_run(outcome: String) -> String:
 	var score := run_score(outcome)
 	var before := career_level()
 	var gained := 0
+	var nemesis_note := ""
 	if not _run_finished:
 		_run_finished = true
 		clear_run_save()
 		gained = score / 10
 		career_xp += gained
+		life_kills += total_kills
+		life_bosses += bosses_slain
+		life_commanders += commanders_slain
+		life_runs += 1
+		if outcome == "death":
+			nemesis_note = _update_nemesis()
 		record_run()
 		write_save()
 	var after := career_level()
@@ -935,7 +965,33 @@ func finish_run(outcome: String) -> String:
 	for u in META_UNLOCKS:
 		if int(u["level"]) > before and int(u["level"]) <= after:
 			lines += "\n★ UNLOCKED: %s" % u["text"]
+	if nemesis_note != "":
+		lines += "\n" + nemesis_note
 	return lines
+
+
+# You died: the strongest commander still standing remembers you and comes
+# back in later runs. If it already was your nemesis, it grows a tier.
+func _update_nemesis() -> String:
+	var best: Node = null
+	for c in get_tree().get_nodes_in_group("commanders"):
+		if not is_instance_valid(c) or c.is_dead:
+			continue
+		if c.is_nemesis:
+			best = c
+			break
+		if best == null or c.tier > best.tier:
+			best = c
+	if best == null:
+		return ""
+	if best.is_nemesis:
+		nemesis["tier"] = mini(5, int(nemesis.get("tier", 3)) + 1)
+		nemesis["kills"] = int(nemesis.get("kills", 1)) + 1
+		return "YOUR NEMESIS %s KILLED YOU AGAIN AND GROWS STRONGER" % String(nemesis.get("name", ""))
+	if nemesis.is_empty() or best.tier >= int(nemesis.get("tier", 3)):
+		nemesis = {"name": best.commander_name, "tier": best.tier, "skill": best.stolen_skill, "kills": 1}
+		return "%s WILL REMEMBER YOU — IT IS NOW YOUR NEMESIS" % best.commander_name
+	return ""
 
 
 # ---------------------------------------------------------------------------

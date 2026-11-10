@@ -116,6 +116,7 @@ func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("hud")
 	_build_ui()
+	_build_commander_bar()
 	_build_downed_overlay()
 	_build_exfil_label()
 	_connect_signals()
@@ -723,6 +724,96 @@ func _build_ui() -> void:
 	mv.add_child(menu_btn)
 
 
+# ---------------------------------------------------------------------------
+# COMMANDER BAR: the nearest thinking zombie - rank, health, what it is doing
+# ---------------------------------------------------------------------------
+var cmd_panel: PanelContainer
+var cmd_title: Label
+var cmd_bar: ProgressBar
+var cmd_status: Label
+var _cmd_fill: StyleBoxFlat
+var _cmd_border: StyleBoxFlat
+var _cmd_t: float = 0.0
+
+
+func _build_commander_bar() -> void:
+	cmd_panel = PanelContainer.new()
+	cmd_panel.anchor_left = 0.5
+	cmd_panel.anchor_right = 0.5
+	cmd_panel.offset_left = -260
+	cmd_panel.offset_right = 260
+	cmd_panel.offset_top = 18
+	cmd_panel.visible = false
+	cmd_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_cmd_border = _make_panel_style(Color(0.06, 0.05, 0.07, 0.8), Color(1.0, 0.5, 0.1), 6, 2)
+	cmd_panel.add_theme_stylebox_override("panel", _cmd_border)
+	add_child(cmd_panel)
+	move_child(cmd_panel, 1)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 3)
+	cmd_panel.add_child(v)
+	cmd_title = Label.new()
+	cmd_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cmd_title.add_theme_font_size_override("font_size", 15)
+	v.add_child(cmd_title)
+	cmd_bar = ProgressBar.new()
+	cmd_bar.custom_minimum_size = Vector2(0, 8)
+	cmd_bar.show_percentage = false
+	cmd_bar.add_theme_stylebox_override("background", _make_bar_style(Color(0.14, 0.08, 0.06)))
+	_cmd_fill = _make_bar_style(Color(1.0, 0.5, 0.1))
+	cmd_bar.add_theme_stylebox_override("fill", _cmd_fill)
+	v.add_child(cmd_bar)
+	cmd_status = Label.new()
+	cmd_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cmd_status.add_theme_font_size_override("font_size", 11)
+	cmd_status.add_theme_color_override("font_color", Color(0.86, 0.84, 0.8))
+	v.add_child(cmd_status)
+
+
+func _update_commander_bar(delta: float) -> void:
+	if cmd_panel == null:
+		return
+	_cmd_t -= delta
+	if _cmd_t > 0.0:
+		return
+	_cmd_t = 0.12
+	var best: ZombieEnemy = null
+	var best_d := 70.0
+	for c in get_tree().get_nodes_in_group("commanders"):
+		var z := c as ZombieEnemy
+		if z == null or z.is_dead:
+			continue
+		var d := z.global_position.distance_to(player.global_position) * (0.5 if z.is_nemesis else 1.0)
+		if d < best_d:
+			best_d = d
+			best = z
+	if best == null:
+		cmd_panel.visible = false
+		return
+	cmd_panel.visible = true
+	cmd_panel.offset_top = 136 if boss_panel.visible else 18
+	var col: Color = ZombieEnemy.TIER_COLORS[best.tier]
+	cmd_title.text = "%s%s %s — %s" % ["NEMESIS  " if best.is_nemesis else "", "★".repeat(best.tier), ZombieEnemy.TIER_NAMES[best.tier], best.commander_name]
+	cmd_title.add_theme_color_override("font_color", col)
+	_cmd_fill.bg_color = col.darkened(0.12)
+	_cmd_border.border_color = col.darkened(0.2)
+	cmd_bar.max_value = best.max_hp
+	cmd_bar.value = best.hp
+	var info: Dictionary = ZombieEnemy.CommanderBrain.SKILLS.get(best.stolen_skill, {})
+	var status := ""
+	if best.shield_on:
+		status = "SHIELDED BY BODYGUARDS — KILL THEM FIRST"
+	elif best.fx_cast_t > 0.0 and best.fx_cast == "scream":
+		status = "PSYCHIC SCREAM — HEADSHOT TO INTERRUPT!"
+	elif best.fx_cast_t > 0.0 and not info.is_empty():
+		status = "%s — %s!" % [info["name"], info["tip"]]
+	elif best.fx_enraged:
+		status = "ENRAGED — ITS HORDE IS DEAD, IT FIGHTS ALONE"
+	elif not info.is_empty():
+		status = "STOLEN %s SKILL: %s" % [info["from"], info["name"]]
+	cmd_status.text = status
+
+
 func _add_slider_row(parent: Control, title: String, min_v: float, max_v: float, value: float, on_change: Callable) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
@@ -871,6 +962,7 @@ func _process(delta: float) -> void:
 	_update_crosshair()
 	_update_heartbeat(delta)
 	_update_exfil_label()
+	_update_commander_bar(delta)
 	if player.is_downed:
 		if player.self_reviving:
 			downed_bar.value = 1.0 - player.downed_timer / PlayerController.DOWNED_TIME

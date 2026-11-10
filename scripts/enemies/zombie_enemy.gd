@@ -24,6 +24,9 @@ const TIER_COLORS := [Color(0, 0, 0), Color(0.9, 0.9, 0.9), Color(1.0, 0.85, 0.2
 const TIER_HP := [1.0, 1.0, 1.35, 2.4, 3.2, 4.2]
 const TIER_DMG := [1.0, 1.0, 1.2, 1.5, 1.8, 2.2]
 const TIER_SPEED := [1.0, 1.0, 1.06, 1.1, 1.15, 1.2]
+const TIER_NAMES := ["", "ROTTER", "STALKER", "COMMANDER", "WARLORD", "OVERLORD"]
+const TIER_GUARD_DR := [1.0, 1.0, 1.0, 0.5, 0.4, 0.3] # damage taken while bodyguards stand near
+const CommanderBrain := preload("res://scripts/enemies/commander_brain.gd")
 var tier: int = 1
 var commander_name: String = ""
 var commander: Node = null # CommanderBrain, tier 3+
@@ -35,6 +38,27 @@ var order_from: Node3D = null
 var buff_t: float = 0.0 # rally: faster and harder hitting
 var _tier_light: OmniLight3D
 var _tier_label: Label3D
+var stolen_skill: String = "" # the operator skill a commander took from a brain
+var is_nemesis: bool = false # the commander that killed you in an earlier run
+var blood_hits: int = 0 # hits landed on players (taste of blood -> rank up)
+var aura_t: float = 0.0 # near a commander: faster, hits harder
+var aura_mult: float = 1.0
+var shield_on: bool = false # commander with bodyguards: damage shield
+var _shield_mesh: MeshInstance3D
+var _aura_ring: MeshInstance3D
+var _warn_node: Node3D
+var _base_vscale: Vector3 = Vector3.ZERO
+var _dodge_cd: float = 1.0
+var _dodge_t: float = 0.0
+var _dodge_dir: Vector3 = Vector3.ZERO
+var _lunge_cd: float = 2.5
+var _lunge_t: float = 0.0
+var _shield_hint_cd: float = 0.0
+var fx_cast: String = "" # skill being wound up right now (shown on the HUD)
+var fx_cast_t: float = 0.0
+var fx_enraged: bool = false
+var _spitter_tinted: bool = false
+static var _shield_tip_t: float = -100.0
 var _zig: float = 0.0
 var is_sprinter: bool = false
 var is_crawler: bool = false
@@ -645,6 +669,30 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 	if buff_t > 0.0:
 		buff_t -= delta
 		speed_mult *= 1.15
+	if aura_t > 0.0:
+		aura_t -= delta
+		speed_mult *= 1.0 + (aura_mult - 1.0) * 0.5
+	if tier >= 2:
+		_update_tier_fx(delta)
+		_dodge_cd -= delta
+		_lunge_cd -= delta
+		_lunge_t -= delta
+		if _dodge_t > 0.0:
+			# Quick sidestep out of the line of fire
+			_dodge_t -= delta
+			velocity.x = _dodge_dir.x * 8.5
+			velocity.z = _dodge_dir.z * 8.5
+			_animate_walk(delta, 6.0)
+			return
+	if commander and commander.casting != "":
+		# Winding up a skill: stands still and channels it
+		velocity.x = move_toward(velocity.x, 0.0, 20.0 * delta)
+		velocity.z = move_toward(velocity.z, 0.0, 20.0 * delta)
+		var look := target_player.global_position - global_position
+		look.y = 0.0
+		_face_direction(look.normalized(), delta * 8.0)
+		_animate_melee_swipe(delta)
+		return
 	if order_t > 0.0:
 		order_t -= delta
 		if _process_order(delta, speed_mult):
@@ -655,13 +703,22 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 	var to_p := target_player.global_position - global_position
 	var flat_dist := Vector2(to_p.x, to_p.z).length()
 
+	if commander and flat_dist > 2.3 and commander.wants_distance():
+		_commander_move(delta, speed_mult, to_p, flat_dist)
+		return
 	if flat_dist > 1.55:
 		var move_dir := _get_nav_dir(target_player.global_position)
 		if flat_dist < 6.0:
 			move_dir = (move_dir + _separation_push() * 0.9).normalized()
 		if tier >= 2:
 			move_dir = _smart_dir(move_dir, flat_dist, delta)
-		var spd := base_speed * speed_mult * _stagger_mult() * (1.35 if order_kind == "flank_run" else 1.0)
+			# Stalkers leap the last few metres
+			if tier == 2 and _lunge_cd <= 0.0 and flat_dist > 3.2 and flat_dist < 6.5 and is_on_floor() and not is_crawler and not is_bloater:
+				_lunge_cd = randf_range(5.0, 8.0)
+				_lunge_t = 0.45
+				velocity.y = 3.4
+				_play_3d_roar("zombie_attack_roar", 1.25)
+		var spd := base_speed * speed_mult * _stagger_mult() * (1.35 if order_kind == "flank_run" else 1.0) * (2.3 if _lunge_t > 0.0 else 1.0)
 		velocity.x = lerp(velocity.x, move_dir.x * spd, 8.0 * delta)
 		velocity.z = lerp(velocity.z, move_dir.z * spd, 8.0 * delta)
 		_face_direction(move_dir, delta * 8.0)
@@ -690,7 +747,9 @@ func _resolve_melee_hit() -> void:
 		return
 	var flat := Vector2(target_player.global_position.x - global_position.x, target_player.global_position.z - global_position.z).length()
 	if flat < 2.15 and target_player.has_method("take_damage"):
-		target_player.take_damage(base_damage * (0.45 if pain_drug_timer > 0.0 else 1.0) * (1.25 if buff_t > 0.0 else 1.0), global_position)
+		target_player.take_damage(base_damage * (0.45 if pain_drug_timer > 0.0 else 1.0) * (1.25 if buff_t > 0.0 else 1.0) * (aura_mult if aura_t > 0.0 else 1.0), global_position)
+		if not is_boss and tier < 3:
+			_taste_blood()
 
 
 func _separation_push() -> Vector3:
@@ -1158,9 +1217,18 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 	elif not ignore_armor and endurance > 0.0:
 		dmg *= (1.0 - endurance)
 
-	# A commander with bodyguards around him takes half damage
-	if commander and commander.has_method("guard_count") and commander.guard_count() >= 2:
-		dmg *= 0.5
+	# A commander with bodyguards near takes far less damage: kill them first
+	if shield_on and tier >= 3:
+		dmg *= TIER_GUARD_DR[tier]
+		if _shield_hint_cd <= 0.0:
+			_shield_hint_cd = 0.2
+			GameState.play_sfx("ricochet", -9.0, randf_range(1.25, 1.45))
+		var now := Time.get_ticks_msec() / 1000.0
+		if now - _shield_tip_t > 25.0 and (net_puppet or not Net.is_online() or _net_attacker == Net.my_id()):
+			_shield_tip_t = now
+			var lp := get_tree().get_first_node_in_group("player")
+			if lp and lp.has_signal("status_banner_requested"):
+				lp.status_banner_requested.emit("BODYGUARDS ARE SHIELDING %s — KILL THEM FIRST" % commander_name, TIER_COLORS[tier])
 
 	# Insta-Kill power-up: any hit drops a regular zombie.
 	if not is_boss and GameState.is_powerup_active("insta_kill"):
@@ -1172,6 +1240,11 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 	if Net.is_online():
 		dmg_by[_net_attacker] = float(dmg_by.get(_net_attacker, 0.0)) + minf(dmg, hp)
 	hp = maxf(0.0, hp - dmg)
+	if is_headshot and commander and hp > 0.0:
+		commander.on_headshot()
+	if tier >= 2 and not is_boss and hp > 0.0 and _dodge_cd <= 0.0 and kind == "bullet" and stun_timer <= 0.0 and entry_stage >= 3 \
+			and order_kind != "feast" and order_kind != "build" and not is_crawler and not is_bloater and (commander == null or commander.casting == ""):
+		_start_dodge()
 	if is_boss:
 		boss_damaged.emit(self)
 	_hit_feedback(hit_pos, dmg, is_headshot, kind)
@@ -1278,6 +1351,11 @@ func _die(was_headshot: bool) -> void:
 	drug_aura.visible = false
 	drug_light.visible = false
 	_set_flash(false)
+	for n in [_shield_mesh, _aura_ring, _tier_label, _tier_light]:
+		if n:
+			n.visible = false
+	if is_instance_valid(_warn_node):
+		_warn_node.queue_free()
 
 	died.emit(self, was_headshot)
 	_net_notify_death(was_headshot)
@@ -1543,6 +1621,8 @@ func net_anim_byte() -> int:
 		m = 0
 	if stun_timer > 0.0:
 		m |= 128
+	if shield_on:
+		m |= 8
 	return m
 
 
@@ -1617,6 +1697,9 @@ func _puppet_process(delta: float) -> void:
 		var pulse := 0.92 + 0.08 * sin(Time.get_ticks_msec() * 0.02)
 		telegraph_ring.scale = Vector3(pulse, 1.0, pulse)
 	var stunned := (_net_anim & 128) != 0
+	if tier >= 3:
+		shield_on = (_net_anim & 8) != 0
+		_update_tier_fx(delta)
 	if stun_halo:
 		stun_halo.visible = stunned
 		if stunned:
@@ -1638,7 +1721,7 @@ func _puppet_process(delta: float) -> void:
 			rig.start_attack(rig.attack_len)
 			rig.attack_kind = (_net_anim >> 5) & 3
 		_net_attack_seen = attacking
-		var mode: String = NET_MODES[clampi(_net_anim & 15, 0, NET_MODES.size() - 1)]
+		var mode: String = NET_MODES[clampi(_net_anim & 7, 0, NET_MODES.size() - 1)]
 		if mode == "walk" or mode == "run":
 			_animate_walk(delta, _net_speed)
 		else:
@@ -1685,6 +1768,8 @@ func net_boss_fx(kind: String, on: bool, pos: Vector3, amount: float) -> void:
 			_spawn_acid_pool(pos, amount)
 		"spit":
 			_spit_visual(pos, amount)
+		_:
+			_commander_fx_local(kind, pos, amount)
 
 
 # ---------------------------------------------------------------------------
@@ -1722,6 +1807,7 @@ func _add_riot_shield() -> void:
 func _tint_spitter() -> void:
 	for m in _meshes:
 		m.material_overlay = MaterialLib.get_emissive(Color(0.35, 1.0, 0.2), 0.35, 0.18)
+	_spitter_tinted = true
 
 
 # Keeps its distance and lobs acid at the target.
@@ -1750,7 +1836,7 @@ func _process_spitter(delta: float, speed_mult: float) -> void:
 		_spit_visual(tp, dmg)
 
 
-func _spit_visual(target_pos: Vector3, dmg: float) -> void:
+func _spit_visual(target_pos: Vector3, dmg: float, radius: float = 1.6) -> void:
 	var glob := MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = 0.11
@@ -1768,7 +1854,7 @@ func _spit_visual(target_pos: Vector3, dmg: float) -> void:
 	tw.tween_callback(func():
 		glob.queue_free()
 		if is_inside_tree():
-			_spawn_acid_pool(target_pos, dmg, 1.6)
+			_spawn_acid_pool(target_pos, dmg, radius)
 	)
 
 
@@ -1787,47 +1873,304 @@ func apply_tier(t: int, scale_stats: bool = true) -> void:
 		base_speed = base_speed / TIER_SPEED[tier] * TIER_SPEED[t]
 		point_reward = 60 + 120 * (t - 1) * (t - 1)
 	tier = t
-	_tier_visuals()
+	if tier >= 3 and not is_boss:
+		add_to_group("commanders")
+		if not net_puppet:
+			if commander_name == "":
+				commander_name = CommanderBrain.random_name()
+			if stolen_skill == "":
+				stolen_skill = CommanderBrain.random_skill()
+	# Clients must know the tier before the brain says its first words
+	if Net.is_online() and not net_puppet and net_id > 0:
+		var ng := _net_game()
+		if ng:
+			ng.zombie_tier(self, tier, commander_name, stolen_skill)
 	if tier >= 3 and commander == null and not is_boss:
-		var brain: Node = load("res://scripts/enemies/commander_brain.gd").new()
+		var brain: Node = CommanderBrain.new()
 		brain.name = "Commander"
 		add_child(brain)
 		commander = brain
 		brain.setup(self)
-	if Net.is_online() and not net_puppet and net_id > 0:
-		var ng := _net_game()
-		if ng:
-			ng.zombie_tier(self, tier, commander_name)
+	_tier_visuals()
 
 
 func _tier_visuals() -> void:
 	if tier <= 1:
 		return
 	var col: Color = TIER_COLORS[tier]
+	var grow := 1.0 + 0.07 * float(tier - 1)
 	if visual_root:
-		visual_root.scale = Vector3.ONE * (1.0 + 0.07 * float(tier - 1))
+		if _base_vscale == Vector3.ZERO:
+			_base_vscale = visual_root.scale
+		visual_root.scale = _base_vscale * grow
 	for m in _meshes:
-		if is_instance_valid(m):
-			m.material_overlay = MaterialLib.get_emissive(col, 0.35 + 0.08 * float(tier), 0.06)
+		if is_instance_valid(m) and not _spitter_tinted: # spitters keep their green
+			m.material_overlay = MaterialLib.get_rim(col, 0.3 + 0.14 * float(tier - 2), 3.0)
 	if _tier_light == null:
+		# Lights the ground around it in its tier colour, not its own body
+		# (the body keeps its look and gets a glowing outline instead)
 		_tier_light = OmniLight3D.new()
-		_tier_light.omni_range = 3.0
-		_tier_light.position = Vector3(0, 1.6 * model_scale, 0)
+		_tier_light.omni_range = 3.2
+		_tier_light.light_cull_mask = 1
+		_tier_light.position = Vector3(0, 0.7 * model_scale, 0)
 		add_child(_tier_light)
 	_tier_light.light_color = col
 	_tier_light.light_energy = 0.6 + 0.3 * float(tier)
-	if tier >= 3:
-		if _tier_label == null:
-			_tier_label = Label3D.new()
-			_tier_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			_tier_label.no_depth_test = false
-			_tier_label.font_size = 40
-			_tier_label.outline_size = 10
-			_tier_label.pixel_size = 0.004
-			_tier_label.position = Vector3(0, 2.45 * model_scale * (1.0 + 0.07 * float(tier - 1)), 0)
-			add_child(_tier_label)
-		_tier_label.modulate = col
-		_tier_label.text = "%s\n%s" % [commander_name if commander_name != "" else "COMMANDER", "★".repeat(tier)]
+	if tier < 3 or is_boss:
+		return
+	if _tier_label == null:
+		_tier_label = Label3D.new()
+		_tier_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		_tier_label.no_depth_test = false
+		_tier_label.font_size = 40
+		_tier_label.outline_size = 10
+		_tier_label.pixel_size = 0.004
+		add_child(_tier_label)
+	_tier_label.position = Vector3(0, 2.45 * model_scale * grow, 0)
+	_tier_label.modulate = col
+	var title: String = commander_name if commander_name != "" else "COMMANDER"
+	_tier_label.text = "%s%s\n%s %s" % ["NEMESIS\n" if is_nemesis else "", title, "★".repeat(tier), TIER_NAMES[tier]]
+	# The ring on the ground shows how far its aura reaches
+	if _aura_ring == null:
+		_aura_ring = MeshInstance3D.new()
+		var pm := PlaneMesh.new()
+		pm.size = Vector2.ONE * CommanderBrain.AURA_R * 2.0
+		_aura_ring.mesh = pm
+		_aura_ring.position.y = 0.05
+		_aura_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_aura_ring.material_override = MaterialLib.new_warn_zone(Color(col.r, col.g, col.b, 0.45), 0.012, 0.0)
+		add_child(_aura_ring)
+	(_aura_ring.material_override as ShaderMaterial).set_shader_parameter("color", Color(col.r, col.g, col.b, 0.45))
+	# Bubble shown while bodyguards stand near (damage shield)
+	if _shield_mesh == null:
+		_shield_mesh = MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 1.15
+		sm.height = 2.5
+		sm.radial_segments = 20
+		sm.rings = 10
+		_shield_mesh.mesh = sm
+		_shield_mesh.position.y = 1.05 * model_scale
+		_shield_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_shield_mesh.visible = false
+		add_child(_shield_mesh)
+	_shield_mesh.material_override = MaterialLib.get_rim(col, 1.7, 1.7, 0.05, 1.0)
+	if roar_audio_3d:
+		roar_audio_3d.unit_size = 11.0
+		roar_audio_3d.max_distance = 46.0
+		roar_audio_3d.volume_db = 1.5
+
+
+# A rank-up everyone can see and hear
+func tier_up_fx() -> void:
+	if is_dead:
+		return
+	_spawn_shockwave_ring(global_position, 2.6, TIER_COLORS[tier])
+	_play_3d_roar("boss_roar" if tier >= 3 else "zombie_roar_2", 1.3 if tier >= 3 else 0.8)
+	FX.blood_spray(global_position + Vector3(0, 1.5 * model_scale, 0), Vector3.UP, 10)
+	if _tier_light:
+		var e := _tier_light.light_energy
+		_tier_light.light_energy = e * 5.0
+		var tw := create_tween()
+		tw.tween_property(_tier_light, "light_energy", e, 0.8)
+
+
+# Commander voice: a deep growl you can locate by ear
+func speak() -> void:
+	if roar_audio_3d == null or is_dead:
+		return
+	var clips := ["zombie_groan", "zombie_roar_1", "zombie_groan"]
+	var st := GameState.get_sfx_stream(clips[randi() % clips.size()])
+	if st:
+		roar_audio_3d.stream = st
+		roar_audio_3d.pitch_scale = randf_range(0.5, 0.62)
+		roar_audio_3d.play()
+
+
+func _update_tier_fx(delta: float) -> void:
+	_shield_hint_cd = maxf(0.0, _shield_hint_cd - delta)
+	fx_cast_t = maxf(0.0, fx_cast_t - delta)
+	if _shield_mesh:
+		_shield_mesh.visible = shield_on
+		if shield_on:
+			_shield_mesh.rotate_y(delta * 1.5)
+
+
+# Commanders lead from behind: stay 9-14 m from the target and circle it
+func _commander_move(delta: float, speed_mult: float, to_p: Vector3, flat_dist: float) -> void:
+	var dir_to_p := Vector3(to_p.x, 0.0, to_p.z).normalized()
+	var side := dir_to_p.cross(Vector3.UP)
+	strafe_switch_timer -= delta
+	if strafe_switch_timer <= 0.0:
+		strafe_switch_timer = randf_range(2.0, 4.5)
+		strafe_dir = -strafe_dir
+	var desired := Vector3.ZERO
+	if flat_dist > 14.0:
+		desired = _get_nav_dir(target_player.global_position)
+	elif flat_dist < 9.0:
+		desired = (-dir_to_p + side * strafe_dir * 0.5).normalized() * 0.85
+	else:
+		desired = side * strafe_dir * 0.45
+	var spd := base_speed * speed_mult * _stagger_mult()
+	velocity.x = lerp(velocity.x, desired.x * spd, 6.0 * delta)
+	velocity.z = lerp(velocity.z, desired.z * spd, 6.0 * delta)
+	_face_direction(dir_to_p, delta * 7.0)
+	_animate_walk(delta, desired.length() * spd)
+
+
+# Tier 2+: hop sideways out of the line of fire when shot
+func _start_dodge() -> void:
+	var to_s := _shooter_pos() - global_position
+	to_s.y = 0.0
+	if to_s.length() < 2.5:
+		return
+	_dodge_dir = to_s.normalized().cross(Vector3.UP) * (1.0 if randf() < 0.5 else -1.0)
+	_dodge_t = 0.26
+	_dodge_cd = randf_range(2.6, 4.2) - 0.35 * float(tier - 2)
+
+
+# Zombies that hurt players get a taste for it and grow smarter
+func _taste_blood() -> void:
+	blood_hits += 1
+	if blood_hits < (2 if tier == 1 else 5):
+		return
+	blood_hits = 0
+	var wm := get_tree().current_scene.get_node_or_null("WaveManager")
+	if wm and wm.has_method("blood_evolve"):
+		wm.blood_evolve(self)
+
+
+# ---------------------------------------------------------------------------
+# COMMANDER SKILL EFFECTS (run on every machine; each hurts its own player)
+# ---------------------------------------------------------------------------
+func commander_fx(kind: String, pos: Vector3, amount: float) -> void:
+	if Net.is_online() and not net_puppet and net_id > 0:
+		var ng := _net_game()
+		if ng:
+			ng.boss_fx(self, kind, true, pos, amount)
+	_commander_fx_local(kind, pos, amount)
+
+
+func _commander_fx_local(kind: String, pos: Vector3, amount: float) -> void:
+	if kind.begins_with("cwarn_"):
+		fx_cast = kind.substr(6)
+		fx_cast_t = 1.5
+	elif kind == "ccancel":
+		fx_cast_t = 0.0
+	elif kind == "cenrage":
+		fx_enraged = true
+	match kind:
+		"cwarn_slam":
+			_warn_ring(pos, amount, Color(1.0, 0.4, 0.1), 0.9)
+			_play_3d_roar("zombie_attack_roar", 0.6)
+			if rig:
+				rig.start_attack(0.9)
+		"cwarn_arc":
+			_warn_ring(pos, amount, Color(0.35, 0.7, 1.0), 1.15)
+			_sfx_at("trap_zap", pos, -4.0, 1.3)
+			if rig:
+				rig.start_attack(1.0)
+		"cwarn_scream":
+			_warn_ring(pos, amount, Color(0.75, 0.3, 1.0), 1.5)
+			_play_3d_roar("boss_roar", 1.5)
+		"ccancel":
+			if is_instance_valid(_warn_node):
+				_warn_node.queue_free()
+		"cslam":
+			_sfx_at("gorilla_slam", pos, 0.0, 1.15)
+			_spawn_shockwave_ring(pos, 5.0, Color(1.0, 0.4, 0.1))
+			_hurt_local_in(pos, 5.0, amount, 1.2, true)
+		"carc":
+			_sfx_at("electrocute", pos, 0.0, 1.1)
+			_spawn_shockwave_ring(pos, 3.6, Color(0.4, 0.75, 1.0))
+			_flash_light(pos + Vector3(0, 1.0, 0), Color(0.5, 0.8, 1.0), 9.0)
+			_hurt_local_in(pos, 3.6, amount, 1.5, false)
+		"cscream":
+			_sfx_at("scream_far", pos, 6.0, 0.75)
+			_spawn_shockwave_ring(pos, 12.0, Color(0.75, 0.3, 1.0))
+			_flash_light(pos + Vector3(0, 1.5, 0), Color(0.75, 0.3, 1.0), 14.0)
+			_hurt_local_in(pos, 12.0, amount, 2.5, false)
+		"ctoxin":
+			_play_3d_roar("zombie_attack_roar", 0.8)
+			if rig:
+				rig.start_attack(0.6)
+			_spit_visual(pos, amount, 2.4)
+		"cdevour":
+			FX.gore_burst(pos, 6, 3.0)
+			FX.blood_spray(pos, Vector3.UP, 16)
+			_sfx_at("gore_splat", pos, 2.0, 0.8)
+			_spawn_shockwave_ring(global_position, 1.8, Color(0.4, 1.0, 0.4))
+		"craise":
+			_spawn_shockwave_ring(pos, 1.6, Color(0.6, 0.2, 0.9))
+			_sfx_at("zombie_groan", pos, -2.0, 0.5)
+		"crally":
+			_spawn_shockwave_ring(pos, amount, TIER_COLORS[tier])
+			_play_3d_roar("boss_roar", 1.2)
+		"cenrage":
+			_spawn_shockwave_ring(pos, 3.0, Color(1.0, 0.1, 0.1))
+			_play_3d_roar("boss_roar", 1.35)
+			if _tier_light:
+				_tier_light.light_energy = 3.5
+				_tier_light.omni_range = 4.5
+
+
+# A plain sound that gets quieter with distance from the camera
+func _sfx_at(clip: String, pos: Vector3, db: float, pitch: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	var d := cam.global_position.distance_to(pos) if cam else 0.0
+	if d < 50.0:
+		GameState.play_sfx(clip, db - d * 0.45, pitch)
+
+
+func _flash_light(pos: Vector3, col: Color, energy: float) -> void:
+	var l := OmniLight3D.new()
+	l.light_color = col
+	l.light_energy = energy
+	l.omni_range = 9.0
+	get_tree().current_scene.add_child(l)
+	l.global_position = pos
+	var tw := l.create_tween()
+	tw.tween_property(l, "light_energy", 0.0, 0.35)
+	tw.tween_callback(l.queue_free)
+
+
+# Warning circle on the ground that fills in while the attack charges
+func _warn_ring(pos: Vector3, radius: float, col: Color, time: float) -> void:
+	if is_instance_valid(_warn_node):
+		_warn_node.queue_free()
+	var root := Node3D.new()
+	get_tree().current_scene.add_child(root)
+	root.global_position = Vector3(pos.x, pos.y + 0.08, pos.z)
+	var disc := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2.ONE * radius * 2.0
+	disc.mesh = pm
+	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mat := MaterialLib.new_warn_zone(Color(col.r, col.g, col.b, 0.9))
+	disc.material_override = mat
+	root.add_child(disc)
+	var tw := root.create_tween()
+	tw.tween_method(func(f: float): mat.set_shader_parameter("fill", f), 0.0, 1.0, time)
+	tw.tween_callback(root.queue_free)
+	_warn_node = root
+
+
+# Hurts this machine's own player if they stand in the area.
+# ground = true: jumping over it dodges (shockwaves).
+func _hurt_local_in(pos: Vector3, radius: float, dmg: float, slow: float, ground: bool) -> void:
+	var lp := get_tree().get_first_node_in_group("player") as Node3D
+	if lp == null or lp.get("is_dead") == true or lp.get("is_downed") == true:
+		return
+	var d := Vector2(lp.global_position.x - pos.x, lp.global_position.z - pos.z).length()
+	if d > radius + 12.0:
+		return
+	if lp.has_method("add_camera_shake"):
+		lp.add_camera_shake(0.35)
+	if d > radius or (ground and ZombieEnemy.is_airborne(lp)):
+		return
+	lp.take_damage(dmg, pos)
+	if slow > 0.0:
+		lp.set("trap_slow_t", maxf(float(lp.get("trap_slow_t")), slow))
 
 
 # Commander orders and the brain feast: go somewhere else than the player.
@@ -1836,7 +2179,7 @@ func _process_order(delta: float, speed_mult: float) -> bool:
 	if order_kind == "flank_run":
 		return false # handled by the normal chase with extra speed
 	var goal := order_pos
-	if order_kind == "guard" and is_instance_valid(order_from):
+	if (order_kind == "guard" or order_kind == "serve") and is_instance_valid(order_from):
 		goal = order_from.global_position + order_pos # ring offset around the commander
 	var off := goal - global_position
 	off.y = 0.0
@@ -1856,7 +2199,7 @@ func _process_order(delta: float, speed_mult: float) -> bool:
 			# Hunched over the body / the trap, clawing
 			_face_direction((order_pos - global_position).normalized() if (order_pos - global_position).length() > 0.2 else -global_basis.z, delta * 6.0)
 			_animate_melee_swipe(delta)
-		elif order_kind == "guard" and is_instance_valid(target_player):
+		elif (order_kind == "guard" or order_kind == "serve") and is_instance_valid(target_player):
 			_face_direction((target_player.global_position - global_position).normalized(), delta * 6.0)
 			_animate_walk(delta, 0.0)
 	if order_t <= 0.0:

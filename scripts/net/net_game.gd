@@ -216,6 +216,9 @@ func _send_late_state(peer: int) -> void:
 			var d: Dictionary = (z.get_meta("spawn") as Dictionary).duplicate()
 			d["p"] = z.global_position
 			d["y"] = z.rotation.y
+			d["t"] = z.tier # ranks can change after the spawn
+			d["cn"] = z.commander_name
+			d["sk"] = z.stolen_skill
 			_c_spawn.rpc_id(peer, d)
 
 
@@ -366,6 +369,8 @@ func _c_spawn(data: Dictionary) -> void:
 	z.hp = z.max_hp
 	if int(data.get("t", 1)) > 1:
 		z.commander_name = String(data.get("cn", ""))
+		z.stolen_skill = String(data.get("sk", ""))
+		z.is_nemesis = bool(data.get("nm", false))
 		z.apply_tier(int(data["t"]), false)
 	z.rise_timer = 0.0
 	var id := z.net_id
@@ -820,16 +825,20 @@ func _update_hud(delta: float) -> void:
 
 
 # --- Zombie tiers: rank-ups, commander speech and traps for every client
-func zombie_tier(z: ZombieEnemy, t: int, cname: String) -> void:
-	_c_zombie_tier.rpc(z.net_id, t, cname)
+func zombie_tier(z: ZombieEnemy, t: int, cname: String, skill: String = "") -> void:
+	_c_zombie_tier.rpc(z.net_id, t, cname, skill)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _c_zombie_tier(id: int, t: int, cname: String) -> void:
+func _c_zombie_tier(id: int, t: int, cname: String, skill: String) -> void:
 	var z: ZombieEnemy = zombies.get(id)
 	if z and is_instance_valid(z) and not z.is_dead:
+		var up := t > z.tier
 		z.commander_name = cname
+		z.stolen_skill = skill
 		z.apply_tier(t, false)
+		if up:
+			z.tier_up_fx()
 
 
 func zombie_say(z: ZombieEnemy, line: String) -> void:

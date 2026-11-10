@@ -74,7 +74,7 @@ func start_round(round_num: int) -> void:
 	if Net.is_online():
 		_c_round.rpc(round_num)
 	_present_round(round_num)
-	_commander_due = round_num >= 8 and randf() < 0.3 + 0.04 * float(GameState.difficulty)
+	_roll_round_leaders(round_num)
 	var n := Net.player_count()
 	var crowd := 1.0 + 0.55 * float(n - 1)
 	in_intermission = false
@@ -291,7 +291,7 @@ func _pick_window() -> Node3D:
 	return options.back()
 
 
-func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, forced_variant: String = "") -> void:
+func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, forced_variant: String = "") -> ZombieEnemy:
 	var z := ZombieEnemy.new()
 	z.add_to_group("enemies")
 
@@ -334,20 +334,26 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	if window:
 		z.set_entry_window(window)
 	z.died.connect(_on_enemy_died)
-	# Tiers: most are tier 1, some tier 2 (more on harder difficulties).
-	# From round 8 a commander can turn up on its own.
-	if _commander_due and _count_commanders() == 0 and variant != "spitter":
+	# Tiers: most are Rotters (1), some Stalkers (2, more on harder
+	# difficulties). From round 6 a commander can turn up on its own, later
+	# even a Warlord or an Overlord. Your nemesis hunts you from round 4.
+	var leader_ok := forced_pos == Vector3.INF and variant != "spitter" and variant != "bloater"
+	if _nemesis_due and leader_ok and _count_commanders() < MAX_COMMANDERS:
+		_spawn_nemesis(z)
+	elif _commander_due and leader_ok and _count_commanders() == 0:
 		_commander_due = false
-		z.apply_tier(3)
+		z.apply_tier(_natural_commander_tier(round_num))
 	elif randf() < clampf(0.25 + 0.05 * float(GameState.difficulty - 1) + 0.01 * float(round_num), 0.15, 0.6):
 		z.apply_tier(2)
-	_net_register(z, {"k": "z", "v": variant, "r": round_num, "w": arena.windows.find(window) if window else -1, "t": z.tier, "cn": z.commander_name})
+	_net_register(z, {"k": "z", "v": variant, "r": round_num, "w": arena.windows.find(window) if window else -1,
+		"t": z.tier, "cn": z.commander_name, "sk": z.stolen_skill, "nm": z.is_nemesis})
 
 	alive_enemies += 1
 	_emit_wave_status()
 
 	if randf() < 0.45:
 		z._play_3d_roar("zombie_roar_1", randf_range(0.88, 1.12))
+	return z
 
 
 func _spawn_hound(round_num: int) -> void:
@@ -476,18 +482,21 @@ var _relic_misses: Dictionary = {} # peer id -> bosses in a row without a relic
 
 # Every player rolls their own relic (25%); the third boss without one
 # always pays out.
-func _boss_relics(pos: Vector3) -> void:
+func _boss_relics(pos: Vector3, chance: float = BOSS_RELIC_CHANCE) -> int:
 	var ids: Array = Net.players.keys() if Net.is_online() else [1]
 	ids.sort()
+	var dropped := 0
 	for i in range(ids.size()):
 		var pid := int(ids[i])
 		var miss := int(_relic_misses.get(pid, 0))
-		if randf() < BOSS_RELIC_CHANCE or miss >= 2:
+		if randf() < chance or miss >= 2:
 			_relic_misses[pid] = 0
+			dropped += 1
 			var ang := float(i) / float(ids.size()) * TAU
 			_spawn_powerup(_roll_relic(), pos + Vector3(cos(ang), 0.0, sin(ang)) * (1.2 if ids.size() > 1 else 0.0), pid if Net.is_online() else 0)
 		else:
 			_relic_misses[pid] = miss + 1
+	return dropped
 
 
 func _make_powerup(id: int, kind: String, pos: Vector3, owner: int = 0) -> void:
@@ -957,13 +966,18 @@ func resume_saved_world() -> void:
 
 
 # ---------------------------------------------------------------------------
-# ZOMBIE TIERS: the brain feast and commanders
+# ZOMBIE TIERS: the brain feast, commanders and the nemesis
 # ---------------------------------------------------------------------------
 const MAX_COMMANDERS := 2
 const TrapScript := preload("res://scripts/world/zombie_trap.gd")
+const Brain := preload("res://scripts/enemies/commander_brain.gd")
 var _commander_due: bool = false
+var _nemesis_due: bool = false
+var _nemesis_seen: bool = false
 var _was_down: Dictionary = {}
 var _feast_pos: Vector3 = Vector3.INF
+var _feast_op: String = "" # operator whose brain is on the menu
+var _feast_name: String = ""
 var _feasters: Array = []
 var _feast_t: float = 0.0
 var _feast_fight: float = -1.0
@@ -977,6 +991,52 @@ func _count_commanders() -> int:
 	return n
 
 
+# Rolls what the next natural commander is, once per round
+func _roll_round_leaders(round_num: int) -> void:
+	_commander_due = round_num >= 6 and randf() < clampf(0.25 + 0.05 * float(round_num - 6) + 0.04 * float(GameState.difficulty), 0.0, 0.9)
+	if not _nemesis_seen and not GameState.nemesis.is_empty() and round_num >= 4 and (randf() < 0.35 or round_num >= 8):
+		_nemesis_due = true
+		_nemesis_seen = true
+
+
+func _natural_commander_tier(round_num: int) -> int:
+	if round_num >= 17 and randf() < 0.2:
+		return 5
+	if round_num >= 12 and randf() < 0.3:
+		return 4
+	return 3
+
+
+# The commander that killed you in an earlier run comes back for more
+func _spawn_nemesis(z: ZombieEnemy) -> void:
+	_nemesis_due = false
+	var nm: Dictionary = GameState.nemesis
+	z.commander_name = String(nm.get("name", "THE NAMELESS"))
+	z.stolen_skill = String(nm.get("skill", ""))
+	z.is_nemesis = true
+	z.apply_tier(clampi(int(nm.get("tier", 3)), 3, 5))
+	z.max_hp *= 1.35
+	z.hp = z.max_hp
+	_banner_all("YOUR NEMESIS HAS FOUND YOU: %s %s" % [z.commander_name, "★".repeat(z.tier)], Color(1.0, 0.2, 0.3))
+	GameState.play_sfx("boss_roar", 0.0, 0.7)
+
+
+func _operator_of(p: Node) -> String:
+	if p is PlayerController:
+		return (p as PlayerController).char_id
+	if p.get("peer_id") != null:
+		return String((Net.players.get(int(p.get("peer_id")), {}) as Dictionary).get("char", ""))
+	return ""
+
+
+func _name_of(p: Node) -> String:
+	if Net.is_online() and p.get("peer_id") != null:
+		return Net.player_name(int(p.get("peer_id")))
+	if Net.is_online() and p is PlayerController:
+		return Net.player_name(Net.my_id())
+	return ""
+
+
 # A player just went down: the nearest zombies run for the body and fight
 # over the brain. The winner ranks up one tier.
 func _watch_downs() -> void:
@@ -984,11 +1044,11 @@ func _watch_downs() -> void:
 		var down: bool = bool(p.get("is_downed")) or bool(p.get("is_dead"))
 		var key := p.get_instance_id()
 		if down and not _was_down.get(key, false):
-			_start_feast(p.global_position)
+			_start_feast(p.global_position, _operator_of(p), _name_of(p))
 		_was_down[key] = down
 
 
-func _start_feast(pos: Vector3) -> void:
+func _start_feast(pos: Vector3, op: String = "", who: String = "") -> void:
 	if _feast_pos != Vector3.INF:
 		return
 	var list: Array = []
@@ -1009,9 +1069,11 @@ func _start_feast(pos: Vector3) -> void:
 		e.give_order("feast", pos + Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.8, 0.8)), 12.0)
 		_feasters.append(e)
 	_feast_pos = pos
+	_feast_op = op
+	_feast_name = who
 	_feast_t = 12.0
 	_feast_fight = -1.0
-	_banner_all("THEY'RE FIGHTING OVER YOUR BRAIN...", Color(1.0, 0.45, 0.35))
+	_banner_all("THEY'RE FIGHTING OVER %s BRAIN — KILL THEM BEFORE ONE EATS IT" % ((who + "'S") if who != "" else "YOUR"), Color(1.0, 0.45, 0.35))
 
 
 func _process_feast(delta: float) -> void:
@@ -1049,26 +1111,74 @@ func _finish_feast(contenders: Array) -> void:
 		e.order_t = 0.0
 		e.order_kind = ""
 	_feast_pos = Vector3.INF
+	var whose := (_feast_name + "'S") if _feast_name != "" else "YOUR"
 	var new_tier := mini(5, winner.tier + 1)
 	if new_tier >= 3 and winner.tier < 3 and _count_commanders() >= MAX_COMMANDERS:
 		new_tier = winner.tier # the horde has enough leaders already
 	if new_tier == winner.tier:
 		winner.hp = winner.max_hp
-		_banner_all("A ZOMBIE ATE YOUR BRAIN", Color(1.0, 0.6, 0.4))
+		_banner_all("A ZOMBIE ATE %s BRAIN" % whose, Color(1.0, 0.6, 0.4))
 		return
+	# A brain carries its owner's training: the eater learns that operator's skill
+	var learned: String = Brain.OPERATOR_SKILL.get(_feast_op, "")
+	if learned != "" and (winner.tier < 3 or winner.stolen_skill == ""):
+		winner.stolen_skill = learned
 	winner.apply_tier(new_tier)
 	winner.hp = winner.max_hp
+	winner.tier_up_fx()
 	if new_tier >= 3:
-		_banner_all("%s ATE YOUR BRAIN — TIER %d COMMANDER" % [winner.commander_name, new_tier], ZombieEnemy.TIER_COLORS[new_tier])
+		var skill_name: String = (Brain.SKILLS.get(winner.stolen_skill, {}) as Dictionary).get("name", "")
+		_banner_all("%s ATE %s BRAIN — %s %s%s" % [winner.commander_name, whose, "★".repeat(new_tier), ZombieEnemy.TIER_NAMES[new_tier],
+			("  •  IT LEARNED " + skill_name) if skill_name != "" else ""], ZombieEnemy.TIER_COLORS[new_tier])
 	else:
-		_banner_all("A ZOMBIE ATE YOUR BRAIN — NOW TIER %d" % new_tier, ZombieEnemy.TIER_COLORS[new_tier])
+		_banner_all("A ZOMBIE ATE %s BRAIN — IT IS NOW A %s" % [whose, ZombieEnemy.TIER_NAMES[new_tier]], ZombieEnemy.TIER_COLORS[new_tier])
+
+
+# A zombie that keeps hurting players grows smarter (called by the zombie)
+func blood_evolve(z: ZombieEnemy) -> void:
+	if z.is_dead or z.is_boss:
+		return
+	var nt := z.tier + 1
+	if nt >= 3 and (_count_commanders() >= MAX_COMMANDERS or GameState.current_round < 3):
+		return
+	z.apply_tier(nt)
+	z.hp = z.max_hp
+	z.tier_up_fx()
+	if nt >= 3:
+		_banner_all("%s TASTED BLOOD AND LEARNED TO THINK — %s %s" % [z.commander_name, "★".repeat(nt), ZombieEnemy.TIER_NAMES[nt]], ZombieEnemy.TIER_COLORS[nt])
 
 
 func _commander_slain(z: ZombieEnemy) -> void:
 	if z.commander:
 		z.commander.on_death()
-	_boss_relics(z.global_position)
-	_banner_all("COMMANDER %s SLAIN! RELIC DROPPED" % z.commander_name, Color(0.5, 1.0, 0.6))
+	# Leaderless: the zombies around it stand stunned
+	var stun := 1.5 + 0.5 * float(z.tier - 3)
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e == z or e.is_dead or e.is_boss or e.tier >= 3:
+			continue
+		if e.global_position.distance_to(z.global_position) < 16.0:
+			e.apply_stun(stun)
+			e.buff_t = 0.0
+			e.aura_t = 0.0
+			e.order_t = 0.0
+			e.order_kind = ""
+	GameState.commanders_slain += 1
+	var rank: String = ZombieEnemy.TIER_NAMES[z.tier]
+	if z.is_nemesis:
+		_boss_relics(z.global_position, 1.0)
+		GameState.nemesis = {}
+		GameState.life_nemesis_slain += 1
+		GameState.write_save()
+		GameState.add_points(2500)
+		if Net.is_online():
+			var ng := _ng()
+			if ng:
+				ng._c_award.rpc(2500, "NEMESIS")
+		_banner_all("NEMESIS SLAIN! %s IS DEAD FOR GOOD  •  +2500  •  RELIC DROPPED" % z.commander_name, Color(1.0, 0.85, 0.3))
+		GameState.play_sfx("level_up", 0.0, 0.8)
+		return
+	var dropped := _boss_relics(z.global_position, [0.5, 0.75, 1.0][z.tier - 3])
+	_banner_all("%s %s SLAIN! THE HORDE IS STUNNED%s" % [rank, z.commander_name, "  •  RELIC DROPPED" if dropped > 0 else ""], Color(0.5, 1.0, 0.6))
 
 
 func spawn_zombie_trap(pos: Vector3, t: int) -> void:
@@ -1090,4 +1200,3 @@ func _banner_all(text: String, col: Color) -> void:
 		player.status_banner_requested.emit(text, col)
 	if Net.is_online():
 		_c_banner.rpc(text, col)
-
