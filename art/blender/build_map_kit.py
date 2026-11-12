@@ -984,15 +984,6 @@ def p_gravestone():
     return finish("prop_gravestone", P)
 
 
-def p_grave_cross():
-    S = mat("stone_block")
-    P = [box((.18, .16, 1.2), (0, 0, .65), S), box((.7, .16, .18), (0, 0, .95), S),
-         box((.6, .4, .1), (0, 0, .05), S), box((.7, 1.6, .06), (0, .9, .03), mat("dirt"), bevel=0)]
-    for p in P[:2]:
-        p.rotation_euler.y = math.radians(7)
-    return finish("prop_grave_cross", P)
-
-
 def p_trash_bags():
     R = mat("rubber")
     P = [ball(.3, (rx, ry, .22), R, seg=7, rings=5, scale=(1, .9, .8), jitter=.15, seed=i)
@@ -1038,7 +1029,7 @@ PROPS = [p_barrel, p_tire_stack, p_sandbags, p_car_wreck, p_truck, p_fuel_tank, 
          p_lamp_post, p_lockers, p_radio_tower, p_rubble, p_generator, p_radio_console, p_mystery_crate,
          p_med_station, p_weapon_forge, p_augment_furnace, p_skull, p_grenade,
          p_wood_crate, p_pallet, p_dumpster, p_jersey_barrier, p_traffic_cone, p_bench, p_gravestone,
-         p_grave_cross, p_trash_bags, p_street_sign, p_pipe_stack, p_iv_stand]
+         p_trash_bags, p_street_sign, p_pipe_stack, p_iv_stand]
 
 
 def main():

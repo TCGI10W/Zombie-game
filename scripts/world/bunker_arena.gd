@@ -475,7 +475,7 @@ func _build_cemetery() -> void:
 			var gp := Vector3(27.0 + 2.6 * float(i) + (1.3 if row % 2 == 1 else 0.0), 0.35, -30.0 - 3.6 * float(row))
 			if gp.x > 44.0:
 				continue
-			var gm := "prop_grave_cross" if (row + i) % 3 == 0 else "prop_gravestone"
+			var gm := "prop_gravestone"
 			_prop(gm, Vector3(gp.x, 0, gp.z), 180.0 + randf_range(-7.0, 7.0), Vector3(0.8, 0.8, 0.25), Vector3(0, 0.4, 0))
 	# Crypt
 	_add_static_box(Vector3(44.0, 2.0, -44.0), Vector3(6.0, 4.0, 7.0), m_stone)

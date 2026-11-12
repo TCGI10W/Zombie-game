@@ -707,9 +707,15 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 		_commander_move(delta, speed_mult, to_p, flat_dist)
 		return
 	if flat_dist > 1.55:
-		var move_dir := _get_nav_dir(target_player.global_position)
-		if flat_dist < 6.0:
-			move_dir = (move_dir + _separation_push() * 0.9).normalized()
+		# Surround, don't queue: close in, each zombie heads for its own slot
+		# on a ring round the player instead of the one shared point, so a
+		# horde fans out and wraps around rather than knotting into a ball.
+		var goal := target_player.global_position
+		if flat_dist < 10.0:
+			goal += _surround_offset(flat_dist)
+		var move_dir := _get_nav_dir(goal)
+		if flat_dist < 30.0:
+			move_dir = (move_dir + _separation_push() * (1.1 if flat_dist < 8.0 else 0.6)).normalized()
 		if tier >= 2:
 			move_dir = _smart_dir(move_dir, flat_dist, delta)
 			# Stalkers leap the last few metres
@@ -761,9 +767,28 @@ func _separation_push() -> Vector3:
 		var off := global_position - other.global_position
 		off.y = 0.0
 		var d := off.length()
-		if d > 0.01 and d < 1.3:
-			push += off / d * (1.3 - d)
+		if d < 0.01:
+			off = Vector3(randf_range(-1, 1), 0, randf_range(-1, 1))
+			d = 0.01
+		if d < 1.6:
+			push += off.normalized() * (1.6 - d) * 1.4
 	return push
+
+
+# This zombie's slot on a ring round the player: a fixed bearing per zombie,
+# pulled toward the side it is already coming from so it never runs a lap.
+var _slot_angle := NAN
+
+
+func _surround_offset(flat_dist: float) -> Vector3:
+	var from_p := global_position - target_player.global_position
+	from_p.y = 0.0
+	var here := atan2(from_p.z, from_p.x)
+	if is_nan(_slot_angle):
+		_slot_angle = here + randf_range(-1.2, 1.2)
+	_slot_angle = lerp_angle(_slot_angle, here, 0.02)
+	var r := clampf(flat_dist * 0.35, 1.15, 2.4)
+	return Vector3(cos(_slot_angle), 0.0, sin(_slot_angle)) * r
 
 
 func _process_boss_ai(delta: float, speed_mult: float, rate_mult: float) -> void:
@@ -1077,7 +1102,10 @@ func _boss_phantom(delta: float, dist: float, dir_to_p: Vector3, speed_mult: flo
 # --- NAVIGATION & PROCEDURAL ANIMATION ---
 func _get_nav_dir(dest: Vector3) -> Vector3:
 	if nav_agent:
-		nav_agent.target_position = dest
+		# re-plan only when the goal really moved (a fresh path every frame
+		# for every zombie eats the frame rate on the big open map)
+		if nav_agent.target_position.distance_to(dest) > 0.6:
+			nav_agent.target_position = dest
 		if not nav_agent.is_navigation_finished():
 			var next_pt := nav_agent.get_next_path_position()
 			var d := next_pt - global_position

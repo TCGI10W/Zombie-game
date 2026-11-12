@@ -6,7 +6,7 @@ extends BunkerArena
 # doors into buildings, turn the power on at the plant, board the windows.
 #   DEPOT (start)  gas station, diner, bus garage          (0, 0)
 #   FARM           farmhouse, barn, silo, fields           (-280, 160)
-#   VILLAGE        houses and a chapel                     (260, 220)
+#   VILLAGE        houses and a schoolhouse                (260, 220)
 #   TOWN           main street of shops, police station    (300, -240)
 #   POWER PLANT    turbine hall with the generator          (-260, -260)
 # Every location pad and road sits at y = 0, so all the old gameplay pieces
@@ -344,15 +344,16 @@ func _build_village() -> void:
 		else:
 			_building(r, styles[i % 4], "", [[side, i % 2, 0]], [], "gable", "wood")
 		_kit("prop_mailbox", Vector3(r.get_center().x + 3, 0, r.end.y + 2 if side == "s" else r.position.y - 2))
-	var chapel := Rect2(o.x + 34, o.y - 8, 8, 16)
-	zone_names["chapel"] = "CHAPEL"
-	_building(chapel, "plaster", "chapel", [["w", 1, -1]], [["e", 1], ["e", 2], ["n", 1]], "gable", "wood", 1500)
-	_buy(chapel, "e", 3, "weapon", "sniper", "LONGSHOT .50", 3500, 1750)
-	for row in range(3):
-		for i in range(4):
-			var gm := "prop_grave_cross" if (row + i) % 3 == 0 else "prop_gravestone"
-			_prop(gm, Vector3(o.x + 48 + i * 2.6, 0, o.y - 6 + row * 3.6), 90.0, Vector3(0.25, 0.8, 0.8), Vector3(0, 0.4, 0))
-	_fence_line(o + Vector2(46, -10), o + Vector2(46, 6), "prop_fence_metal")
+	var school := Rect2(o.x + 34, o.y - 8, 8, 16)
+	zone_names["school"] = "SCHOOLHOUSE"
+	_building(school, "siding_red", "school", [["w", 1, -1]], [["e", 1], ["e", 2], ["n", 1]], "gable", "wood", 1500)
+	_buy(school, "e", 3, "weapon", "sniper", "LONGSHOT .50", 3500, 1750)
+	# fenced schoolyard: a bench and an old bus stop
+	_fence_line(o + Vector2(46, -10), o + Vector2(58, -10))
+	_fence_line(o + Vector2(58, -10), o + Vector2(58, 10))
+	_fence_line(o + Vector2(46, 10), o + Vector2(58, 10))
+	_prop("prop_bench", Vector3(o.x + 52, 0, o.y - 4), 90.0, Vector3.ZERO, Vector3.ZERO)
+	_kit("prop_bus_stop", Vector3(o.x + 50, 0, o.y + 6), 0.0)
 	for p in [Vector2(-10, -8), Vector2(10, 8), Vector2(-28, 2)]:
 		_post_light(Vector3(o.x + p.x, 0, o.y + p.y), Color(1.0, 0.82, 0.55), 1.8, 13.0)
 	_prop("prop_bench", Vector3(o.x, 0, o.y - 6), 0.0, Vector3.ZERO, Vector3.ZERO)
