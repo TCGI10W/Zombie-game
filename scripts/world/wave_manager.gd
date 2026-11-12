@@ -350,8 +350,13 @@ func _pick_window() -> Node3D:
 	return options.back()
 
 
+# Which zombie class this mode spawns (the open-world mode returns its own).
+func _new_zombie() -> ZombieEnemy:
+	return ZombieEnemy.new()
+
+
 func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, forced_variant: String = "") -> ZombieEnemy:
-	var z := ZombieEnemy.new()
+	var z := _new_zombie()
 	z.add_to_group("enemies")
 
 	var variant := forced_variant
@@ -378,9 +383,6 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	var sp := forced_pos
 	if sp == Vector3.INF:
 		window = _pick_window()
-		# open world: a far-off window is no use, come in from the dark instead
-		if window and arena.has_method("open_spawn_point") and window.global_position.distance_to(_focus_pos()) > 40.0:
-			window = null
 		if window:
 			var side := window.global_basis.x * randf_range(-1.5, 1.5)
 			sp = window.spawn_pos() + side
@@ -448,7 +450,7 @@ func _hound_spawn_point() -> Vector3:
 		var d := randf_range(7.0, 13.0)
 		var cand := focus + Vector3(cos(ang) * d, 0.0, sin(ang) * d)
 		var snapped := NavigationServer3D.map_get_closest_point(map, cand)
-		if snapped.distance_to(focus) < 6.0 or absf(snapped.y - focus.y) > 2.5:
+		if snapped.distance_to(focus) < 6.0 or absf(snapped.y) > 0.6:
 			continue
 		var zone := arena.zone_at(snapped)
 		if zone == "" or not arena.is_zone_open(zone):

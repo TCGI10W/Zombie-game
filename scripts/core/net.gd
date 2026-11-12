@@ -312,7 +312,7 @@ func _s_hello(pname: String, char_id: String, version: String) -> void:
 	lobby_changed.emit()
 	if in_game:
 		# Join in progress: load straight into the running game
-		_c_start_game.rpc_id(id, GameState.difficulty, GameState.run_id, false, true, GameState.game_mode)
+		_c_start_game.rpc_id(id, GameState.difficulty, GameState.run_id, false, true, GameState.game_mode + "|" + GameState.map_mode)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -355,13 +355,16 @@ func start_game(resume: bool = false) -> void:
 	if resume:
 		GameState.difficulty = int(GameState.load_world().get("difficulty", GameState.difficulty))
 		GameState.game_mode = String(GameState.load_world().get("mode", GameState.game_mode))
-	_c_start_game.rpc(GameState.difficulty, rid, resume, false, GameState.game_mode)
+	_c_start_game.rpc(GameState.difficulty, rid, resume, false, GameState.game_mode + "|" + GameState.map_mode)
 
 
 @rpc("authority", "call_local", "reliable")
 func _c_start_game(diff: int, rid: int = 0, resume: bool = false, late: bool = false, mode: String = "casual") -> void:
 	GameState.difficulty = clampi(diff, 0, GameState.DIFFICULTIES.size() - 1)
-	GameState.game_mode = mode if mode in ["casual", "infinite"] else "casual"
+	# "casual|outbreak": the run mode, then the host's map (classic / outbreak)
+	var parts := mode.split("|")
+	GameState.game_mode = parts[0] if parts[0] in ["casual", "infinite"] else "casual"
+	GameState.map_mode = parts[1] if parts.size() > 1 and parts[1] in ["classic", "outbreak"] else "classic"
 	in_game = true
 	GameState.reset_run()
 	GameState.run_id = rid

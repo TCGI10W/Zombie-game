@@ -59,6 +59,7 @@ var show_crosshair: bool = true
 var damage_numbers: bool = true
 var show_minimap: bool = true
 var game_mode: String = "casual" # "casual" (ends at round 20) or "infinite"
+var map_mode: String = "classic" # "classic" (Nacht, the closed map) or "outbreak" (The County, open world)
 var best_round_infinite: int = 0
 var fov_setting: float = 80.0
 var post_fx_enabled: bool = true
@@ -339,6 +340,7 @@ func load_save() -> void:
 		damage_numbers = bool(cfg.get_value("settings", "damage_numbers", true))
 		show_minimap = bool(cfg.get_value("settings", "show_minimap", true))
 		game_mode = String(cfg.get_value("settings", "game_mode", "casual"))
+		map_mode = String(cfg.get_value("settings", "map_mode", "classic"))
 		best_round_infinite = int(cfg.get_value("records", "best_round_infinite", 0))
 		fov_setting = float(cfg.get_value("settings", "fov", 80.0))
 		post_fx_enabled = bool(cfg.get_value("settings", "post_fx", true))
@@ -376,6 +378,7 @@ func write_save() -> void:
 	cfg.set_value("settings", "damage_numbers", damage_numbers)
 	cfg.set_value("settings", "show_minimap", show_minimap)
 	cfg.set_value("settings", "game_mode", game_mode)
+	cfg.set_value("settings", "map_mode", map_mode)
 	cfg.set_value("records", "best_round_infinite", best_round_infinite)
 	cfg.set_value("settings", "fov", fov_setting)
 	cfg.set_value("settings", "post_fx", post_fx_enabled)

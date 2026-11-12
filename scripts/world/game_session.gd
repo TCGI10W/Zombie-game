@@ -14,7 +14,8 @@ func _ready() -> void:
 	GameState.reset_run()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-	arena = OpenWorld.new()
+	# Two modes, two maps: the closed Nacht map (classic) or The County (outbreak)
+	arena = OpenWorld.new() if GameState.map_mode == "outbreak" else BunkerArena.new()
 	arena.name = "BunkerArena"
 	add_child(arena)
 
@@ -27,7 +28,7 @@ func _ready() -> void:
 	player.position = arena.player_spawn
 	add_child(player)
 
-	wave_mgr = WaveManager.new()
+	wave_mgr = OutbreakWaveManager.new() if GameState.map_mode == "outbreak" else WaveManager.new()
 	wave_mgr.name = "WaveManager"
 	add_child(wave_mgr)
 

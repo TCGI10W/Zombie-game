@@ -5,6 +5,11 @@ extends Node3D
 
 const ACCENT := Color(0.95, 0.32, 0.22)
 const ACCENT_BLUE := Color(0.45, 0.85, 1.0)
+const MAPS := {
+	"classic": {"name": "NACHT  —  CLASSIC", "desc": "The closed town. Buy doors, board windows, hold the line room by room."},
+	"outbreak": {"name": "THE COUNTY  —  OUTBREAK", "desc": "Open-world survival. Drive between towns, farms and the plant while the dead roam the land."},
+}
+var _map_cards: Dictionary = {}
 const MODES := {
 	"casual": {"name": "CASUAL", "desc": "Survive 20 rounds, then kill THE PROGENITOR to contain the outbreak. Escape by chopper from round 8."},
 	"infinite": {"name": "INFINITE", "desc": "Endless rounds that keep getting harder. No final boss — just how long you last."},
@@ -332,6 +337,26 @@ func _build_play_page() -> Control:
 	_detail_skills = _label("", 13, Color(0.86, 0.88, 0.92), true)
 	v.add_child(_detail_skills)
 
+	_header(v, "MAP")
+	var maprow := HBoxContainer.new()
+	maprow.add_theme_constant_override("separation", 8)
+	v.add_child(maprow)
+	for map_id in ["classic", "outbreak"]:
+		var mb := Button.new()
+		mb.text = "%s
+%s" % [MAPS[map_id]["name"], MAPS[map_id]["desc"]]
+		mb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		mb.custom_minimum_size = Vector2(0, 92)
+		mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		mb.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		mb.add_theme_font_size_override("font_size", 14)
+		mb.pressed.connect(func():
+			GameState.map_mode = map_id
+			GameState.write_save()
+			_refresh_play())
+		maprow.add_child(mb)
+		_map_cards[map_id] = mb
+
 	_header(v, "MODE")
 	var mrow := HBoxContainer.new()
 	mrow.add_theme_constant_override("separation", 8)
@@ -406,6 +431,9 @@ func _build_play_page() -> Control:
 
 
 func _refresh_play() -> void:
+	for map_id in _map_cards:
+		var mon: bool = map_id == GameState.map_mode
+		(_map_cards[map_id] as Button).add_theme_stylebox_override("normal", _box(Color(0.2, 0.08, 0.07, 0.95) if mon else Color(0.07, 0.08, 0.1, 0.92), ACCENT if mon else Color(1, 1, 1, 0.08), 2 if mon else 1))
 	for mid in _mode_cards:
 		var on: bool = mid == GameState.game_mode
 		(_mode_cards[mid] as Button).add_theme_stylebox_override("normal", _box(Color(0.2, 0.08, 0.07, 0.95) if on else Color(0.07, 0.08, 0.1, 0.92), ACCENT if on else Color(1, 1, 1, 0.08), 2 if on else 1))
