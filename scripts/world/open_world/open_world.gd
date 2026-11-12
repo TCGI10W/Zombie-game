@@ -294,8 +294,8 @@ func _build_depot() -> void:
 		_post_light(p, Color(1.0, 0.82, 0.55), 2.0, 14.0)
 	_prop("prop_car_wreck", Vector3(28, 0, 16), 70.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
 	_add_crate_stack(Vector3(-30, 0, 18), 2)
-	_add_vehicle("vehicle_pickup", "PICKUP", Vector3(-22, 0.8, -18), 90.0)
-	_add_vehicle("vehicle_sedan", "SEDAN", Vector3(28, 0.8, -6), 0.0)
+	_add_vehicle("truck", "SS-07 TRUCK", Vector3(-22, 0.4, -18), 90.0)
+	_add_vehicle("vehicle_sedan", "SEDAN", Vector3(28, 0.4, -6), 0.0)
 
 
 func _build_farm() -> void:
@@ -399,7 +399,7 @@ func _build_town() -> void:
 	_prop("prop_car_wreck", Vector3(326, 0, z0 + 4), -80.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
 	_prop("prop_dumpster", Vector3(262, 0, z0 - 30), 0.0, Vector3(2.0, 1.4, 1.2), Vector3(0, 0.7, 0))
 	_add_sandbags(Vector3(312, 0, z0 - 6), 0.0)
-	_add_vehicle("vehicle_pickup", "PICKUP", Vector3(352, 0.8, z0 + 3), -90.0)
+	_add_vehicle("truck", "SS-07 TRUCK", Vector3(352, 0.4, z0 + 3), -90.0)
 
 
 func _build_plant() -> void:
@@ -489,9 +489,8 @@ func _near_flat_pads(p: Vector2, margin: float) -> bool:
 
 func _add_vehicle(model: String, title: String, pos: Vector3, rot: float) -> void:
 	var v := DriveVehicle.new()
-	v.model_path = KIT % model
+	v.model = model
 	v.title = title
-	v.wheel_radius = 0.42 if model == "vehicle_pickup" else 0.36
 	v.position = pos
 	v.rotation_degrees.y = rot
 	add_child(v)

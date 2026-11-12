@@ -377,6 +377,7 @@ func _physics_process(delta: float) -> void:
 var driving: Node3D = null
 var _saved_layers := Vector2i.ZERO
 var _drive_grace := 0.0
+var _drive_cam: Node3D = null
 
 
 func enter_vehicle(v: Node3D) -> void:
@@ -387,6 +388,11 @@ func enter_vehicle(v: Node3D) -> void:
 	velocity = Vector3.ZERO
 	_drive_grace = 0.4
 	nearby_station = null
+	_drive_cam = VehicleCamera.new()
+	_drive_cam.car = v
+	get_tree().current_scene.add_child(_drive_cam)
+	if viewmodel_root_visible_node():
+		viewmodel_root_visible_node().visible = false
 	interact_prompt_changed.emit("[E] LEAVE VEHICLE")
 
 
@@ -396,9 +402,18 @@ func exit_vehicle() -> void:
 	var out: Vector3 = driving.leave(self)
 	driving = null
 	global_position = out
+	if is_instance_valid(_drive_cam):
+		_drive_cam.queue_free()
+	camera.current = true
+	if viewmodel_root_visible_node():
+		viewmodel_root_visible_node().visible = true
 	collision_layer = _saved_layers.x
 	collision_mask = _saved_layers.y
 	interact_prompt_changed.emit("")
+
+
+func viewmodel_root_visible_node() -> Node3D:
+	return gun_rig
 
 
 func _drive_tick(delta: float) -> void:

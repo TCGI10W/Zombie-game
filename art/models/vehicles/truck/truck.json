@@ -1,0 +1,771 @@
+{
+ "version": 1,
+ "convention": "Godot space; the truck's nose at -Z; docs/design/place_metro9.md (M9)",
+ "pieces": {
+  "beacon_body": {
+   "family": "beacon",
+   "note": "the origin on the wall's face at the plate's centre; it stands out along -Y (Godot +Z)",
+   "tris": 810,
+   "aabb": [
+    [
+     -0.152,
+     -0.345,
+     0.0
+    ],
+    [
+     0.152,
+     0.336,
+     0.28
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "steel",
+    "black",
+    "hazard",
+    "stencil_beacon",
+    "relay",
+    "glass",
+    "rust"
+   ],
+   "points": {
+    "lamp": [
+     0.0,
+     0.15,
+     0.19
+    ],
+    "pip_0": [
+     -0.07,
+     -0.08,
+     0.28
+    ],
+    "pip_1": [
+     0.0,
+     -0.08,
+     0.28
+    ],
+    "pip_2": [
+     0.07,
+     -0.08,
+     0.28
+    ],
+    "dust": [
+     0.0,
+     0.17,
+     0.19
+    ],
+    "front": [
+     0.0,
+     0.0,
+     0.28
+    ]
+   }
+  },
+  "beacon_dome": {
+   "family": "beacon",
+   "note": "the amber dome; its origin on the collar's top",
+   "tris": 70,
+   "aabb": [
+    [
+     -0.066,
+     0.0,
+     -0.0628
+    ],
+    [
+     0.066,
+     0.152,
+     0.0628
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "dome_amber"
+   ]
+  },
+  "beacon_pip": {
+   "family": "beacon",
+   "note": "one pip's lens; its origin on the box's face, it faces -Y",
+   "tris": 28,
+   "aabb": [
+    [
+     -0.016,
+     -0.016,
+     -0.004
+    ],
+    [
+     0.016,
+     0.016,
+     0.008
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "pip"
+   ]
+  },
+  "beacon_rotor": {
+   "family": "beacon",
+   "note": "the turning reflector and bulb; its origin on the axis at the collar's top",
+   "tris": 60,
+   "aabb": [
+    [
+     -0.05,
+     0.0,
+     -0.05
+    ],
+    [
+     0.05,
+     0.1,
+     0.04
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "black",
+    "bulb",
+    "reflector"
+   ]
+  },
+  "body": {
+   "family": "truck",
+   "note": "SS-07's body (round 2): nose at Blender +Y (Godot -Z), origin under the wheelbase's middle",
+   "tris": 6630,
+   "aabb": [
+    [
+     -1.3938,
+     0.38,
+     -3.845
+    ],
+    [
+     1.39,
+     3.049,
+     4.445
+    ]
+   ],
+   "boxes": [
+    [
+     0.0,
+     1.69,
+     -0.21,
+     2.62,
+     2.06,
+     3.03
+    ],
+    [
+     0.0,
+     1.27,
+     -2.66,
+     2.62,
+     1.22,
+     1.87
+    ],
+    [
+     0.0,
+     0.82,
+     -3.68,
+     2.64,
+     0.36,
+     0.17
+    ],
+    [
+     0.0,
+     1.16,
+     2.775,
+     2.24,
+     0.08,
+     2.74
+    ],
+    [
+     -1.215,
+     1.375,
+     2.815,
+     0.19,
+     0.85,
+     2.82
+    ],
+    [
+     1.215,
+     1.375,
+     2.815,
+     0.19,
+     0.85,
+     2.82
+    ],
+    [
+     0.0,
+     1.35,
+     1.425,
+     2.24,
+     0.8,
+     0.04
+    ],
+    [
+     0.0,
+     2.355,
+     1.505,
+     2.3,
+     1.21,
+     0.08
+    ],
+    [
+     0.0,
+     0.69,
+     4.295,
+     2.44,
+     0.14,
+     0.14
+    ],
+    [
+     0.0,
+     0.785,
+     0.325,
+     1.32,
+     0.33,
+     7.8
+    ]
+   ],
+   "materials": [
+    "black",
+    "rust",
+    "steel",
+    "soot",
+    "rubber",
+    "dark",
+    "plastic",
+    "lens_head",
+    "lens_amber",
+    "sand_worn",
+    "stencil_plate",
+    "lens_dead",
+    "hazard",
+    "sand",
+    "stripes",
+    "dash",
+    "glass",
+    "liner",
+    "glass_cracked",
+    "seat",
+    "gauges",
+    "crt",
+    "tread",
+    "lens_tail",
+    "mag",
+    "maglow",
+    "can",
+    "lens_white"
+   ],
+   "points": {
+    "wheel_fl": [
+     -1.08,
+     0.53,
+     -2.4
+    ],
+    "wheel_fr": [
+     1.08,
+     0.53,
+     -2.4
+    ],
+    "wheel_rl": [
+     -1.08,
+     0.53,
+     2.4
+    ],
+    "wheel_rr": [
+     1.08,
+     0.53,
+     2.4
+    ],
+    "seat": [
+     -0.6,
+     1.35,
+     -0.955
+    ],
+    "seat_front": [
+     0.6,
+     1.35,
+     -0.955
+    ],
+    "seat_rear_l": [
+     -0.55,
+     1.35,
+     0.625
+    ],
+    "seat_rear_r": [
+     0.55,
+     1.35,
+     0.625
+    ],
+    "eye": [
+     -0.6,
+     2.25,
+     -0.795
+    ],
+    "steer": [
+     -0.58,
+     1.82,
+     -1.225
+    ],
+    "screen": [
+     0.0847,
+     2.02,
+     -1.4382
+    ],
+    "button": [
+     -0.27,
+     1.65,
+     -1.465
+    ],
+    "tailgate": [
+     0.0,
+     1.2,
+     4.145
+    ],
+    "steps": [
+     0.0,
+     1.14,
+     4.695
+    ],
+    "door_fl": [
+     -1.31,
+     0.0,
+     -1.615
+    ],
+    "door_fr": [
+     1.31,
+     0.0,
+     -1.615
+    ],
+    "door_rl": [
+     -1.31,
+     0.0,
+     -0.245
+    ],
+    "door_rr": [
+     1.31,
+     0.0,
+     -0.245
+    ],
+    "headlight_l": [
+     -0.83,
+     1.39,
+     -3.635
+    ],
+    "headlight_r": [
+     0.83,
+     1.39,
+     -3.635
+    ],
+    "tail_l": [
+     -1.21,
+     1.44,
+     4.235
+    ],
+    "tail_r": [
+     1.21,
+     1.44,
+     4.235
+    ],
+    "reverse": [
+     0.62,
+     0.69,
+     4.395
+    ],
+    "exhaust": [
+     1.27,
+     0.62,
+     1.545
+    ],
+    "snorkel": [
+     -1.27,
+     3.03,
+     -1.625
+    ],
+    "bed_min": [
+     -1.12,
+     1.2,
+     4.145
+    ],
+    "bed_max": [
+     1.12,
+     3.7,
+     1.445
+    ],
+    "cab_min": [
+     -1.24,
+     0.85,
+     1.255
+    ],
+    "cab_max": [
+     1.24,
+     2.64,
+     -1.625
+    ],
+    "bumper": [
+     0.0,
+     0.76,
+     4.295
+    ],
+    "running_l": [
+     -1.3,
+     0.5,
+     -0.175
+    ],
+    "running_r": [
+     1.3,
+     0.5,
+     -0.175
+    ],
+    "front": [
+     0.0,
+     0.8,
+     -3.765
+    ],
+    "rear": [
+     0.0,
+     0.69,
+     4.365
+    ]
+   }
+  },
+  "button": {
+   "family": "truck",
+   "note": "the START button's red cap; the origin at its foot, pressed along Blender +Y",
+   "tris": 76,
+   "aabb": [
+    [
+     -0.0286,
+     -0.0286,
+     0.0
+    ],
+    [
+     0.0286,
+     0.0286,
+     0.0416
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "steel",
+    "can"
+   ]
+  },
+  "door_fl": {
+   "family": "truck",
+   "note": "the front left (the driver's) door; the origin on its hinge line's foot",
+   "tris": 302,
+   "aabb": [
+    [
+     -0.25,
+     0.81,
+     0.0
+    ],
+    [
+     0.185,
+     2.615,
+     1.23
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "sand_worn",
+    "sand",
+    "dash",
+    "steel",
+    "stripes",
+    "glass",
+    "rubber",
+    "black",
+    "plastic"
+   ]
+  },
+  "door_fr": {
+   "family": "truck",
+   "note": "the front right door; the origin on its hinge line's foot",
+   "tris": 302,
+   "aabb": [
+    [
+     -0.185,
+     0.81,
+     0.0
+    ],
+    [
+     0.25,
+     2.615,
+     1.23
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "sand_worn",
+    "sand",
+    "dash",
+    "steel",
+    "stripes",
+    "glass",
+    "rubber",
+    "black",
+    "plastic"
+   ]
+  },
+  "door_rl": {
+   "family": "truck",
+   "note": "the rear left door; the origin on its hinge line's foot",
+   "tris": 236,
+   "aabb": [
+    [
+     -0.0375,
+     0.81,
+     0.0
+    ],
+    [
+     0.185,
+     2.615,
+     1.21
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "sand_worn",
+    "sand",
+    "dash",
+    "steel",
+    "stripes",
+    "glass_cracked",
+    "rubber"
+   ]
+  },
+  "door_rr": {
+   "family": "truck",
+   "note": "the rear right door; the origin on its hinge line's foot",
+   "tris": 236,
+   "aabb": [
+    [
+     -0.185,
+     0.81,
+     0.0
+    ],
+    [
+     0.0375,
+     2.615,
+     1.21
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "sand_worn",
+    "sand",
+    "dash",
+    "steel",
+    "stripes",
+    "glass",
+    "rubber"
+   ]
+  },
+  "exit_boom": {
+   "family": "exit",
+   "note": "the boom; its origin on the pivot, lying along Blender +Y (Godot -Z); raise it about X",
+   "tris": 180,
+   "aabb": [
+    [
+     -0.07,
+     -0.1,
+     -4.29
+    ],
+    [
+     0.07,
+     0.1,
+     0.49
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "hazard",
+    "black",
+    "steel",
+    "lens_dead"
+   ]
+  },
+  "exit_boom_post": {
+   "family": "exit",
+   "note": "the boom barrier's post; its origin on the road under it, the pivot hub at +X",
+   "tris": 378,
+   "aabb": [
+    [
+     -0.26,
+     0.0,
+     -0.26
+    ],
+    [
+     0.26,
+     1.125,
+     0.26
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "steel",
+    "black",
+    "hazard",
+    "lens_dead"
+   ],
+   "points": {
+    "pivot": [
+     0.29,
+     0.8,
+     0.0
+    ]
+   }
+  },
+  "exit_flash": {
+   "family": "exit",
+   "note": "the flasher's two amber lenses; the origin at the flasher box's centre",
+   "tris": 92,
+   "aabb": [
+    [
+     -0.044,
+     -0.044,
+     -0.1
+    ],
+    [
+     0.044,
+     0.044,
+     0.1
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "lens_amber"
+   ]
+  },
+  "exit_post": {
+   "family": "exit",
+   "note": "a chevron post; its origin on the road under the base, the chevrons facing -Y (Godot +Z)",
+   "tris": 300,
+   "aabb": [
+    [
+     -0.23,
+     0.0,
+     -0.23
+    ],
+    [
+     0.26,
+     1.85,
+     0.23
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "rubber",
+    "steel",
+    "black",
+    "chevron",
+    "hazard"
+   ],
+   "points": {
+    "flash": [
+     0.0,
+     1.785,
+     0.0
+    ]
+   }
+  },
+  "steer": {
+   "family": "truck",
+   "note": "the wheel's hub at the origin, its axis along Blender +Y (toward the dash)",
+   "tris": 284,
+   "aabb": [
+    [
+     -0.2879,
+     -0.2763,
+     -0.0585
+    ],
+    [
+     0.2828,
+     0.2763,
+     0.0272
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "black",
+    "steel",
+    "rubber"
+   ]
+  },
+  "steps": {
+   "family": "truck",
+   "note": "the fold-down steps under the tailgate's end (shown while it's down); the origin under its end",
+   "tris": 460,
+   "aabb": [
+    [
+     -1.12,
+     -1.14,
+     -0.5674
+    ],
+    [
+     1.12,
+     0.5706,
+     1.65
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "black",
+    "rubber",
+    "steel",
+    "tread"
+   ]
+  },
+  "tailgate": {
+   "family": "truck",
+   "note": "the origin on the hinge line's middle; closed upright, the outside at -Y",
+   "tris": 202,
+   "aabb": [
+    [
+     -1.17,
+     -0.0225,
+     -0.01
+    ],
+    [
+     1.17,
+     0.59,
+     0.074
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "sand",
+    "sand_worn",
+    "hazard",
+    "stencil_tailgate",
+    "steel"
+   ]
+  },
+  "wheel": {
+   "family": "truck",
+   "note": "the hub's centre at the origin, its axle along X; the outer face at +X",
+   "tris": 784,
+   "aabb": [
+    [
+     -0.185,
+     -0.5369,
+     -0.5369
+    ],
+    [
+     0.191,
+     0.5369,
+     0.5369
+    ]
+   ],
+   "boxes": [],
+   "materials": [
+    "rubber",
+    "rim",
+    "black",
+    "rust",
+    "steel",
+    "dark"
+   ]
+  }
+ }
+}
