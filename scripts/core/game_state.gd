@@ -62,6 +62,8 @@ var game_mode: String = "casual" # "casual" (ends at round 20) or "infinite"
 var best_round_infinite: int = 0
 var fov_setting: float = 80.0
 var post_fx_enabled: bool = true
+var retro_enabled: bool = true
+var retro_lines: int = 360
 var graphics_quality: int = 2 # 0 low, 1 medium, 2 high
 var vsync_on: bool = true
 var show_fps: bool = false
@@ -340,6 +342,8 @@ func load_save() -> void:
 		best_round_infinite = int(cfg.get_value("records", "best_round_infinite", 0))
 		fov_setting = float(cfg.get_value("settings", "fov", 80.0))
 		post_fx_enabled = bool(cfg.get_value("settings", "post_fx", true))
+		retro_enabled = bool(cfg.get_value("settings", "retro", true))
+		retro_lines = int(cfg.get_value("settings", "retro_lines", 360))
 		graphics_quality = int(cfg.get_value("settings", "graphics", 2))
 		vsync_on = bool(cfg.get_value("settings", "vsync", true))
 		show_fps = bool(cfg.get_value("settings", "show_fps", false))
@@ -375,6 +379,8 @@ func write_save() -> void:
 	cfg.set_value("records", "best_round_infinite", best_round_infinite)
 	cfg.set_value("settings", "fov", fov_setting)
 	cfg.set_value("settings", "post_fx", post_fx_enabled)
+	cfg.set_value("settings", "retro", retro_enabled)
+	cfg.set_value("settings", "retro_lines", retro_lines)
 	cfg.set_value("settings", "graphics", graphics_quality)
 	cfg.set_value("settings", "vsync", vsync_on)
 	cfg.set_value("settings", "show_fps", show_fps)

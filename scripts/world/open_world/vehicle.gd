@@ -26,6 +26,9 @@ var slip := 0.0
 var wheel_radius := 0.42
 var seat_local := Vector3(-0.38, 1.05, 0.15)
 var eye_local := Vector3(-0.38, 1.6, 0.15)
+var bonnet_local := Vector3(0, 1.3, -1.4)
+var body_length := 4.4  # camera framing
+var body_height := 1.9
 var _truck: Node3D = null  # TruckModel when model == "truck"
 var _wheel_nodes: Array[Node3D] = []  # pivots (steer + height)
 var _spin_nodes: Array[Node3D] = []   # roll
@@ -64,6 +67,9 @@ func _setup_truck() -> void:
 		_spin_nodes.append(_truck.spins[i])
 		_wheel_rest.append(_truck.wheels[i].position)
 	seat_local = TruckKit.point("body", "seat") + Vector3(0, 0.1, 0)
+	bonnet_local = Vector3(0.0, 2.32, -2.6)
+	body_length = 8.3
+	body_height = 3.05
 	eye_local = TruckKit.point("body", "eye")
 	for b: Array in TruckKit.info("body").get("boxes", []):
 		var cs := CollisionShape3D.new()
@@ -99,6 +105,7 @@ func _setup_kit_car() -> void:
 	add_child(cs)
 	seat_local = Vector3(-0.4, wheel_radius + 0.55, 0.1)
 	eye_local = seat_local + Vector3(0, 0.6, 0)
+	bonnet_local = Vector3(0, wheel_radius + 1.05, -1.3)
 
 
 # ---------------------------------------------------------------- station API
@@ -136,6 +143,10 @@ func _swing_door() -> void:
 
 func seat_position() -> Vector3:
 	return global_transform * seat_local
+
+
+func bonnet_transform() -> Transform3D:
+	return Transform3D(global_basis, global_transform * bonnet_local)
 
 
 func eye_transform() -> Transform3D:

@@ -20,6 +20,11 @@ var banner_timer: float = 0.0
 
 # Center Crosshair & Prompts
 var crosshair_root: Control
+var _combat_box: Control
+var _drive_panel: PanelContainer
+var _drive_speed: Label
+var _drive_info: Label
+var _was_driving := false
 var hit_canvas: Control
 var streak_lbl: Label
 var sub_lbl: Label
@@ -592,6 +597,8 @@ func _build_ui() -> void:
 	br_box.offset_bottom = -24
 	br_box.add_theme_constant_override("separation", 8)
 	root.add_child(br_box)
+	_combat_box = br_box
+	_build_drive_panel(root)
 
 	var skills_row := HBoxContainer.new()
 	skills_row.add_theme_constant_override("separation", 10)
@@ -1067,7 +1074,53 @@ func _toggle_pause() -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
+func _build_drive_panel(root: Control) -> void:
+	_drive_panel = PanelContainer.new()
+	_drive_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.05, 0.06, 0.08, 0.88), Color(0.55, 0.56, 0.62)))
+	_drive_panel.anchor_left = 1.0
+	_drive_panel.anchor_right = 1.0
+	_drive_panel.anchor_top = 1.0
+	_drive_panel.anchor_bottom = 1.0
+	_drive_panel.offset_left = -470
+	_drive_panel.offset_right = -28
+	_drive_panel.offset_top = -150
+	_drive_panel.offset_bottom = -24
+	_drive_panel.visible = false
+	root.add_child(_drive_panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 2)
+	_drive_panel.add_child(v)
+	_drive_speed = Label.new()
+	_drive_speed.add_theme_font_size_override("font_size", 40)
+	_drive_speed.add_theme_color_override("font_color", Color(0.95, 0.95, 0.98))
+	v.add_child(_drive_speed)
+	_drive_info = Label.new()
+	_drive_info.add_theme_font_size_override("font_size", 13)
+	_drive_info.add_theme_color_override("font_color", Color(0.7, 0.72, 0.78))
+	v.add_child(_drive_info)
+
+
+# Driving swaps the combat panel and crosshair for speed + controls.
+func _update_drive_hud() -> void:
+	var car: Node3D = player.driving if is_instance_valid(player) and is_instance_valid(player.driving) else null
+	var on := car != null
+	if on:
+		var kmh := (car as RigidBody3D).linear_velocity.length() * 3.6
+		_drive_speed.text = "%d KM/H" % int(kmh)
+		_drive_info.text = "%s
+[V] CAMERA: %s    [E] LEAVE    [SPACE] HANDBRAKE" % [car.title, player.drive_camera_name()]
+		crosshair_root.visible = false
+	elif _was_driving:
+		crosshair_root.visible = true
+	if on != _was_driving:
+		_combat_box.visible = not on
+		_drive_panel.visible = on
+	_was_driving = on
+
+
 func _process(delta: float) -> void:
+	if _drive_panel:
+		_update_drive_hud()
 	if fps_lbl:
 		fps_lbl.visible = GameState.show_fps
 		if GameState.show_fps:

@@ -377,7 +377,11 @@ func _physics_process(delta: float) -> void:
 var driving: Node3D = null
 var _saved_layers := Vector2i.ZERO
 var _drive_grace := 0.0
-var _drive_cam: Node3D = null
+var _drive_cam: VehicleCamera = null
+
+
+func drive_camera_name() -> String:
+	return _drive_cam.stance_name() if is_instance_valid(_drive_cam) else ""
 
 
 func enter_vehicle(v: Node3D) -> void:
@@ -393,7 +397,7 @@ func enter_vehicle(v: Node3D) -> void:
 	get_tree().current_scene.add_child(_drive_cam)
 	if viewmodel_root_visible_node():
 		viewmodel_root_visible_node().visible = false
-	interact_prompt_changed.emit("[E] LEAVE VEHICLE")
+	interact_prompt_changed.emit("")
 
 
 func exit_vehicle() -> void:
@@ -404,6 +408,7 @@ func exit_vehicle() -> void:
 	global_position = out
 	if is_instance_valid(_drive_cam):
 		_drive_cam.queue_free()
+	_drive_cam = null
 	camera.current = true
 	if viewmodel_root_visible_node():
 		viewmodel_root_visible_node().visible = true

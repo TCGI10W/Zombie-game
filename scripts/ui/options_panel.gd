@@ -52,6 +52,13 @@ func _ready() -> void:
 		var pfx := get_tree().current_scene.get_node_or_null("PostFX") if get_tree().current_scene else null
 		if pfx:
 			pfx.visible = on)
+	_toggle("RETRO PIXEL LOOK & INK OUTLINES", GameState.retro_enabled, func(on: bool):
+		GameState.retro_enabled = on
+		var cs := get_tree().current_scene
+		var rfx := cs.get_node_or_null("RetroFX") if cs else null
+		if rfx:
+			rfx.visible = on
+		get_tree().call_group("ink_outline", "set_visible", on))
 	_toggle("SHOW FPS", GameState.show_fps, func(on: bool):
 		GameState.show_fps = on)
 	_toggle("SHOW CROSSHAIR", GameState.show_crosshair, func(on: bool):
