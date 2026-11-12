@@ -8,6 +8,8 @@ var enemies_container: Node3D
 var post_fx: ShaderMaterial
 var _fx_damage: float = 0.0
 var _fx_downed: float = 0.0
+var _fx_stress: float = 0.0
+var _fx_dead: float = 0.0
 
 
 func _ready() -> void:
@@ -97,5 +99,11 @@ func _process(delta: float) -> void:
 	var want_damage := clampf((0.45 - ratio) / 0.45, 0.0, 1.0)
 	_fx_damage = lerpf(_fx_damage, want_damage, clampf(4.0 * delta, 0.0, 1.0))
 	_fx_downed = move_toward(_fx_downed, 1.0 if player.is_downed else 0.0, delta * 2.5)
+	_fx_stress = lerpf(_fx_stress, float(player.get("stress")) if player.get("stress") != null else 0.0, clampf(5.0 * delta, 0.0, 1.0))
+	_fx_dead = move_toward(_fx_dead, 1.0 if player.is_dead else 0.0, delta * 1.8)
+	post_fx.set_shader_parameter("bodycam", 1.0 if GameState.bodycam_mode else 0.0)
+	post_fx.set_shader_parameter("stress", _fx_stress)
+	post_fx.set_shader_parameter("flash_blind", float(player.get("sensor_flash")) if player.get("sensor_flash") != null else 0.0)
 	post_fx.set_shader_parameter("damage", _fx_damage)
 	post_fx.set_shader_parameter("downed", _fx_downed)
+	post_fx.set_shader_parameter("dead_cam", _fx_dead)

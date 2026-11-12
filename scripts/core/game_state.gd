@@ -55,12 +55,13 @@ var invert_y: bool = false
 var fullscreen: bool = false
 var resolution: String = "native" # "native" or "WxH"
 var key_binds: Dictionary = {} # action -> "k:<physical keycode>" or "m:<mouse button>"
-var show_crosshair: bool = true
-var damage_numbers: bool = true
-var show_minimap: bool = true
+var show_crosshair: bool = false
+var damage_numbers: bool = false
+var show_minimap: bool = false
+var bodycam_mode: bool = true
 var game_mode: String = "casual" # "casual" (ends at round 20) or "infinite"
 var best_round_infinite: int = 0
-var fov_setting: float = 80.0
+var fov_setting: float = 94.0
 var post_fx_enabled: bool = true
 var graphics_quality: int = 2 # 0 low, 1 medium, 2 high
 var vsync_on: bool = true
@@ -199,6 +200,47 @@ const WEAPONS := {
 	},
 }
 
+const WEAPON_ATTACHMENTS := {
+	"suppressor": {"tag": "SUPP", "name": "SUPPRESSED", "sfx": "gun_suppressed", "dmg": 0.96, "spread": 0.84, "recoil": 0.80, "muzzle": 0.22},
+	"tac_laser": {"tag": "LASER", "name": "TAC-LASER", "spread": 0.52, "ads_speed": 1.15, "laser": true},
+	"ext_mag": {"tag": "EXT-MAG", "name": "EXTENDED MAG", "mag": 1.45, "reload": 1.08},
+	"heavy_barrel": {"tag": "HVY-BRL", "name": "HEAVY BARREL", "dmg": 1.22, "range": 1.30, "recoil": 1.12},
+	"quickdraw": {"tag": "Q-DRAW", "name": "QUICKDRAW GRIP", "reload": 0.78, "recoil": 0.88},
+	"overpressured": {"tag": "+P", "name": "+P HOLLOW-POINT", "dmg": 1.16, "stagger": 1.65, "recoil": 1.14},
+}
+
+
+static func roll_crate_attachments(w_id: String) -> Array[String]:
+	var w_cls := String(WEAPONS.get(w_id, {}).get("class", ""))
+	var pool: Array[String] = []
+	for k in WEAPON_ATTACHMENTS.keys():
+		if (w_cls == "wonder" or w_id == "volt") and (k == "suppressor" or k == "overpressured"):
+			continue
+		if w_id == "revolver" and k == "suppressor":
+			continue
+		pool.append(String(k))
+	for i in range(pool.size() - 1, 0, -1):
+		var j := randi() % (i + 1)
+		var tmp := pool[i]
+		pool[i] = pool[j]
+		pool[j] = tmp
+	var count := 1 if randf() < 0.45 else 2
+	var out: Array[String] = []
+	for idx in range(mini(count, pool.size())):
+		out.append(pool[idx])
+	return out
+
+
+static func format_attachment_tags(mods: Array) -> String:
+	if mods.is_empty():
+		return ""
+	var tags: Array[String] = []
+	for m in mods:
+		var k := String(m)
+		if WEAPON_ATTACHMENTS.has(k):
+			tags.append(String(WEAPON_ATTACHMENTS[k]["tag"]))
+	return ("[%s]" % " + ".join(tags)) if not tags.is_empty() else ""
+
 # Upgradeable stats bought at the Augment Furnace. Points burned into a stat
 # fill its bar; each level costs more than the last.
 const STAT_MAX_LEVEL := 30
@@ -334,13 +376,21 @@ func load_save() -> void:
 		resolution = String(cfg.get_value("settings", "resolution", "native"))
 		key_binds = cfg.get_value("settings", "key_binds", {})
 		_apply_key_binds()
-		show_crosshair = bool(cfg.get_value("settings", "show_crosshair", true))
-		damage_numbers = bool(cfg.get_value("settings", "damage_numbers", true))
-		show_minimap = bool(cfg.get_value("settings", "show_minimap", true))
+		show_crosshair = bool(cfg.get_value("settings", "show_crosshair", false))
+		damage_numbers = bool(cfg.get_value("settings", "damage_numbers", false))
+		show_minimap = bool(cfg.get_value("settings", "show_minimap", false))
+		bodycam_mode = bool(cfg.get_value("settings", "bodycam", true))
 		game_mode = String(cfg.get_value("settings", "game_mode", "casual"))
 		best_round_infinite = int(cfg.get_value("records", "best_round_infinite", 0))
-		fov_setting = float(cfg.get_value("settings", "fov", 80.0))
+		fov_setting = float(cfg.get_value("settings", "fov", 94.0))
 		post_fx_enabled = bool(cfg.get_value("settings", "post_fx", true))
+		if not bool(cfg.get_value("settings", "horror_v2_migrated", false)):
+			bodycam_mode = true
+			post_fx_enabled = true
+			fov_setting = maxf(fov_setting, 92.0)
+			show_crosshair = false
+			damage_numbers = false
+			show_minimap = false
 		graphics_quality = int(cfg.get_value("settings", "graphics", 2))
 		vsync_on = bool(cfg.get_value("settings", "vsync", true))
 		show_fps = bool(cfg.get_value("settings", "show_fps", false))
@@ -373,6 +423,8 @@ func write_save() -> void:
 	cfg.set_value("settings", "show_crosshair", show_crosshair)
 	cfg.set_value("settings", "damage_numbers", damage_numbers)
 	cfg.set_value("settings", "show_minimap", show_minimap)
+	cfg.set_value("settings", "bodycam", bodycam_mode)
+	cfg.set_value("settings", "horror_v2_migrated", true)
 	cfg.set_value("settings", "game_mode", game_mode)
 	cfg.set_value("records", "best_round_infinite", best_round_infinite)
 	cfg.set_value("settings", "fov", fov_setting)
@@ -635,7 +687,9 @@ func _preload_audio() -> void:
 		"hound_growl", "hound_bark", "hound_howl", "hound_bite", "hound_death", "hound_round_sting",
 		"lightning_strike", "thunder_far", "bloater_pop", "player_cough", "player_downed", "second_wind",
 		"heli_loop", "flare_ignite", "flare_burn", "radio_call", "radio_beep", "exfil_siren", "exfil_success",
-		"carpenter", "fire_sale", "powerup_spawn"
+		"carpenter", "fire_sale", "powerup_spawn",
+		"breath_panic", "whisper_eerie", "metal_scrape", "fluorescent_buzz",
+		"flashlight_click", "headshot_crunch", "round_end_sting", "boss_blackout", "gun_suppressed"
 	]
 	for n in names:
 		var path := "res://assets/audio/%s.wav" % n
@@ -887,12 +941,12 @@ const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD", "VETERAN", "NIGHTMARE", "AP
 #  horror: 0 = a normal zombie shooter .. 1 = dark, lights fail, things stalk you
 #  points: points you earn   score: run score at the end
 const DIFFICULTIES := [
-	{"hp": 0.75, "dmg": 0.7, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 0.75, "horror": 0.0},
-	{"hp": 1.0, "dmg": 1.0, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.0, "horror": 0.2},
-	{"hp": 1.2, "dmg": 1.15, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.5, "horror": 0.4},
-	{"hp": 1.4, "dmg": 1.3, "speed": 1.04, "crowd": 1.1, "special": 1.2, "boss": 1.05, "regen": 1.0, "points": 1.0, "score": 2.0, "horror": 0.55},
-	{"hp": 1.65, "dmg": 1.45, "speed": 1.08, "crowd": 1.2, "special": 1.4, "boss": 1.15, "regen": 0.9, "points": 1.0, "score": 2.75, "horror": 0.7},
-	{"hp": 1.95, "dmg": 1.65, "speed": 1.12, "crowd": 1.3, "special": 1.7, "boss": 1.25, "regen": 0.8, "points": 0.95, "score": 3.5, "horror": 0.85},
+	{"hp": 0.75, "dmg": 0.7, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 0.75, "horror": 0.65},
+	{"hp": 1.0, "dmg": 1.0, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.0, "horror": 0.78},
+	{"hp": 1.2, "dmg": 1.15, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.5, "horror": 0.85},
+	{"hp": 1.4, "dmg": 1.3, "speed": 1.04, "crowd": 1.1, "special": 1.2, "boss": 1.05, "regen": 1.0, "points": 1.0, "score": 2.0, "horror": 0.90},
+	{"hp": 1.65, "dmg": 1.45, "speed": 1.08, "crowd": 1.2, "special": 1.4, "boss": 1.15, "regen": 0.9, "points": 1.0, "score": 2.75, "horror": 0.95},
+	{"hp": 1.95, "dmg": 1.65, "speed": 1.12, "crowd": 1.3, "special": 1.7, "boss": 1.25, "regen": 0.8, "points": 0.95, "score": 3.5, "horror": 1.0},
 	{"hp": 2.3, "dmg": 1.9, "speed": 1.16, "crowd": 1.4, "special": 2.0, "boss": 1.35, "regen": 0.7, "points": 0.9, "score": 4.5, "horror": 1.0},
 ]
 const FINAL_ROUND := 20
@@ -953,19 +1007,11 @@ func diff_lines(i: int) -> Array[String]:
 	pct.call("Boss health", "boss")
 	pct.call("Your health regen", "regen")
 	pct.call("Points earned", "points")
-	var hr := float(d.get("horror", 0.0))
-	if hr <= 0.0:
-		out.append("No horror: bright, classic zombie game")
-	else:
-		var bits: Array[String] = ["darker, flashlight needed" if hr < 0.5 else "dark, flashlight needed"]
-		if hr >= 0.35:
-			bits.append("lights fail")
-		bits.append("stalking zombies, sound scares")
-		if hr >= 0.55:
-			bits.append("no minimap")
-		if hr >= 0.7:
-			bits.append("no zombie count")
-		out.append("Horror %d%%: %s" % [roundi(hr * 100.0), ", ".join(bits)])
+	var hr := float(d.get("horror", 0.78))
+	var bits: Array[String] = ["pitch-black interiors", "tactical flashlight", "sleeper & stalker infected", "power blackouts"]
+	if hr >= 0.92:
+		bits.append("hidden zombie count")
+	out.append("Survival Horror %d%%: %s" % [roundi(hr * 100.0), ", ".join(bits)])
 	if out.is_empty():
 		out.append("The standard experience")
 	out.append("Score x%s" % str(snappedf(float(d["score"]), 0.01)))

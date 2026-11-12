@@ -11,6 +11,7 @@ enum State { IDLE, ROLLING, OFFER }
 var interact_radius: float = 2.8
 var state: State = State.IDLE
 var offered_id: String = ""
+var offered_mods: Array = []
 var owner_peer: int = 0 # who paid for the current roll
 var _timer: float = 0.0
 var _cycle_t: float = 0.0
@@ -44,29 +45,29 @@ func _ready() -> void:
 	add_child(body)
 
 	_glow = OmniLight3D.new()
-	_glow.light_color = Color(0.4, 0.75, 1.0)
-	_glow.light_energy = 1.4
-	_glow.omni_range = 5.0
+	_glow.light_color = Color(0.92, 0.62, 0.20)
+	_glow.light_energy = 0.85
+	_glow.omni_range = 4.2
 	_glow.position = Vector3(0, 1.4, -0.3)
 	add_child(_glow)
 
 	var beam := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
-	cm.top_radius = 0.3
-	cm.bottom_radius = 0.45
+	cm.top_radius = 0.26
+	cm.bottom_radius = 0.42
 	cm.height = 6.0
 	beam.mesh = cm
-	beam.material_override = MaterialLib.get_emissive(Color(0.4, 0.75, 1.0), 0.5, 0.05)
+	beam.material_override = MaterialLib.get_emissive(Color(0.92, 0.60, 0.20), 0.18, 0.04)
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	beam.position.y = 3.6
 	add_child(beam)
 
 	var lbl := Label3D.new()
 	lbl.text = "MYSTERY CRATE\n%d PTS" % COST
-	lbl.font_size = 34
-	lbl.outline_size = 10
-	lbl.pixel_size = 0.005
-	lbl.modulate = Color(0.6, 0.85, 1.0)
+	lbl.font_size = 32
+	lbl.outline_size = 9
+	lbl.pixel_size = 0.0046
+	lbl.modulate = Color(0.88, 0.74, 0.44)
 	lbl.position = Vector3(0, 0.95, -0.5)
 	lbl.rotation.y = PI
 	add_child(lbl)
@@ -79,11 +80,11 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
-	_glow.light_energy = 1.4 + sin(_t * 3.0) * 0.3
+	_glow.light_energy = 0.82 + sin(_t * 3.0) * 0.22
 	if _price_lbl:
 		var fs := GameState.is_powerup_active("fire_sale")
 		_price_lbl.text = "MYSTERY CRATE\n%s" % ("FIRE SALE — 10 PTS" if fs else "%d PTS" % COST)
-		_price_lbl.modulate = Color(1.0, 0.4, 0.3) if fs else Color(0.6, 0.85, 1.0)
+		_price_lbl.modulate = Color(0.95, 0.32, 0.22) if fs else Color(0.88, 0.74, 0.44)
 	match state:
 		State.ROLLING:
 			_timer -= delta
@@ -112,11 +113,13 @@ func get_prompt(player: Node3D) -> String:
 			return "[E] MYSTERY CRATE — RANDOM WEAPON  —  %d PTS" % current_cost()
 		State.OFFER:
 			var w_name: String = GameState.WEAPONS[offered_id]["name"]
+			var tag_str := GameState.format_attachment_tags(offered_mods)
+			var full_name := ("%s %s" % [w_name, tag_str]) if tag_str != "" else w_name
 			if owner_peer != Net.my_id():
-				return "%s'S CRATE — %s" % [Net.player_name(owner_peer), w_name]
+				return "%s'S CRATE — %s" % [Net.player_name(owner_peer), full_name]
 			if player.weapons_owned.size() >= 2 and not player.weapons_owned.has(offered_id):
-				return "[E] TAKE %s  (REPLACES %s)" % [w_name, player.get_weapon_cfg(player.get_current_weapon_id())["name"]]
-			return "[E] TAKE %s" % w_name
+				return "[E] TAKE %s  (REPLACES %s)" % [full_name, player.get_weapon_cfg(player.get_current_weapon_id())["name"]]
+			return "[E] TAKE %s" % full_name
 	return ""
 
 
@@ -126,11 +129,13 @@ func try_purchase(player: Node3D) -> void:
 			if player.is_monster_form:
 				return
 			if GameState.try_pay(player, current_cost()):
-				Net.world(self, "open", [_random_weapon("", player.weapons_owned), Net.my_id()])
+				var rolled_w := _random_weapon("", player.weapons_owned)
+				var rolled_mods := GameState.roll_crate_attachments(rolled_w)
+				Net.world(self, "open", [rolled_w, Net.my_id(), rolled_mods])
 		State.OFFER:
 			if player.is_monster_form or owner_peer != Net.my_id():
 				return
-			player.grant_or_refill_weapon(offered_id)
+			player.grant_or_refill_weapon(offered_id, offered_mods)
 			GameState.play_sfx("weapon_swap", 0.0, 0.9)
 			Net.world(self, "close")
 
@@ -139,17 +144,19 @@ func net_apply(action: String, args: Array) -> void:
 	match action:
 		"open":
 			if state == State.IDLE:
-				_open_with(String(args[0]), int(args[1]))
+				var mods: Array = args[2] if args.size() > 2 else []
+				_open_with(String(args[0]), int(args[1]), mods)
 		"close":
 			if state != State.IDLE:
 				_close()
 
 
-func _open_with(w_id: String, owner: int) -> void:
+func _open_with(w_id: String, owner: int, mods: Array = []) -> void:
 	state = State.ROLLING
 	_timer = ROLL_TIME
 	_cycle_t = 0.0
 	offered_id = w_id
+	offered_mods = mods.duplicate()
 	owner_peer = owner
 	GameState.play_sfx("crate_open", -1.0, 1.0)
 	if _lid:
@@ -159,6 +166,7 @@ func _open_with(w_id: String, owner: int) -> void:
 func _close() -> void:
 	state = State.IDLE
 	offered_id = ""
+	offered_mods = []
 	if is_instance_valid(_display_model):
 		_display_model.queue_free()
 		_display_model = null

@@ -175,11 +175,11 @@ func _wall_buy(zone: String, a: Vector2, b: Vector2, dist: float, stype: String,
 	var d := (b - a).normalized()
 	var inn := -_outward(zone, a, b)
 	var p: Vector2 = a + d * dist + inn * inset
-	var col := Color(0.25, 0.88, 1.0)
+	var col := Color(0.84, 0.78, 0.64)
 	if stype == "ammo_box":
-		col = Color(1.0, 0.78, 0.20)
+		col = Color(0.76, 0.62, 0.30)
 	elif stype == "forge":
-		col = Color(0.72, 0.30, 1.0)
+		col = Color(0.68, 0.16, 0.14)
 	_spawn_station(stype, wid, title, cost, acost, col, Vector3(p.x, y, p.y), rad_to_deg(atan2(inn.x, inn.y)))
 
 
@@ -191,21 +191,22 @@ func _post_light(pos: Vector3, col: Color, energy: float, rng: float, rot: float
 	_prop("prop_lamp_post", pos, rot, Vector3(0.3, 4.0, 0.3), Vector3(0, 2.0, 0))
 	var l := OmniLight3D.new()
 	l.light_color = col
-	l.light_energy = energy
-	l.omni_range = rng
+	l.light_energy = energy * 0.48
+	l.omni_range = rng * 0.85
 	l.position = pos + Vector3(0, 4.3, 0)
 	add_child(l)
 
 
-# Soft always-on light so big rooms are readable before the power is on
+# Soft fill lights: dead until power is restored in the Warehouse Motor Pool
 func _fill_lights(points: Array, col: Color, energy: float, rng: float) -> void:
 	for p in points:
 		var l := OmniLight3D.new()
 		l.light_color = col
-		l.light_energy = energy
-		l.omni_range = rng
+		l.light_energy = 0.0
+		l.omni_range = rng * 0.85
 		l.position = p
 		add_child(l)
+		powered_lamps.append({"light": l, "fixture": null, "color": col, "energy": energy * 0.52})
 
 
 func _place(script: GDScript, pos: Vector3, rot: float) -> Node3D:
@@ -261,9 +262,9 @@ func _build_plaza() -> void:
 	water.position = Vector3(0, 0.72, -2.0)
 	add_child(water)
 	var fl := OmniLight3D.new()
-	fl.light_color = Color(0.5, 0.75, 1.0)
-	fl.light_energy = 1.4
-	fl.omni_range = 9.0
+	fl.light_color = Color(0.32, 0.44, 0.56)
+	fl.light_energy = 0.32
+	fl.omni_range = 6.5
 	fl.position = Vector3(0, 2.8, -2.0)
 	add_child(fl)
 	# Cover and scenery
@@ -403,7 +404,7 @@ func _build_hospital() -> void:
 		_prop("prop_gurney", g[0], g[1], Vector3(0.8, 1.1, 2.0), Vector3(0, 0.55, 0))
 	_prop("prop_lockers", Vector3(-21.0, 0, -9.0), -90.0, Vector3(2.0, 2.0, 0.55), Vector3(0, 1.0, 0))
 	_prop("prop_desk", Vector3(-26.0, 0, 3.5), 0.0, Vector3(1.6, 1.0, 0.8), Vector3(0, 0.5, 0))
-	var vat_glass := MaterialLib.get_emissive(Color(0.3, 1.0, 0.45), 2.2, 0.55)
+	var vat_glass := MaterialLib.get_emissive(Color(0.22, 0.65, 0.32), 0.9, 0.55)
 	for p in [Vector3(-42.6, 0, -28.0), Vector3(-33.4, 0, -28.0), Vector3(-33.4, 0, -14.0)]:
 		var vat := MeshInstance3D.new()
 		var cm := CylinderMesh.new()
@@ -476,8 +477,8 @@ func _build_cemetery() -> void:
 	# Crypt
 	_add_static_box(Vector3(44.0, 2.0, -44.0), Vector3(6.0, 4.0, 7.0), m_stone)
 	_add_static_box(Vector3(44.0, 4.3, -44.0), Vector3(6.8, 0.6, 7.8), m_dark_conc)
-	_spawn_station("weapon", "sniper", "LONGSHOT .50", 3500, 1750, Color(0.25, 0.88, 1.0), Vector3(40.68, 1.55, -44.0), -90.0)
-	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(1.0, 0.78, 0.20), Vector3(44.0, 1.55, -40.18), 0.0)
+	_spawn_station("weapon", "sniper", "LONGSHOT .50", 3500, 1750, Color(0.84, 0.78, 0.64), Vector3(40.68, 1.55, -44.0), -90.0)
+	_spawn_station("ammo_box", "", "AMMO CACHE", 450, 0, Color(0.76, 0.62, 0.30), Vector3(44.0, 1.55, -40.18), 0.0)
 	for t in [Vector3(30.0, 0, -46.0), Vector3(48.0, 0, -30.0), Vector3(36.0, 0, -50.0)]:
 		_prop("prop_dead_tree", t, t.x * 7.0, Vector3(0.6, 3.0, 0.6), Vector3(0, 1.5, 0), 1.1)
 	for lp in [Vector3(34.0, 0, -36.0), Vector3(46.0, 0, -36.0)]:
@@ -522,9 +523,10 @@ func _scatter_blood() -> void:
 	if not is_inside_tree():
 		return
 	var spots := [Vector3(-3, 0, 6), Vector3(5, 0, -8), Vector3(-10, 0, 9), Vector3(1, 0, -24), Vector3(-12, 0, -33),
-		Vector3(30, 0, 4), Vector3(42, 0, 20), Vector3(-28, 0, 0), Vector3(-38, 0, -18), Vector3(-25, 0, 27), Vector3(36, 0, -38)]
+		Vector3(30, 0, 4), Vector3(42, 0, 20), Vector3(-28, 0, 0), Vector3(-38, 0, -18), Vector3(-25, 0, 27), Vector3(36, 0, -38),
+		Vector3(-21, 0, -3), Vector3(-35, 0, 2), Vector3(-40, 0, -8), Vector3(1, 0, -45), Vector3(24, 0, -5), Vector3(0, 0, 4), Vector3(-8, 0, -12)]
 	for sp in spots:
-		FX.blood_decal(sp + Vector3(0, 0.02, 0), Vector3.UP, randf_range(1.0, 2.2))
+		FX.blood_decal(sp + Vector3(0, 0.02, 0), Vector3.UP, randf_range(1.1, 2.5))
 
 
 func _make_polys() -> void:
@@ -543,13 +545,13 @@ func _make_polys() -> void:
 	zone_polys["cemetery"] = [PackedVector2Array([Vector2(22, -38), Vector2(22, -28), Vector2(30, -24), Vector2(46, -26), Vector2(54, -40), Vector2(46, -54), Vector2(28, -52)])]
 
 
-# Red danger lights outside every window so you can see what's coming
+# Dim crimson bleed outside every boarded window so zombies silhouette in the dark
 func _window_lights() -> void:
 	for w in windows:
 		var l := OmniLight3D.new()
-		l.light_color = Color(0.95, 0.2, 0.12)
-		l.light_energy = 1.5
-		l.omni_range = 5.5
+		l.light_color = Color(0.75, 0.09, 0.06)
+		l.light_energy = 0.36
+		l.omni_range = 4.2
 		l.position = w.position + w.basis.z * 2.6 + Vector3(0, 2.4, 0)
 		add_child(l)
 
@@ -561,16 +563,20 @@ func _process(delta: float) -> void:
 	_flicker_time += delta * 7.5
 	for i in range(fire_lights.size()):
 		var fl := fire_lights[i]
-		fl.light_energy = 2.6 + sin(_flicker_time + float(i) * 1.9) * 0.45 + cos(_flicker_time * 2.3 + float(i)) * 0.25
+		fl.light_energy = 2.0 + sin(_flicker_time + float(i) * 1.9) * 0.42 + cos(_flicker_time * 2.3 + float(i)) * 0.22
 	if power_on:
 		for i in range(flicker_lamps.size()):
 			var lamp := flicker_lamps[i]
 			var n := sin(_flicker_time * 3.1 + float(i) * 7.0) + sin(_flicker_time * 7.7 + float(i))
-			lamp.light_energy = 0.15 if n > 1.6 else 1.9
+			lamp.light_energy = 0.08 if n > 1.45 else 1.45
 	else:
-		var pulse := 0.45 + sin(_flicker_time * 0.35) * 0.2
+		var pulse := 0.20 + sin(_flicker_time * 0.35) * 0.10
 		for d in powered_lamps:
-			(d["light"] as OmniLight3D).light_energy = pulse
+			var l: OmniLight3D = d["light"]
+			if d["fixture"] == null:
+				l.light_energy = 0.0
+			else:
+				l.light_energy = pulse
 
 
 func get_boss_spawn(player_pos: Vector3) -> Vector3:
@@ -593,40 +599,40 @@ func _build_environment() -> void:
 	world_env = env
 
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.03, 0.045, 0.08)
-	sky_mat.sky_horizon_color = Color(0.08, 0.10, 0.15)
-	sky_mat.ground_bottom_color = Color(0.02, 0.02, 0.03)
-	sky_mat.ground_horizon_color = Color(0.06, 0.07, 0.10)
+	sky_mat.sky_top_color = Color(0.005, 0.008, 0.014)
+	sky_mat.sky_horizon_color = Color(0.016, 0.020, 0.028)
+	sky_mat.ground_bottom_color = Color(0.004, 0.004, 0.006)
+	sky_mat.ground_horizon_color = Color(0.012, 0.015, 0.020)
 	# Stars, Milky Way, moonlit clouds and the moon itself
 	if ResourceLoader.exists("res://assets/textures/sky_night.png"):
 		sky_mat.sky_cover = load("res://assets/textures/sky_night.png")
-		sky_mat.sky_cover_modulate = Color(1.45, 1.45, 1.55, 1.0)
+		sky_mat.sky_cover_modulate = Color(0.28, 0.32, 0.40, 1.0)
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.14, 0.17, 0.24)
-	env.ambient_light_energy = 1.15
+	env.ambient_light_color = Color(0.055, 0.070, 0.090)
+	env.ambient_light_energy = 0.16
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.3
+	env.tonemap_exposure = 0.98
 	env.glow_enabled = true
-	env.glow_intensity = 0.65
-	env.glow_bloom = 0.18
+	env.glow_intensity = 0.42
+	env.glow_bloom = 0.12
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	env.ssao_enabled = true
 	env.ssr_enabled = true
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.02
-	env.volumetric_fog_albedo = Color(0.14, 0.17, 0.23)
-	env.volumetric_fog_emission = Color(0.02, 0.025, 0.04)
+	env.volumetric_fog_density = 0.036
+	env.volumetric_fog_albedo = Color(0.08, 0.095, 0.115)
+	env.volumetric_fog_emission = Color(0.0, 0.0, 0.0)
 	we.environment = env
 	add_child(we)
 
 	var moon := DirectionalLight3D.new()
-	moon.light_color = Color(0.58, 0.68, 0.90)
-	moon.light_energy = 1.15
+	moon.light_color = Color(0.42, 0.50, 0.66)
+	moon.light_energy = 0.24
 	moon.shadow_enabled = true
 	moon.rotation_degrees = Vector3(-52.0, -34.0, 0.0)
 	add_child(moon)
@@ -637,17 +643,16 @@ func _add_lamp(pos: Vector3, col: Color, energy: float, flicker: bool) -> void:
 	var bm := BoxMesh.new()
 	bm.size = Vector3(1.4, 0.12, 0.3)
 	fixture.mesh = bm
-	fixture.material_override = MaterialLib.get_emissive(col, 3.0)
 	fixture.position = pos + Vector3(0, 0.2, 0)
 	add_child(fixture)
 	var l := OmniLight3D.new()
 	l.light_color = EMERGENCY_RED
-	l.light_energy = 0.45
-	l.omni_range = 10.0
+	l.light_energy = 0.20
+	l.omni_range = 6.5
 	l.position = pos
 	add_child(l)
-	fixture.material_override = MaterialLib.get_emissive(EMERGENCY_RED, 1.2)
-	powered_lamps.append({"light": l, "fixture": fixture, "color": col, "energy": energy})
+	fixture.material_override = MaterialLib.get_emissive(EMERGENCY_RED, 0.85)
+	powered_lamps.append({"light": l, "fixture": fixture, "color": col, "energy": energy * 0.72})
 	if flicker:
 		flicker_lamps.append(l)
 
@@ -658,7 +663,8 @@ func set_power(on: bool) -> void:
 		var l: OmniLight3D = d["light"]
 		l.light_color = d["color"]
 		l.light_energy = d["energy"]
-		(d["fixture"] as MeshInstance3D).material_override = MaterialLib.get_emissive(d["color"], 3.0)
+		if d["fixture"] != null:
+			(d["fixture"] as MeshInstance3D).material_override = MaterialLib.get_emissive(d["color"], 2.4)
 
 
 func skull_found() -> void:

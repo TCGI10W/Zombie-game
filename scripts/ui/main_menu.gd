@@ -166,7 +166,7 @@ func _process(delta: float) -> void:
 	# Lamp flicker with a periodic brownout
 	if is_instance_valid(lamp_light):
 		var brown := fmod(_t, 9.0) > 8.55
-		lamp_light.light_energy = 0.0 if brown else 1.7 + sin(_t * 13.0) * 0.18 + _rng.randf_range(-0.08, 0.08)
+		lamp_light.light_energy = 0.0 if brown else 1.15 + sin(_t * 13.0) * 0.14 + _rng.randf_range(-0.08, 0.08)
 	# Radio tower beacon
 	if is_instance_valid(beacon_light):
 		var on := sin(_t * 2.2) > 0.55
@@ -189,7 +189,7 @@ func _process(delta: float) -> void:
 	_amb_event_t -= delta
 	if _amb_event_t <= 0.0:
 		_amb_event_t = _rng.randf_range(7.0, 15.0)
-		var picks := ["crow", "bell_far", "scream_far", "train_horn", "creak"]
+		var picks := ["crow", "bell_far", "scream_far", "train_horn", "creak", "whisper_eerie", "metal_scrape"]
 		_sfx(picks[_rng.randi_range(0, picks.size() - 1)], _rng.randf_range(-19.0, -14.0), _rng.randf_range(0.9, 1.1))
 	# Nemesis plate pulse
 	if is_instance_valid(_nemesis_plate):
@@ -287,25 +287,26 @@ func _build_diorama() -> void:
 	var world_env := WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.008, 0.012, 0.02)
+	env.background_color = Color(0.003, 0.004, 0.006)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.12, 0.16, 0.22)
-	env.ambient_light_energy = 0.6
+	env.ambient_light_color = Color(0.06, 0.07, 0.09)
+	env.ambient_light_energy = 0.10
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 0.94
 	env.fog_enabled = true
-	env.fog_density = 0.03
-	env.fog_light_color = Color(0.035, 0.055, 0.09)
-	env.fog_light_energy = 0.7
+	env.fog_density = 0.048
+	env.fog_light_color = Color(0.015, 0.02, 0.028)
+	env.fog_light_energy = 0.32
 	env.glow_enabled = true
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
-	env.glow_intensity = 0.6
-	env.glow_bloom = 0.08
+	env.glow_intensity = 0.45
+	env.glow_bloom = 0.05
 	env.adjustment_enabled = true
-	env.adjustment_contrast = 1.07
-	env.adjustment_saturation = 1.05
-	if GameState.graphics_quality >= 2:
+	env.adjustment_contrast = 1.14
+	env.adjustment_saturation = 0.82
+	if GameState.graphics_quality >= 1:
 		env.volumetric_fog_enabled = true
-		env.volumetric_fog_density = 0.022
+		env.volumetric_fog_density = 0.036
 		env.volumetric_fog_length = 40.0
 	world_env.environment = env
 	add_child(world_env)
@@ -337,7 +338,11 @@ func _build_diorama() -> void:
 	torus.ring_segments = 12
 	ring.mesh = torus
 	ring.position = Vector3(0, 0.19, 0)
-	podium_ring_mat = MaterialLib.get_emissive(ACCENT, 1.4).duplicate() as StandardMaterial3D
+	podium_ring_mat = StandardMaterial3D.new()
+	podium_ring_mat.albedo_color = Color(0.08, 0.07, 0.07)
+	podium_ring_mat.roughness = 0.92
+	podium_ring_mat.metallic = 0.35
+	podium_ring_mat.emission_enabled = false
 	ring.material_override = podium_ring_mat
 	add_child(ring)
 
@@ -355,7 +360,7 @@ func _build_diorama() -> void:
 		operator_rig.sway = 0.3
 	accent_light = OmniLight3D.new()
 	accent_light.light_color = ACCENT
-	accent_light.light_energy = 1.2
+	accent_light.light_energy = 0.22
 	accent_light.omni_range = 4.0
 	accent_light.position = Vector3(0, 1.3, 0.5)
 	operator.add_child(accent_light)
@@ -378,7 +383,21 @@ func _build_diorama() -> void:
 			zr.hunch = zd[4]
 			zr.arm_style = zd[5]
 			zr.sway = zd[6]
+			zr.twitch_amt = 0.65
 			zombie_rigs.append(zr)
+			var head_node: Node3D = (zr.nodes.get("Head") as Node3D) if zr.nodes.has("Head") else z.find_child("Head", true, false) as Node3D
+			if head_node:
+				var eye_mat := MaterialLib.get_emissive(Color(0.88, 0.70, 0.28), 0.9)
+				var eye_sm := SphereMesh.new()
+				eye_sm.radius = 0.013
+				eye_sm.height = 0.026
+				for sx in [-1.0, 1.0]:
+					var eye := MeshInstance3D.new()
+					eye.mesh = eye_sm
+					eye.material_override = eye_mat
+					eye.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					eye.position = Vector3(0.044 * sx, 0.11, -0.105)
+					head_node.add_child(eye)
 
 	# Set dressing
 	_prop("barrel", Vector3(-2.7, 0, 1.9), 0.3)
@@ -423,29 +442,29 @@ func _build_diorama() -> void:
 
 	# Key / rim / fill lighting
 	var key := SpotLight3D.new()
-	key.light_color = Color(1.0, 0.85, 0.65)
-	key.light_energy = 12.0
+	key.light_color = Color(0.92, 0.84, 0.72)
+	key.light_energy = 4.6
 	key.spot_range = 16.0
-	key.spot_angle = 42.0
+	key.spot_angle = 28.0
 	key.shadow_enabled = GameState.graphics_quality >= 1
 	key.look_at_from_position(Vector3(1.9, 5.6, 3.4), Vector3(0, 1.1, 0), Vector3.UP)
 	add_child(key)
 	rim_light = SpotLight3D.new()
 	rim_light.light_color = Color(0.95, 0.25, 0.18)
-	rim_light.light_energy = 3.5
+	rim_light.light_energy = 1.3
 	rim_light.spot_range = 12.0
 	rim_light.spot_angle = 50.0
 	rim_light.look_at_from_position(Vector3(-2.6, 3.4, -3.6), Vector3(0, 1.2, 0), Vector3.UP)
 	add_child(rim_light)
 	var fill := OmniLight3D.new()
 	fill.light_color = Color(0.4, 0.7, 1.0)
-	fill.light_energy = 1.0
+	fill.light_energy = 0.18
 	fill.omni_range = 10.0
 	fill.position = Vector3(2.5, 1.6, 4.5)
 	add_child(fill)
 	var horde_glow := OmniLight3D.new()
 	horde_glow.light_color = Color(0.9, 0.15, 0.1)
-	horde_glow.light_energy = 1.4
+	horde_glow.light_energy = 0.45
 	horde_glow.omni_range = 7.0
 	horde_glow.position = Vector3(0, 1.8, -8.0)
 	add_child(horde_glow)
@@ -453,9 +472,9 @@ func _build_diorama() -> void:
 	# Flickering lamp
 	lamp_light = SpotLight3D.new()
 	lamp_light.light_color = Color(0.7, 0.85, 1.0)
-	lamp_light.light_energy = 1.7
+	lamp_light.light_energy = 1.15
 	lamp_light.spot_range = 9.0
-	lamp_light.spot_angle = 55.0
+	lamp_light.spot_angle = 38.0
 	lamp_light.look_at_from_position(Vector3(3.6, 4.2, -2.6), Vector3(2.8, 0, -1.8), Vector3.UP)
 	add_child(lamp_light)
 
@@ -1289,8 +1308,7 @@ func _select_character(cid: String) -> void:
 	if is_instance_valid(accent_light):
 		accent_light.light_color = accent
 	if podium_ring_mat:
-		podium_ring_mat.albedo_color = accent
-		podium_ring_mat.emission = accent
+		podium_ring_mat.albedo_color = accent.darkened(0.75)
 	if is_instance_valid(rim_light):
 		rim_light.light_color = accent.lerp(Color(0.95, 0.2, 0.15), 0.35)
 	_refresh_play()

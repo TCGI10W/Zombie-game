@@ -136,6 +136,14 @@ var _cmd_fill: StyleBoxFlat
 var _cmd_border: StyleBoxFlat
 var _cmd_t: float = 0.0
 
+# Bodycam OSD
+var bodycam_osd: Control
+var bodycam_rec_dot: ColorRect
+var bodycam_time_lbl: Label
+var bodycam_bat_fill: ColorRect
+var _bodycam_clock: float = 0.0
+var _bodycam_last_sec: int = -1
+
 
 func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	player = p_player
@@ -332,6 +340,7 @@ func _build_ui() -> void:
 	monster_overlay.modulate.a = 0.0
 	root.add_child(monster_overlay)
 
+	_build_bodycam_osd(root)
 	_build_top_right(root)
 	_build_boss_bar(root)
 	_build_center(root)
@@ -340,15 +349,109 @@ func _build_ui() -> void:
 	_build_modal()
 
 
+func _build_bodycam_osd(root: Control) -> void:
+	bodycam_osd = Control.new()
+	bodycam_osd.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bodycam_osd.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bodycam_osd.visible = GameState.bodycam_mode
+	root.add_child(bodycam_osd)
+
+	var frame_col := Color(0.85, 0.86, 0.82, 0.22)
+	var m := 14
+	var arm := 18
+	for c in [
+		[0.0, 0.0, m, m, arm, 1],
+		[0.0, 0.0, m, m, 1, arm],
+		[1.0, 0.0, -m - arm, m, arm, 1],
+		[1.0, 0.0, -m - 1, m, 1, arm],
+		[0.0, 1.0, m, -m - 1, arm, 1],
+		[0.0, 1.0, m, -m - arm, 1, arm],
+		[1.0, 1.0, -m - arm, -m - 1, arm, 1],
+		[1.0, 1.0, -m - 1, -m - arm, 1, arm],
+	]:
+		var b := ColorRect.new()
+		b.color = frame_col
+		b.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.anchor_left = float(c[0])
+		b.anchor_right = float(c[0])
+		b.anchor_top = float(c[1])
+		b.anchor_bottom = float(c[1])
+		b.offset_left = int(c[2])
+		b.offset_top = int(c[3])
+		b.offset_right = int(c[2]) + int(c[4])
+		b.offset_bottom = int(c[3]) + int(c[5])
+		bodycam_osd.add_child(b)
+
+	var stamp := VBoxContainer.new()
+	stamp.anchor_left = 1.0
+	stamp.anchor_right = 1.0
+	stamp.offset_left = -290
+	stamp.offset_right = -20
+	stamp.offset_top = 12
+	stamp.offset_bottom = 50
+	stamp.add_theme_constant_override("separation", 2)
+	stamp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bodycam_osd.add_child(stamp)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 6)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stamp.add_child(row)
+
+	bodycam_rec_dot = ColorRect.new()
+	bodycam_rec_dot.custom_minimum_size = Vector2(8, 8)
+	bodycam_rec_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bodycam_rec_dot.color = Color(0.88, 0.14, 0.12, 0.95)
+	bodycam_rec_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(bodycam_rec_dot)
+
+	var rec_lbl := HI.label("REC", 12, Color(0.92, 0.88, 0.82, 0.92))
+	rec_lbl.add_theme_constant_override("outline_size", 3)
+	rec_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	row.add_child(rec_lbl)
+
+	bodycam_time_lbl = HI.label("2026-11-12 23:41:00 // AXON BODY-3", 11, Color(0.84, 0.84, 0.80, 0.84))
+	bodycam_time_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	bodycam_time_lbl.add_theme_constant_override("outline_size", 3)
+	bodycam_time_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	row.add_child(bodycam_time_lbl)
+
+	var bat_row := HBoxContainer.new()
+	bat_row.alignment = BoxContainer.ALIGNMENT_END
+	bat_row.add_theme_constant_override("separation", 5)
+	bat_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stamp.add_child(bat_row)
+
+	var cam_id := HI.label("CAM-07 // BAT", 10, Color(0.70, 0.70, 0.66, 0.72))
+	cam_id.add_theme_constant_override("outline_size", 3)
+	cam_id.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	bat_row.add_child(cam_id)
+
+	var bat_bg := ColorRect.new()
+	bat_bg.custom_minimum_size = Vector2(36, 5)
+	bat_bg.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bat_bg.color = Color(0.14, 0.14, 0.14, 0.85)
+	bat_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bat_row.add_child(bat_bg)
+
+	bodycam_bat_fill = ColorRect.new()
+	bodycam_bat_fill.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	bodycam_bat_fill.anchor_right = 1.0
+	bodycam_bat_fill.color = Color(0.72, 0.78, 0.64, 0.9)
+	bodycam_bat_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bat_bg.add_child(bodycam_bat_fill)
+
+
 func _build_top_right(root: Control) -> void:
 	hostiles_panel = PanelContainer.new()
 	hostiles_panel.anchor_left = 1.0
 	hostiles_panel.anchor_right = 1.0
 	hostiles_panel.offset_left = -150
 	hostiles_panel.offset_right = -20
-	hostiles_panel.offset_top = 18
-	hostiles_panel.offset_bottom = 60
-	hostiles_panel.add_theme_stylebox_override("panel", _panel(HI.BG, HI.RED.darkened(0.2), 5, 1, 10))
+	hostiles_panel.offset_top = 54
+	hostiles_panel.offset_bottom = 94
+	hostiles_panel.add_theme_stylebox_override("panel", _panel(HI.BG, HI.RED.darkened(0.2), 2, 1, 10))
 	root.add_child(hostiles_panel)
 	var h := HBoxContainer.new()
 	h.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -367,8 +470,8 @@ func _build_top_right(root: Control) -> void:
 	powerups_box.anchor_right = 1.0
 	powerups_box.offset_left = -190
 	powerups_box.offset_right = -20
-	powerups_box.offset_top = 68
-	powerups_box.offset_bottom = 200
+	powerups_box.offset_top = 102
+	powerups_box.offset_bottom = 234
 	powerups_box.add_theme_constant_override("separation", 6)
 	powerups_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(powerups_box)
@@ -1272,6 +1375,24 @@ func _toggle_pause() -> void:
 # Per-frame
 # ---------------------------------------------------------------------------
 func _process(delta: float) -> void:
+	_bodycam_clock += delta
+	if bodycam_osd:
+		bodycam_osd.visible = GameState.bodycam_mode and not is_paused and not modal_overlay.visible
+		if bodycam_osd.visible:
+			if bodycam_rec_dot:
+				bodycam_rec_dot.modulate.a = 1.0 if fmod(_bodycam_clock, 1.2) < 0.72 else 0.15
+			var cur_sec := int(_bodycam_clock)
+			if cur_sec != _bodycam_last_sec and bodycam_time_lbl:
+				_bodycam_last_sec = cur_sec
+				var tot := 23 * 3600 + 41 * 60 + cur_sec
+				var hh := (tot / 3600) % 24
+				var mm := (tot / 60) % 60
+				var ss := tot % 60
+				bodycam_time_lbl.text = "2026-11-12 %02d:%02d:%02d // AXON BODY-3" % [hh, mm, ss]
+			if bodycam_bat_fill and is_instance_valid(player):
+				var bat := clampf(float(player.get("flash_battery")) if player.get("flash_battery") != null else 1.0, 0.0, 1.0)
+				bodycam_bat_fill.anchor_right = bat
+				bodycam_bat_fill.color = Color(0.84, 0.22, 0.16, 0.95) if bat < 0.22 else Color(0.72, 0.78, 0.64, 0.9)
 	if fps_lbl:
 		fps_lbl.get_parent().visible = GameState.show_fps
 		if GameState.show_fps:
@@ -1296,7 +1417,8 @@ func _process(delta: float) -> void:
 	if not is_instance_valid(player):
 		return
 	var hp_ratio := clampf(player.hp / maxf(1.0, player.max_hp), 0.0, 1.0)
-	var target_blood := clampf((0.82 - hp_ratio) * 1.25, 0.0, 0.92)
+	var p_stress := float(player.get("stress")) if player.get("stress") != null else 0.0
+	var target_blood := clampf(maxf((0.82 - hp_ratio) * 1.25, p_stress * 0.34 * (0.65 + 0.35 * sin(_bodycam_clock * 5.2))), 0.0, 0.92)
 	blood_overlay.modulate.a = lerp(blood_overlay.modulate.a, target_blood, 8.0 * delta)
 	var target_monster := 0.72 if player.is_monster_form else 0.0
 	monster_overlay.modulate.a = lerp(monster_overlay.modulate.a, target_monster, 8.0 * delta)
@@ -1311,7 +1433,7 @@ func _process(delta: float) -> void:
 	_update_objectives()
 	_update_scoreboard(delta)
 	if minimap:
-		minimap.visible = GameState.show_minimap and not player.is_dead and not modal_overlay.visible and GameState.horror() < 0.55
+		minimap.visible = GameState.show_minimap and not player.is_dead and not modal_overlay.visible and GameState.horror() < 0.92
 	_update_flash_label()
 	if player.is_downed:
 		if player.self_reviving:
@@ -1644,10 +1766,10 @@ func _on_round_started(round_num: int, boss_cfg: Dictionary) -> void:
 	_show_banner("ROUND %s — ELIMINATE ALL ZOMBIES TO SUMMON %s!" % [GameState.to_roman(round_num), boss_cfg["name"]], boss_cfg["color"])
 	var title := Label.new()
 	title.text = "ROUND %d" % round_num
-	title.add_theme_font_size_override("font_size", 84)
-	title.add_theme_color_override("font_color", Color(0.85, 0.08, 0.06))
+	title.add_theme_font_size_override("font_size", 82)
+	title.add_theme_color_override("font_color", Color(0.68, 0.06, 0.05))
 	title.add_theme_constant_override("outline_size", 14)
-	title.add_theme_color_override("font_outline_color", Color(0.08, 0, 0))
+	title.add_theme_color_override("font_outline_color", Color(0.05, 0, 0))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.anchor_left = 0.5
 	title.anchor_right = 0.5
@@ -1659,14 +1781,14 @@ func _on_round_started(round_num: int, boss_cfg: Dictionary) -> void:
 	title.offset_bottom = -90
 	title.modulate.a = 0.0
 	title.pivot_offset = Vector2(400, 50)
-	title.scale = Vector2(1.4, 1.4)
+	title.scale = Vector2(1.04, 1.04)
 	add_child(title)
 	var ttw := title.create_tween()
 	ttw.set_parallel(true)
-	ttw.tween_property(title, "modulate:a", 1.0, 0.4)
-	ttw.tween_property(title, "scale", Vector2.ONE, 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	ttw.chain().tween_interval(1.6)
-	ttw.chain().tween_property(title, "modulate:a", 0.0, 0.8)
+	ttw.tween_property(title, "modulate:a", 1.0, 0.95).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	ttw.tween_property(title, "scale", Vector2.ONE, 1.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	ttw.chain().tween_interval(1.8)
+	ttw.chain().tween_property(title, "modulate:a", 0.0, 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	ttw.chain().tween_callback(title.queue_free)
 
 
@@ -1734,17 +1856,17 @@ func _on_kill_streak(count: int) -> void:
 	var name: String = STREAK_NAMES.get(count, "UNSTOPPABLE")
 	streak_lbl.text = "%s  x%d   +%d" % [name, count, 25 * (count - 1)]
 	var t := clampf(float(count - 2) / 6.0, 0.0, 1.0)
-	var col := Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.25, 0.2), t)
+	var col := HI.AMBER.lerp(HI.RED, t)
 	streak_lbl.add_theme_color_override("font_color", col)
 	streak_icon.modulate = col
-	streak_lbl.scale = Vector2.ONE * 1.35
-	streak_lbl.get_parent().modulate.a = 1.0
+	streak_lbl.scale = Vector2.ONE * 1.08
+	streak_lbl.get_parent().modulate.a = 0.86
 	var tw := streak_lbl.create_tween()
-	tw.tween_property(streak_lbl, "scale", Vector2.ONE, 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_interval(1.1)
-	tw.tween_property(streak_lbl.get_parent(), "modulate:a", 0.0, 0.4)
+	tw.tween_property(streak_lbl, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(0.95)
+	tw.tween_property(streak_lbl.get_parent(), "modulate:a", 0.0, 0.45)
 	if count == 3 or count == 5 or count % 5 == 0:
-		GameState.play_sfx("streak_sting", -6.0, 1.0 + 0.04 * float(mini(count, 10)))
+		GameState.play_sfx("streak_sting", -13.0, 0.96 + 0.03 * float(mini(count, 10)))
 
 
 func _show_banner(txt: String, col: Color) -> void:

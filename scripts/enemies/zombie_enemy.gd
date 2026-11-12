@@ -61,6 +61,9 @@ var fx_enraged: bool = false
 # sprints, "lurker" freezes while you look at it and rushes when you don't
 var move_style: String = ""
 var _style_t: float = 0.0
+var _sleeper_awake: bool = true
+var _flash_lit_t: float = 0.0
+var _eye_nodes: Array[MeshInstance3D] = []
 var _spitter_tinted: bool = false
 static var _shield_tip_t: float = -100.0
 var _zig: float = 0.0
@@ -227,7 +230,7 @@ func setup_regular(round_num: int, variant: String = "walker") -> void:
 	if is_spitter:
 		_tint_spitter()
 	if rig:
-		rig.twitch_amt = randf_range(0.12, 0.3) + 0.55 * GameState.horror() * randf()
+		rig.twitch_amt = maxf(rig.twitch_amt, randf_range(0.32, 0.78))
 	_style_t = randf() * 10.0
 
 
@@ -335,10 +338,83 @@ func _build_body(model_path: String, accent_color: Color) -> void:
 		rise_tw.tween_property(visual_root, "position:y", 0.0, 0.7).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 	_build_status_vfx(cap.height, accent_color)
+	_attach_pinprick_eyes(accent_color if is_boss else Color(0.85, 0.72, 0.32))
 	_build_3d_audio(cap.height)
 	anim_phase = randf() * TAU
 	_last_step_half = int(floor(anim_phase / PI))
 	roar_timer = randf_range(0.8, 2.2) if is_boss else randf_range(2.2, 7.5)
+
+
+func _attach_pinprick_eyes(col: Color) -> void:
+	var anchor: Node3D = null
+	if rig and rig.nodes.has("Head") and is_instance_valid(rig.nodes["Head"]):
+		anchor = rig.nodes["Head"] as Node3D
+	elif is_instance_valid(node_head):
+		anchor = node_head
+	elif is_instance_valid(visual_root):
+		anchor = visual_root
+	if anchor == null:
+		return
+	var mat := MaterialLib.get_emissive(col, 1.35 if is_boss else 0.85)
+	var eye_mesh := SphereMesh.new()
+	eye_mesh.radius = 0.013
+	eye_mesh.height = 0.026
+	eye_mesh.radial_segments = 6
+	eye_mesh.rings = 4
+	var y_off := 0.11 if anchor != visual_root else 1.58
+	var z_off := -0.105 if anchor != visual_root else -0.14
+	for sx in [-1.0, 1.0]:
+		var eye := MeshInstance3D.new()
+		eye.mesh = eye_mesh
+		eye.material_override = mat
+		eye.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		eye.layers = 2
+		eye.position = Vector3(0.044 * sx, y_off, z_off)
+		anchor.add_child(eye)
+		_eye_nodes.append(eye)
+
+
+func make_sleeper() -> void:
+	if is_boss or is_crawler or is_bloater:
+		return
+	move_style = "sleeper"
+	_sleeper_awake = false
+	rise_timer = 0.0
+	if is_instance_valid(visual_root):
+		visual_root.rotation.x = deg_to_rad(80.0)
+		visual_root.position.y = 0.14
+	for eye in _eye_nodes:
+		if is_instance_valid(eye):
+			eye.visible = false
+
+
+func _lit_by_flashlight() -> bool:
+	if not is_instance_valid(target_player) or not (target_player is PlayerController):
+		return false
+	var pc := target_player as PlayerController
+	if not pc.flashlight_lit() or not is_instance_valid(pc.flashlight):
+		return false
+	var to_me := (global_position + Vector3(0, 0.9, 0)) - pc.flashlight.global_position
+	var d := to_me.length()
+	if d > 20.0 or d < 0.1:
+		return false
+	return (-pc.flashlight.global_basis.z).dot(to_me / d) > 0.88
+
+
+func _wake_sleeper() -> void:
+	if _sleeper_awake:
+		return
+	_sleeper_awake = true
+	for eye in _eye_nodes:
+		if is_instance_valid(eye):
+			eye.visible = true
+	_play_3d_roar("zombie_attack_roar", randf_range(1.08, 1.28))
+	rise_timer = 0.32
+	if is_instance_valid(visual_root):
+		var tw := create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(visual_root, "rotation:x", 0.0, 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(visual_root, "position:y", 0.0, 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func _tint_shirt(inst: Node) -> void:
@@ -703,6 +779,19 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 	if entry_window and entry_stage < 3:
 		_process_window_entry(delta, speed_mult)
 		return
+	if not _sleeper_awake:
+		if _lit_by_flashlight():
+			_flash_lit_t += delta
+		else:
+			_flash_lit_t = maxf(0.0, _flash_lit_t - delta * 0.5)
+		var dist_p := global_position.distance_to(target_player.global_position)
+		var gunshot_near := target_player is PlayerController and (target_player as PlayerController).sensor_flash > 0.2 and dist_p < 13.0
+		if dist_p < 5.2 or _flash_lit_t > 0.25 or gunshot_near:
+			_wake_sleeper()
+		else:
+			velocity.x = 0.0
+			velocity.z = 0.0
+			return
 	if buff_t > 0.0:
 		buff_t -= delta
 		speed_mult *= 1.15
@@ -1231,6 +1320,8 @@ func _animate_stunned(delta: float) -> void:
 func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armor: bool = false, kind: String = "bullet") -> Dictionary:
 	if is_dead:
 		return {"dealt": 0.0, "headshot": false, "killed": false}
+	if not _sleeper_awake:
+		_wake_sleeper()
 	_pre_hit_hp = hp
 	last_damage_kind = kind
 	last_hit_point = hit_pos if hit_pos != Vector3.ZERO else global_position + Vector3(0, 1.1 * model_scale, 0)
@@ -1294,8 +1385,8 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 	if is_boss:
 		boss_damaged.emit(self)
 	_hit_feedback(hit_pos, dmg, is_headshot, kind)
-	if not is_boss and dmg >= 90.0 and kind != "electric":
-		velocity += -last_hit_from * clampf(dmg / 60.0, 1.5, 5.0)
+	if not is_boss and dmg >= 48.0 and kind != "electric":
+		velocity += -last_hit_from * clampf(dmg / 52.0, 1.3, 5.2)
 	if Net.is_online() and net_id > 0:
 		var ng := _net_game()
 		if ng:
@@ -1334,7 +1425,7 @@ func _hit_feedback(hit_pos: Vector3, dmg: float, is_headshot: bool, kind: String
 	if rig and hp > dmg:
 		var local_from := global_basis.inverse() * last_hit_from
 		var region := _hit_region(hit_pos) if hit_pos != Vector3.ZERO and kind != "explosive" else "torso"
-		rig.hit(clampf(dmg / 60.0, 0.3, 2.2), local_from, region)
+		rig.hit(clampf(dmg / 60.0 * 1.35, 0.4, 2.7), local_from, region)
 
 
 # Which part of the body a hit landed on (model space, scale-independent).
@@ -1400,6 +1491,9 @@ func _die(was_headshot: bool) -> void:
 	for n in [_shield_mesh, _aura_ring, _tier_label, _tier_light]:
 		if n:
 			n.visible = false
+	for eye in _eye_nodes:
+		if is_instance_valid(eye):
+			eye.visible = false
 	if is_instance_valid(_warn_node):
 		_warn_node.queue_free()
 
@@ -1962,6 +2056,13 @@ func _tier_visuals() -> void:
 		if _base_vscale == Vector3.ZERO:
 			_base_vscale = visual_root.scale
 		visual_root.scale = _base_vscale * grow
+	if tier == 2:
+		# Stalkers lurk without neon outlines; only crimson pinprick eyes give them away
+		var eye_mat := MaterialLib.get_emissive(Color(1.0, 0.14, 0.10), 1.45)
+		for eye in _eye_nodes:
+			if is_instance_valid(eye):
+				eye.material_override = eye_mat
+		return
 	for m in _meshes:
 		if is_instance_valid(m) and not _spitter_tinted: # spitters keep their green
 			m.material_overlay = MaterialLib.get_rim(col, 0.3 + 0.14 * float(tier - 2), 3.0)
@@ -1974,8 +2075,8 @@ func _tier_visuals() -> void:
 		_tier_light.position = Vector3(0, 0.7 * model_scale, 0)
 		add_child(_tier_light)
 	_tier_light.light_color = col
-	_tier_light.light_energy = 0.6 + 0.3 * float(tier)
-	if tier < 3 or is_boss:
+	_tier_light.light_energy = 0.35 + 0.18 * float(tier)
+	if is_boss:
 		return
 	if _tier_label == null:
 		_tier_label = Label3D.new()

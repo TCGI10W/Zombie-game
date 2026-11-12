@@ -90,6 +90,9 @@ func start_round(round_num: int) -> void:
 		zombies_to_spawn = 0
 		hounds_to_spawn = mini(int(round(float(6 + round_num) * crowd)), 26 + 6 * (n - 1))
 		hound_timer = 4.0
+	elif ev == "dead_fog":
+		hounds_to_spawn = randi_range(2, 5)
+		hound_timer = randf_range(5.0, 9.0)
 	boss_pending = true
 	boss_intro_triggered = false
 	boss_intro_timer = 0.0
@@ -157,7 +160,7 @@ func _present_round(round_num: int, ev: String = "") -> void:
 				GameState.play_sfx("hound_round_sting", -2.0, 1.0)
 				player.status_banner_requested.emit("%s — %s" % [info["name"], info["desc"]], info["color"]))
 	GameState.round_changed.emit(round_num)
-	hound_round = false # hound raids removed
+	hound_round = round_num >= 5 and (round_num % 5 == 0) and not (round_num == GameState.FINAL_ROUND and GameState.game_mode == "casual")
 	if hound_round:
 		GameState.play_sfx("hound_round_sting", 0.0, 1.0)
 		GameState.play_sfx("hound_howl", -5.0, randf_range(0.95, 1.05))
@@ -302,6 +305,9 @@ func _process(delta: float) -> void:
 			boss_intro_triggered = true
 			boss_intro_timer = 2.5
 			GameState.play_sfx("boss_roar", 2.0, 0.92)
+			var horror := get_parent().get_node_or_null("Horror")
+			if horror and horror.has_method("trigger_boss_blackout"):
+				horror.trigger_boss_blackout(2.6)
 			var cfg := GameState.get_boss_config(GameState.current_round)
 			_banner(
 				"ALL ZOMBIES ELIMINATED! ROUND %d BOSS INCOMING: %s!" % [GameState.current_round, cfg["name"]],
@@ -319,6 +325,7 @@ func _process(delta: float) -> void:
 	# Phase 3: round over once the boss and its minions are dead
 	if zombies_to_spawn <= 0 and hounds_to_spawn <= 0 and not boss_pending and alive_enemies <= 0:
 		in_intermission = true
+		GameState.play_sfx("round_end_sting", -1.5, 1.0)
 		if weather and weather.storm:
 			weather.set_storm(false)
 		intermission_timer = 8.0
@@ -378,14 +385,18 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 
 	var window: Node3D = null
 	var sp := forced_pos
+	var spawn_sleeper := forced_pos == Vector3.INF and variant == "walker" and round_num >= 2 and randf() < 0.14
 	if sp == Vector3.INF:
-		window = _pick_window()
-		if window:
-			var side := window.global_basis.x * randf_range(-1.5, 1.5)
-			sp = window.spawn_pos() + side
-			sp.y = 0.1
+		if spawn_sleeper:
+			sp = _hound_spawn_point()
 		else:
-			sp = arena.get_boss_spawn(_focus_pos())
+			window = _pick_window()
+			if window:
+				var side := window.global_basis.x * randf_range(-1.5, 1.5)
+				sp = window.spawn_pos() + side
+				sp.y = 0.1
+			else:
+				sp = arena.get_boss_spawn(_focus_pos())
 
 	enemies_container.add_child(z)
 	z.global_position = sp
@@ -409,7 +420,9 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 			z.move_style = "burst"
 		elif sr < 0.3 * hr + 0.5:
 			z.move_style = "lurch"
-	if window:
+	if spawn_sleeper:
+		z.make_sleeper()
+	elif window:
 		z.set_entry_window(window)
 	z.died.connect(_on_enemy_died)
 	# Tiers: most are Rotters (1), some Stalkers (2, more on harder

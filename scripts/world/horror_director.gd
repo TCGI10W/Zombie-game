@@ -34,23 +34,23 @@ func setup(p_arena: Node, p_player: Node3D, p_hud: Node, wave_mgr: Node) -> void
 			_lamps.append(l)
 	_blackout_t = randf_range(50.0, 90.0)
 	_scare_t = randf_range(15.0, 30.0)
-	if h >= 0.7:
+	if h >= 0.92:
 		wave_mgr.wave_status_changed.connect(_hide_count)
 
 
-# Darker the higher the horror, but shapes stay readable
+# Subtle refinement over BunkerArena's dark horror baseline
 func _apply_darkness() -> void:
 	var env: Environment = arena.world_env
 	if env == null:
 		return
-	env.ambient_light_energy *= lerpf(1.0, 0.4, h)
-	env.tonemap_exposure = lerpf(env.tonemap_exposure, 1.1, h)
-	env.volumetric_fog_density *= 1.0 + 0.8 * h
+	env.ambient_light_energy *= lerpf(1.0, 0.72, h)
+	env.tonemap_exposure = lerpf(env.tonemap_exposure, 0.94, h)
+	env.volumetric_fog_density *= 1.0 + 0.30 * h
 	for d in arena.find_children("*", "DirectionalLight3D", true, false):
-		(d as DirectionalLight3D).light_energy *= lerpf(1.0, 0.32, h)
+		(d as DirectionalLight3D).light_energy *= lerpf(1.0, 0.70, h)
 	var sky := env.sky.sky_material as ProceduralSkyMaterial if env.sky else null
 	if sky:
-		sky.sky_cover_modulate = sky.sky_cover_modulate * lerpf(1.0, 0.55, h)
+		sky.sky_cover_modulate = sky.sky_cover_modulate * lerpf(1.0, 0.75, h)
 
 
 func _hide_count(_txt: String) -> void:
@@ -69,26 +69,75 @@ func _process(delta: float) -> void:
 			_run_blackout()
 	_scare_t -= delta
 	if _scare_t <= 0.0:
-		_scare_t = randf_range(18.0, 40.0) / (0.4 + h)
+		_scare_t = randf_range(16.0, 34.0) / (0.4 + h)
 		_sound_scare()
-	if h >= 0.3:
-		_heartbeat(delta)
+
+
+func trigger_boss_blackout(duration: float = 2.6) -> void:
+	if _busy or not is_inside_tree():
+		return
+	_busy = true
+	GameState.play_sfx("boss_blackout", 1.0, 1.0)
+	for i in range(4):
+		if not is_inside_tree():
+			_busy = false
+			return
+		_set_lamps(i % 2 == 1)
+		await get_tree().create_timer(randf_range(0.05, 0.13)).timeout
+	if not is_inside_tree():
+		_busy = false
+		return
+	_set_lamps(false)
+	blackout = true
+	await get_tree().create_timer(duration).timeout
+	if not is_inside_tree():
+		_busy = false
+		return
+	for i in range(3):
+		if not is_inside_tree():
+			_busy = false
+			return
+		_set_lamps(i % 2 == 0)
+		await get_tree().create_timer(randf_range(0.05, 0.14)).timeout
+	if not is_inside_tree():
+		_busy = false
+		return
+	_set_lamps(true)
+	blackout = false
+	_busy = false
 
 
 # Lamps stutter, die for a few seconds, then come back
 func _run_blackout() -> void:
+	if not is_inside_tree():
+		return
 	_busy = true
 	GameState.play_sfx("trap_zap", -10.0, 0.7)
 	for i in range(4):
+		if not is_inside_tree():
+			_busy = false
+			return
 		_set_lamps(i % 2 == 1)
 		await get_tree().create_timer(randf_range(0.06, 0.18)).timeout
+	if not is_inside_tree():
+		_busy = false
+		return
 	_set_lamps(false)
 	blackout = true
 	GameState.play_sfx("power_on", -8.0, 0.45)
 	await get_tree().create_timer(2.5 + 4.0 * h).timeout
+	if not is_inside_tree():
+		_busy = false
+		return
 	for i in range(3):
+		if not is_inside_tree():
+			_busy = false
+			return
 		_set_lamps(i % 2 == 0)
 		await get_tree().create_timer(randf_range(0.05, 0.14)).timeout
+	if not is_inside_tree():
+		_busy = false
+		return
 	_set_lamps(true)
 	blackout = false
 	_busy = false
@@ -109,12 +158,12 @@ func _sound_scare() -> void:
 	back.y = 0.0
 	back = back.normalized().rotated(Vector3.UP, randf_range(-0.9, 0.9))
 	var pos := cam.global_position + back * randf_range(2.5, 6.0)
-	match randi() % 6:
+	match randi() % 9:
 		0:
 			_play_at("zombie_step_1", pos, 2.0, 0.8)
 			get_tree().create_timer(0.45).timeout.connect(func(): _play_at("zombie_step_2", pos + back * -0.6, 3.0, 0.8))
 		1:
-			_play_at("zombie_groan", pos, -8.0, 1.75) # thin whisper
+			_play_at("whisper_eerie", pos, -2.0, randf_range(0.92, 1.08))
 		2:
 			_play_at("board_tear", pos + back * 6.0, -4.0, 0.6)
 		3:
@@ -123,6 +172,12 @@ func _sound_scare() -> void:
 			_play_at("creak", pos, 0.0, 0.7)
 		5:
 			_play_at("zombie_roar_2", pos, -14.0, 0.45) # low breath
+		6:
+			_play_at("metal_scrape", pos + back * 4.0, -3.0, randf_range(0.88, 1.12))
+		7:
+			_play_at("fluorescent_buzz", pos, -5.0, randf_range(0.92, 1.08))
+		8:
+			_play_at("zombie_groan", pos, -7.0, 1.65)
 
 
 func _play_at(clip: String, pos: Vector3, db: float, pitch: float) -> void:
@@ -140,26 +195,3 @@ func _play_at(clip: String, pos: Vector3, db: float, pitch: float) -> void:
 	p.global_position = pos
 	p.finished.connect(p.queue_free)
 	p.play()
-
-
-# Heartbeat when a zombie is close but you are not looking at it
-func _heartbeat(delta: float) -> void:
-	_beat_t -= delta
-	if _beat_t > 0.0:
-		return
-	_beat_t = 0.5
-	var cam := get_viewport().get_camera_3d()
-	if cam == null:
-		return
-	var fwd := -cam.global_basis.z
-	var near := 99.0
-	for z in get_tree().get_nodes_in_group("enemies"):
-		if z.is_dead:
-			continue
-		var off: Vector3 = z.global_position - cam.global_position
-		var d := off.length()
-		if d < 8.0 and fwd.dot(off / maxf(d, 0.01)) < 0.3:
-			near = minf(near, d)
-	if near < 8.0:
-		_beat_t = lerpf(0.45, 0.95, near / 8.0)
-		GameState.play_sfx("heartbeat", lerpf(-2.0, -14.0, near / 8.0), 1.0)

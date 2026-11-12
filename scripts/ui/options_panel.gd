@@ -26,8 +26,9 @@ func _ready() -> void:
 		GameState.invert_y = on)
 
 	_section("VIDEO")
-	_slider("FIELD OF VIEW", 65.0, 110.0, GameState.fov_setting, func(v: float):
+	_slider("FIELD OF VIEW", 65.0, 112.0, GameState.fov_setting, func(v: float):
 		GameState.fov_setting = v
+		GameState.write_save()
 		var p := get_tree().get_first_node_in_group("player")
 		if p:
 			p.base_fov = v)
@@ -47,19 +48,27 @@ func _ready() -> void:
 	_toggle("VSYNC  (OFF = LESS INPUT DELAY)", GameState.vsync_on, func(on: bool):
 		GameState.vsync_on = on
 		GameState.apply_graphics())
+	_toggle("BODYCAM FISHEYE & REC OSD", GameState.bodycam_mode, func(on: bool):
+		GameState.bodycam_mode = on
+		GameState.write_save())
 	_toggle("FILM GRAIN & LENS EFFECTS", GameState.post_fx_enabled, func(on: bool):
 		GameState.post_fx_enabled = on
+		GameState.write_save()
 		var pfx := get_tree().current_scene.get_node_or_null("PostFX") if get_tree().current_scene else null
 		if pfx:
 			pfx.visible = on)
 	_toggle("SHOW FPS", GameState.show_fps, func(on: bool):
-		GameState.show_fps = on)
+		GameState.show_fps = on
+		GameState.write_save())
 	_toggle("SHOW CROSSHAIR", GameState.show_crosshair, func(on: bool):
-		GameState.show_crosshair = on)
+		GameState.show_crosshair = on
+		GameState.write_save())
 	_toggle("DAMAGE NUMBERS", GameState.damage_numbers, func(on: bool):
-		GameState.damage_numbers = on)
+		GameState.damage_numbers = on
+		GameState.write_save())
 	_toggle("MINIMAP", GameState.show_minimap, func(on: bool):
-		GameState.show_minimap = on)
+		GameState.show_minimap = on
+		GameState.write_save())
 	_build_keys()
 
 

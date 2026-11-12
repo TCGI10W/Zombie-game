@@ -11,16 +11,16 @@ const COLS := 8
 
 # Night-outbreak palette: gunmetal surfaces, blood red, amber points, cyan info,
 # green ready, purple arc / borrowed, warm white text.
-const BG := Color(0.045, 0.055, 0.075, 0.86)
-const BG_SOLID := Color(0.055, 0.065, 0.09, 0.96)
-const EDGE := Color(0.30, 0.36, 0.44, 0.9)
-const RED := Color(0.88, 0.14, 0.12)
-const AMBER := Color(1.0, 0.78, 0.25)
-const CYAN := Color(0.35, 0.85, 1.0)
-const GREEN := Color(0.45, 1.0, 0.65)
-const PURPLE := Color(0.75, 0.5, 1.0)
-const TEXT := Color(0.93, 0.95, 0.98)
-const DIM := Color(0.60, 0.66, 0.74)
+const BG := Color(0.032, 0.030, 0.030, 0.84)
+const BG_SOLID := Color(0.045, 0.042, 0.042, 0.95)
+const EDGE := Color(0.24, 0.21, 0.19, 0.78)
+const RED := Color(0.76, 0.10, 0.08)
+const AMBER := Color(0.88, 0.66, 0.24)
+const CYAN := Color(0.56, 0.72, 0.74)
+const GREEN := Color(0.46, 0.74, 0.48)
+const PURPLE := Color(0.66, 0.44, 0.78)
+const TEXT := Color(0.89, 0.87, 0.82)
+const DIM := Color(0.56, 0.53, 0.49)
 
 const INDEX := {
 	"skull": 0, "crown": 1, "heart": 2, "shield": 3, "bolt": 4, "bullet": 5, "grenade": 6, "knife": 7,
@@ -85,7 +85,7 @@ static func keycap(label: String, px: float = 12) -> PanelContainer:
 	return p
 
 
-static func panel(bg: Color = BG, border: Color = EDGE, corner: int = 4, bw: int = 1, margin: int = 10) -> StyleBoxFlat:
+static func panel(bg: Color = BG, border: Color = EDGE, corner: int = 1, bw: int = 1, margin: int = 10) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg
 	sb.border_color = border

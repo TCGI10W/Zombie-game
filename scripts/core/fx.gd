@@ -3,7 +3,7 @@ extends Node
 # casings, gore chunks, dust puffs and blood sprays. Everything is capped so
 # long fights don't pile up nodes.
 
-const MAX_BLOOD := 48
+const MAX_BLOOD := 72
 const MAX_HOLES := 60
 const MAX_GORE := 24
 const MAX_PUFFS := 24
@@ -51,7 +51,7 @@ func _ready() -> void:
 	_mat_gore2.albedo_color = Color(0.45, 0.32, 0.28)
 	_mat_gore2.roughness = 0.6
 	_mat_dust = _sprite_mat(Color(0.55, 0.52, 0.48, 0.5))
-	_mat_spray = _sprite_mat(Color(0.22, 0.008, 0.008, 0.85))
+	_mat_spray = _sprite_mat(Color(0.16, 0.006, 0.006, 0.92))
 
 	_mesh_casing = CylinderMesh.new()
 	_mesh_casing.top_radius = 0.005

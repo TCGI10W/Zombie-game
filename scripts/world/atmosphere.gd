@@ -85,13 +85,22 @@ func _process(delta: float) -> void:
 			_bolt_t = _rng.randf_range(7.0, 16.0)
 			weather.flash_sky(_rng.randf_range(0.5, 1.0))
 
-	# Swinging lamps: wind pushes them harder
+	# Swinging lamps: wind pushes them harder; unpowered indoor bulbs stay dark
 	var amp := deg_to_rad(2.5 + 8.0 * intensity)
+	var pwr_on: bool = arena != null and arena.get("power_on") == true
 	for s in _swingers:
 		var piv: Node3D = s["pivot"]
 		var ph: float = s["phase"]
 		piv.rotation.x = amp * sin(_time * 1.35 + ph)
 		piv.rotation.z = amp * 0.6 * sin(_time * 1.04 + ph * 1.7)
+		var l: OmniLight3D = s["light"]
+		var b: MeshInstance3D = s["bulb"]
+		if not pwr_on:
+			l.light_energy = 0.0
+			b.material_override = MaterialLib.get_emissive(Color(0.25, 0.08, 0.06), 0.15)
+		else:
+			l.light_energy = 1.15
+			b.material_override = MaterialLib.get_emissive(s["color"], 2.4)
 
 	_event_t -= delta
 	if _event_t <= 0.0 and cam:
@@ -325,17 +334,17 @@ func _build_swinging_lights() -> void:
 		bm.radius = 0.1
 		bm.height = 0.2
 		bulb.mesh = bm
-		bulb.material_override = MaterialLib.get_emissive(s[2], 4.0)
+		bulb.material_override = MaterialLib.get_emissive(Color(0.25, 0.08, 0.06), 0.15)
 		bulb.position.y = -length - 0.15
 		pivot.add_child(bulb)
 		var l := OmniLight3D.new()
 		l.light_color = s[2]
-		l.light_energy = 1.8
-		l.omni_range = 13.0
+		l.light_energy = 0.0
+		l.omni_range = 10.5
 		l.shadow_enabled = s[3] and GameState.graphics_quality >= 1
 		l.position.y = -length - 0.3
 		pivot.add_child(l)
-		_swingers.append({"pivot": pivot, "phase": _rng.randf_range(0.0, TAU)})
+		_swingers.append({"pivot": pivot, "phase": _rng.randf_range(0.0, TAU), "light": l, "bulb": bulb, "color": s[2]})
 
 
 # ---------------------------------------------------------------------------
@@ -412,28 +421,42 @@ func _ambient_event(cam_pos: Vector3) -> void:
 	var r := _rng.randf()
 	match zone:
 		"warehouse":
-			if r < 0.6:
+			if r < 0.38:
+				_one_shot("metal_scrape", near, -8.0, _rng.randf_range(0.85, 1.15))
+			elif r < 0.68:
+				_one_shot("fluorescent_buzz", near, -11.0, _rng.randf_range(0.9, 1.1))
+			elif r < 0.85:
 				_one_shot("creak", near, -10.0, _rng.randf_range(0.7, 1.0))
 			else:
 				_one_shot("drip", near, -14.0, _rng.randf_range(0.9, 1.2))
 		"hospital":
-			if r < 0.5:
-				_one_shot("drip", near, -14.0, _rng.randf_range(0.9, 1.3))
-			elif r < 0.8:
-				_one_shot("creak", near, -16.0, _rng.randf_range(1.2, 1.5))
-			else:
-				_one_shot("scream_far", far, -12.0, _rng.randf_range(0.85, 1.1))
-		"church":
-			if r < 0.5:
-				_one_shot("creak", near + Vector3(0, 4, 0), -12.0, _rng.randf_range(0.55, 0.75))
-			else:
-				_one_shot("bell_far", Vector3(1, 12, -50), -10.0, 1.0)
-		_:
-			if r < 0.4:
-				_one_shot("crow", far, -8.0, _rng.randf_range(0.9, 1.1))
-			elif r < 0.6:
-				_one_shot("scream_far", far, -12.0, _rng.randf_range(0.85, 1.15))
+			if r < 0.32:
+				_one_shot("whisper_eerie", near, -9.0, _rng.randf_range(0.9, 1.1))
+			elif r < 0.56:
+				_one_shot("fluorescent_buzz", near, -11.0, _rng.randf_range(0.9, 1.1))
 			elif r < 0.78:
+				_one_shot("drip", near, -14.0, _rng.randf_range(0.9, 1.3))
+			elif r < 0.90:
+				_one_shot("metal_scrape", near, -12.0, _rng.randf_range(0.95, 1.25))
+			else:
+				_one_shot("scream_far", far, -10.0, _rng.randf_range(0.85, 1.1))
+		"church":
+			if r < 0.38:
+				_one_shot("whisper_eerie", near, -8.0, _rng.randf_range(0.82, 1.05))
+			elif r < 0.72:
+				_one_shot("creak", near + Vector3(0, 4, 0), -11.0, _rng.randf_range(0.55, 0.75))
+			else:
+				_one_shot("bell_far", Vector3(1, 12, -50), -9.0, 1.0)
+		_:
+			if r < 0.25:
+				_one_shot("crow", far, -8.0, _rng.randf_range(0.9, 1.1))
+			elif r < 0.45:
+				_one_shot("whisper_eerie", near, -11.0, _rng.randf_range(0.9, 1.15))
+			elif r < 0.65:
+				_one_shot("metal_scrape", near, -12.0, _rng.randf_range(0.85, 1.15))
+			elif r < 0.80:
+				_one_shot("scream_far", far, -11.0, _rng.randf_range(0.85, 1.15))
+			elif r < 0.90:
 				_one_shot("bell_far", Vector3(1, 12, -50), -6.0, 1.0)
 			else:
 				_one_shot("train_horn", Vector3(-90, 4, 30), -4.0, _rng.randf_range(0.95, 1.05))

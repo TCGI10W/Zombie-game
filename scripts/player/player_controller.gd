@@ -22,7 +22,7 @@ const STAND_HEAD := 1.62
 const CROUCH_HEAD := 1.05
 const SLIDE_HEAD := 0.82
 const HIP_POS := Vector3(0.19, -0.2, -0.36)
-var base_fov: float = 80.0 # set from the FOV setting
+var base_fov: float = 94.0 # set from the FOV setting
 const SLIDE_FRICTION := 8.5 # m/s lost per second while sliding
 const SLIDE_DRAG := 0.035 # extra loss at high speed (speed squared)
 const SLIDE_MAX_TIME := 2.5
@@ -88,6 +88,20 @@ var active_slot: int = 0
 var mag_ammo: Dictionary = {}
 var reserve_ammo: Dictionary = {}
 var upgraded: Dictionary = {} # w_id -> true once forged
+var weapon_mods: Dictionary = {} # w_id -> Array[String] from Mystery Crate rolls
+
+# Bodycam horror & panic state
+var sensor_flash: float = 0.0
+var stress: float = 0.0
+var _cam_yaw_vel: float = 0.0
+var _breath_cd: float = 0.0
+var _stress_beat_cd: float = 0.0
+var _flash_hit_flicker: float = 0.0
+var flash_pivot: Node3D
+var flashlight_spill: SpotLight3D
+var flash_beam_mesh: MeshInstance3D
+var tac_laser_beam: MeshInstance3D
+var tac_laser_dot: MeshInstance3D
 var fire_cooldown: float = 0.0
 var is_reloading: bool = false
 var reload_timer: float = 0.0
@@ -252,33 +266,94 @@ func _build_camera_and_viewmodels() -> void:
 	gun_rig.position = HIP_POS
 	camera.add_child(gun_rig)
 
-	# Soft fill light so the viewmodel reads in dark rooms
+	# Subtle fill light so the viewmodel reads dimly without glowing in pitch black
 	var fill := OmniLight3D.new()
-	fill.light_color = Color(0.85, 0.88, 1.0)
-	fill.light_energy = 0.55
-	fill.omni_range = 1.1
+	fill.light_color = Color(0.72, 0.78, 0.90)
+	fill.light_energy = 0.24
+	fill.omni_range = 1.0
 	fill.position = Vector3(0.1, 0.25, 0.1)
 	fill.light_cull_mask = VIEWMODEL_LAYER # only lights the gun & hands, not zombies in your face
 	camera.add_child(fill)
 
+	flash_pivot = Node3D.new()
+	flash_pivot.position = Vector3(0.15, -0.13, -0.08)
+	camera.add_child(flash_pivot)
+
 	flashlight = SpotLight3D.new()
-	flashlight.light_color = Color(1.0, 0.95, 0.85)
+	flashlight.light_color = Color(0.93, 0.96, 1.0)
 	flashlight.light_energy = FLASH_ENERGY
-	flashlight.spot_range = 30.0
-	flashlight.spot_angle = 27.0
-	flashlight.spot_angle_attenuation = 0.7
-	flashlight.spot_attenuation = 0.8
+	flashlight.spot_range = 34.0
+	flashlight.spot_angle = 21.5
+	flashlight.spot_angle_attenuation = 1.65
+	flashlight.spot_attenuation = 0.95
 	flashlight.shadow_enabled = true
-	flashlight.light_volumetric_fog_energy = 1.6
-	flashlight.position = Vector3(0.18, -0.12, 0.0)
-	flashlight.visible = false
-	camera.add_child(flashlight)
-	flashlight_on = GameState.horror() >= 0.4
+	flashlight.light_volumetric_fog_energy = 1.35
+	flashlight.visible = true
+	flash_pivot.add_child(flashlight)
+
+	flashlight_spill = SpotLight3D.new()
+	flashlight_spill.light_color = Color(0.82, 0.88, 0.98)
+	flashlight_spill.light_energy = 0.52
+	flashlight_spill.spot_range = 10.5
+	flashlight_spill.spot_angle = 54.0
+	flashlight_spill.spot_angle_attenuation = 2.4
+	flashlight_spill.spot_attenuation = 1.5
+	flashlight_spill.shadow_enabled = false
+	flashlight_spill.light_volumetric_fog_energy = 0.25
+	flashlight_spill.visible = true
+	flash_pivot.add_child(flashlight_spill)
+
+	flash_beam_mesh = MeshInstance3D.new()
+	var bcm := CylinderMesh.new()
+	bcm.top_radius = 0.03
+	bcm.bottom_radius = 0.65
+	bcm.height = 3.2
+	bcm.radial_segments = 16
+	flash_beam_mesh.mesh = bcm
+	flash_beam_mesh.position = Vector3(0.0, 0.0, -1.65)
+	flash_beam_mesh.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+	flash_beam_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var bm_mat := StandardMaterial3D.new()
+	bm_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bm_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bm_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	bm_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	bm_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	bm_mat.albedo_color = Color(0.85, 0.92, 1.0, 0.018)
+	flash_beam_mesh.material_override = bm_mat
+	flash_pivot.add_child(flash_beam_mesh)
+	flashlight_on = true
+
+	tac_laser_beam = MeshInstance3D.new()
+	var lbm := CylinderMesh.new()
+	lbm.top_radius = 0.0025
+	lbm.bottom_radius = 0.0025
+	lbm.height = 1.0
+	tac_laser_beam.mesh = lbm
+	tac_laser_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var lmat := StandardMaterial3D.new()
+	lmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	lmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	lmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	lmat.albedo_color = Color(0.25, 1.0, 0.38, 0.35)
+	tac_laser_beam.material_override = lmat
+	tac_laser_beam.visible = false
+	camera.add_child(tac_laser_beam)
+
+	tac_laser_dot = MeshInstance3D.new()
+	var ldm := SphereMesh.new()
+	ldm.radius = 0.022
+	ldm.height = 0.044
+	tac_laser_dot.mesh = ldm
+	tac_laser_dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	tac_laser_dot.material_override = MaterialLib.get_emissive(Color(0.3, 1.0, 0.45), 3.2, 0.95)
+	tac_laser_dot.visible = false
+	get_tree().current_scene.add_child(tac_laser_dot)
 
 	muzzle_light = OmniLight3D.new()
 	muzzle_light.light_color = Color(1.0, 0.72, 0.30)
-	muzzle_light.light_energy = 3.6
-	muzzle_light.omni_range = 7.0
+	muzzle_light.light_energy = 5.2
+	muzzle_light.omni_range = 11.5
 	muzzle_light.visible = false
 	gun_rig.add_child(muzzle_light)
 
@@ -340,9 +415,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		rotate_y(-event.relative.x * sens)
 		var dy: float = -event.relative.y if GameState.invert_y else event.relative.y
 		head_pivot.rotation.x = clampf(head_pivot.rotation.x - dy * sens, deg_to_rad(-86.0), deg_to_rad(86.0))
-		sway += Vector2(event.relative.x, event.relative.y) * 0.0009
+		sway += Vector2(event.relative.x, event.relative.y) * (0.00145 if GameState.bodycam_mode else 0.0009)
+		if GameState.bodycam_mode:
+			_cam_yaw_vel = clampf(_cam_yaw_vel - event.relative.x * 0.012, -1.0, 1.0)
 		# The gun lags behind fast turns and swings back into place
-		var lag := 0.0016 * (0.35 if is_ads else 1.0)
+		var lag := (0.0022 if GameState.bodycam_mode else 0.0016) * (0.35 if is_ads else 1.0)
 		vm_rot_vel += Vector3(event.relative.y * lag, -event.relative.x * lag * 1.3, -event.relative.x * lag)
 
 	elif event is InputEventMouseButton and event.pressed:
@@ -361,9 +438,11 @@ func _physics_process(delta: float) -> void:
 			global_position = _extract_node.global_position + Vector3(0, 0.6, 0)
 		return
 	_update_timers(delta)
+	_update_stress(delta)
 	_handle_movement(delta)
 	_handle_combat_inputs(delta)
 	_animate_viewmodels(delta)
+	_update_tac_laser()
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +510,8 @@ func stamina_recover_time() -> float:
 # ---------------------------------------------------------------------------
 func _update_timers(delta: float) -> void:
 	_update_flashlight(delta)
+	sensor_flash = move_toward(sensor_flash, 0.0, delta * 2.6)
+	_cam_yaw_vel = lerpf(_cam_yaw_vel, 0.0, clampf(8.5 * delta, 0.0, 1.0))
 	fire_cooldown = maxf(0.0, fire_cooldown - delta)
 	monster_rend_cd = maxf(0.0, monster_rend_cd - delta)
 	monster_slam_cd = maxf(0.0, monster_slam_cd - delta)
@@ -885,19 +966,26 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 		_:
 			_eject_casing(false)
 
-	# Muzzle flash
+	# Muzzle flash + Bodycam CMOS exposure dip
 	var flash_col := Color(1.0, 0.72, 0.30)
 	if pap_timer > 0.0 or upgraded.has(w_id):
 		flash_col = Color(0.8, 0.4, 1.0)
 	if w_cfg["class"] == "wonder":
 		flash_col = Color(0.4, 0.8, 1.0)
+	var muz_mult: float = float(w_cfg.get("muzzle_scale", 1.0))
 	muzzle_light.light_color = flash_col
+	muzzle_light.light_energy = 5.2 * muz_mult
+	muzzle_light.omni_range = 11.5 if muz_mult > 0.5 else 3.5
 	muzzle_light.visible = true
-	muzzle_flash.visible = not is_scoped()
+	muzzle_flash.visible = not is_scoped() and muz_mult > 0.05
 	(muzzle_flash.material_override as StandardMaterial3D).albedo_color = flash_col
-	muzzle_flash.scale = Vector3.ONE * randf_range(0.8, 1.3) * (1.6 if w_cfg["class"] in ["shotgun", "sniper", "lmg"] else 1.0)
+	muzzle_flash.scale = Vector3.ONE * randf_range(0.8, 1.3) * (1.6 if w_cfg["class"] in ["shotgun", "sniper", "lmg"] else 1.0) * muz_mult
 	muzzle_flash.rotation.z = randf() * TAU
 	muzzle_flash_timer = 0.045
+	if muz_mult > 0.5:
+		sensor_flash = minf(1.0, sensor_flash + (0.45 if _last_shot_heavy else 0.26))
+	else:
+		sensor_flash = minf(1.0, sensor_flash + 0.05)
 
 	# Recoil: part of the kick stays (aim climbs), part recovers
 	var ads_k := lerpf(1.0, 0.6, _ease_ads()) * (0.75 if is_crouching else 1.0)
@@ -978,6 +1066,8 @@ func _fire_ray(origin: Vector3, dir: Vector3, cfg: Dictionary, dmg: float, give_
 			var res := z.take_damage(final_dmg, pt, pap_timer > 0.0)
 			if res["dealt"] > 0.0:
 				out["hit"] = true
+				if float(cfg.get("stagger_mult", 1.0)) > 1.0 and not z.is_dead and not z.is_boss and z.rig != null:
+					z.rig.stagger = minf(1.0, z.rig.stagger + 0.35)
 				if give_points:
 					GameState.add_points(10)
 				if res["headshot"]:
@@ -1463,7 +1553,8 @@ func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 		hp_changed.emit(hp, max_hp, overshield)
 	if was_headshot:
 		GameState.headshots += 1
-		GameState.play_sfx("headshot_ding", -2.5, randf_range(0.96, 1.05))
+		GameState.play_sfx("headshot_crunch", -1.5, randf_range(0.92, 1.08))
+		GameState.play_sfx("skull_shatter", -5.0, randf_range(0.90, 1.10))
 	if char_id == "alchemist" and pain_drug_charges < pain_drug_max:
 		pain_drug_synth_progress += 1.6
 
@@ -1480,8 +1571,10 @@ func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
 		dmg *= 0.85
 
 	regen_delay_timer = maxf(1.2, 3.8 - 0.22 * stat_eff("vitality"))
-	add_camera_shake(0.22)
-	hurt_roll = randf_range(-1.0, 1.0) * deg_to_rad(4.0)
+	add_camera_shake(0.32)
+	hurt_roll = randf_range(-1.0, 1.0) * deg_to_rad(7.5)
+	_flash_hit_flicker = 0.32
+	sensor_flash = minf(1.0, sensor_flash + 0.35)
 	damaged.emit(_from_pos)
 	if _hurt_sfx_cd <= 0.0:
 		_hurt_sfx_cd = 0.6
@@ -1596,8 +1689,14 @@ func _second_wind_revive() -> void:
 	stats_changed.emit()
 
 
-func grant_or_refill_weapon(w_id: String) -> void:
+func has_weapon_mod(w_id: String, mod_id: String) -> bool:
+	return (weapon_mods.get(w_id, []) as Array).has(mod_id)
+
+
+func grant_or_refill_weapon(w_id: String, mods: Array = []) -> void:
 	if weapons_owned.has(w_id):
+		if not mods.is_empty():
+			weapon_mods[w_id] = mods.duplicate()
 		var cfg := get_weapon_cfg(w_id)
 		mag_ammo[w_id] = cfg["mag_size"]
 		reserve_ammo[w_id] = cfg["reserve_max"]
@@ -1607,8 +1706,14 @@ func grant_or_refill_weapon(w_id: String) -> void:
 			weapons_owned.append(w_id)
 			active_slot = weapons_owned.size() - 1
 		else:
-			upgraded.erase(weapons_owned[active_slot])
+			var dropped: String = weapons_owned[active_slot]
+			upgraded.erase(dropped)
+			weapon_mods.erase(dropped)
 			weapons_owned[active_slot] = w_id
+		if not mods.is_empty():
+			weapon_mods[w_id] = mods.duplicate()
+		else:
+			weapon_mods.erase(w_id)
 		var cfg2 := get_weapon_cfg(w_id)
 		mag_ammo[w_id] = cfg2["mag_size"]
 		reserve_ammo[w_id] = cfg2["reserve_max"]
@@ -1631,22 +1736,67 @@ func refill_all_ammo() -> void:
 	status_banner_requested.emit("MAX AMMO! ALL WEAPONS & GRENADES REFILLED!", Color(1.0, 0.85, 0.25))
 
 
-# Returns the weapon's stats with any forge upgrade applied.
+# Returns the weapon's stats with Mystery Crate attachments and any forge upgrade applied.
 func get_weapon_cfg(w_id: String) -> Dictionary:
 	var base: Dictionary = GameState.WEAPONS[w_id]
-	if not upgraded.has(w_id) and mag_lv == 0 and reserve_lv == 0:
+	var mods: Array = weapon_mods.get(w_id, [])
+	if not upgraded.has(w_id) and mag_lv == 0 and reserve_lv == 0 and mods.is_empty():
 		return base
 	var cfg := base.duplicate()
+	var dmg_k := 1.0
+	var spr_k := 1.0
+	var ads_spr_k := 1.0
+	var rec_k := 1.0
+	var rel_k := 1.0
+	var rng_k := 1.0
+	var mod_mag_k := 1.0
+	var muz_k := 1.0
+	var stag_k := 1.0
+	for m in mods:
+		var m_id := String(m)
+		var info: Dictionary = GameState.WEAPON_ATTACHMENTS.get(m_id, {})
+		if info.is_empty():
+			continue
+		dmg_k *= float(info.get("dmg", 1.0))
+		spr_k *= float(info.get("spread", 1.0))
+		ads_spr_k *= float(info.get("spread", 1.0))
+		rec_k *= float(info.get("recoil", 1.0))
+		rel_k *= float(info.get("reload", 1.0))
+		rng_k *= float(info.get("range", 1.0))
+		mod_mag_k *= float(info.get("mag", 1.0))
+		muz_k *= float(info.get("muzzle", 1.0))
+		stag_k = maxf(stag_k, float(info.get("stagger", 1.0)))
+		if info.has("sfx"):
+			cfg["sfx"] = info["sfx"]
+		if bool(info.get("laser", false)):
+			cfg["has_laser"] = true
+	if muz_k < 0.99:
+		cfg["muzzle_scale"] = muz_k
+	if stag_k > 1.01:
+		cfg["stagger_mult"] = stag_k
+	cfg["damage"] = float(base["damage"]) * dmg_k
+	cfg["spread_deg"] = float(base["spread_deg"]) * spr_k
+	cfg["ads_spread_deg"] = float(base["ads_spread_deg"]) * ads_spr_k
+	cfg["recoil_pitch"] = float(base["recoil_pitch"]) * rec_k
+	cfg["recoil_yaw"] = float(base["recoil_yaw"]) * rec_k
+	cfg["reload_time"] = float(base["reload_time"]) * rel_k
+	cfg["range"] = float(base["range"]) * rng_k
+
 	var mk := 1.5 if upgraded.has(w_id) else 1.0
 	var rk := 2.0 if upgraded.has(w_id) else 1.0
 	# Supply Depot ammo upgrades: each level adds +50% of the base size
-	cfg["mag_size"] = int(ceil(float(base["mag_size"]) * mk * (1.0 + 0.5 * float(mag_lv))))
+	cfg["mag_size"] = int(ceil(float(base["mag_size"]) * mod_mag_k * mk * (1.0 + 0.5 * float(mag_lv))))
 	cfg["reserve_max"] = int(ceil(float(base["reserve_max"]) * rk * (1.0 + 0.5 * float(reserve_lv))))
+	var tag_str := GameState.format_attachment_tags(mods)
+	var disp_name: String = String(base["name"])
+	if tag_str != "":
+		disp_name = "%s %s" % [disp_name, tag_str]
+	cfg["name"] = disp_name
 	if not upgraded.has(w_id):
 		return cfg
-	cfg["name"] = "%s  MK-II" % base["name"]
-	cfg["damage"] = float(base["damage"]) * 2.1
-	cfg["reload_time"] = float(base["reload_time"]) * 0.85
+	cfg["name"] = "%s  MK-II" % disp_name
+	cfg["damage"] = float(cfg["damage"]) * 2.1
+	cfg["reload_time"] = float(cfg["reload_time"]) * 0.85
 	cfg["penetration"] = int(base.get("penetration", 0)) + 1
 	return cfg
 
@@ -1785,10 +1935,13 @@ func _animate_viewmodels(delta: float) -> void:
 		lower = maxf(lower, 0.9)
 		target_pos += Vector3(0, -0.3 * 0.9, 0)
 
-	# Breathing drift and strafe tilt
+	# Breathing drift, panic hand tremor & strafe tilt
 	var breathe := 1.0 - ads_e * 0.65
+	var tremor := stress * (0.45 if is_ads else 1.0)
+	var reload_jit := (0.011 * stress) if (is_reloading and stress > 0.45) else 0.0
 	target_pos += Vector3(sin(_vm_time * 0.9) * 0.0016, sin(_vm_time * 1.8) * 0.0022, 0.0) * breathe
-	target_rot.z += -strafe_input * 0.07 * (1.0 - ads_e * 0.7)
+	target_pos += Vector3(sin(_vm_time * 24.0) * (0.0025 * tremor + reload_jit), cos(_vm_time * 19.3) * (0.0025 * tremor + reload_jit), 0.0)
+	target_rot.z += -strafe_input * 0.07 * (1.0 - ads_e * 0.7) + sin(_vm_time * 17.5) * 0.018 * tremor
 
 	_animate_gun_parts(delta, cfg)
 	_animate_grenade_hand(delta)
@@ -1806,15 +1959,18 @@ func _animate_viewmodels(delta: float) -> void:
 	if is_monster_form:
 		monster_claw_rig.position = Vector3(bob_x * 1.4, -0.18 - bob_y * 1.2, -0.36)
 
-	# Camera: recoil, strafe lean, hurt roll, head bob, shake
+	# Camera: recoil, strafe lean, bodycam turn banking, boot roll, hurt roll, head bob, shake
 	hurt_roll = lerpf(hurt_roll, 0.0, clampf(7.0 * delta, 0.0, 1.0))
-	var lean := -strafe_input * deg_to_rad(1.2) + (deg_to_rad(-4.0) if is_sliding else 0.0)
-	# Aim sway while looking down sights (stronger through a scope)
-	var aim_sway := ads_e * (2.6 if is_scoped() else 1.0) * (0.6 if is_crouching else 1.0)
+	var bcam := 1.0 if GameState.bodycam_mode else 0.0
+	var lean := -strafe_input * deg_to_rad(1.4) + (deg_to_rad(-4.5) if is_sliding else 0.0)
+	lean += _cam_yaw_vel * deg_to_rad(2.6) * bcam
+	lean += sin(bob_phase * 0.5) * deg_to_rad(1.35) * move_amt * (1.0 - ads_e) * bcam
+	# Aim sway while looking down sights (amplified by psychological panic)
+	var aim_sway := ads_e * (2.6 if is_scoped() else 1.0) * (0.6 if is_crouching else 1.0) * (1.0 + stress * 1.15)
 	var sway_x := (sin(_vm_time * 1.1) * 0.0011 + sin(_vm_time * 2.3) * 0.0004) * aim_sway
 	var sway_y := sin(_vm_time * 0.7 + 1.3) * 0.0012 * aim_sway
 	camera.rotation = Vector3(recoil_view.x + sway_x, recoil_view.y + sway_y, lerpf(camera.rotation.z, lean + hurt_roll + cam_spring.x * 0.5, clampf(10.0 * delta, 0.0, 1.0)))
-	var cam_bob := Vector3(cos(bob_phase * 0.5) * 0.02, absf(sin(bob_phase)) * 0.025, 0.0) * move_amt * (1.0 - ads_e)
+	var cam_bob := Vector3(cos(bob_phase * 0.5) * 0.024, absf(sin(bob_phase)) * (0.032 if bcam > 0.5 else 0.025), 0.0) * move_amt * (1.0 - ads_e)
 
 	if camera_shake > 0.0:
 		camera_shake = maxf(0.0, camera_shake - delta * 1.8)
@@ -2001,11 +2157,17 @@ func _play_death_camera() -> void:
 	gun_rig.visible = false
 	monster_claw_rig.visible = false
 	knife_rig.visible = false
+	if is_instance_valid(tac_laser_beam):
+		tac_laser_beam.visible = false
+	if is_instance_valid(tac_laser_dot):
+		tac_laser_dot.visible = false
 	camera.position = Vector3.ZERO
+	var drop_side := -1.0 if randf() < 0.5 else 1.0
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(head_pivot, "position:y", 0.35, 0.9).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
-	tw.tween_property(camera, "rotation:z", deg_to_rad(72.0), 0.8).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(head_pivot, "position:y", 0.16, 0.85).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(camera, "rotation:z", deg_to_rad(84.0 * drop_side), 0.72).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(camera, "rotation:x", deg_to_rad(-8.0), 0.65).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func add_camera_shake(amount: float) -> void:
@@ -2255,7 +2417,7 @@ func export_state() -> Dictionary:
 		"run_id": GameState.run_id, "char": char_id, "points": GameState.points,
 		"kills": GameState.total_kills, "headshots": GameState.headshots, "bosses": GameState.bosses_slain,
 		"weapons": Array(weapons_owned), "slot": active_slot, "mag": mag_ammo.duplicate(),
-		"reserve": reserve_ammo.duplicate(), "upgraded": upgraded.duplicate(), "stats": stat_burned.duplicate(),
+		"reserve": reserve_ammo.duplicate(), "upgraded": upgraded.duplicate(), "mods": weapon_mods.duplicate(true), "stats": stat_burned.duplicate(),
 		"revives": revives, "grenades": grenades, "c4": c4_count, "mines": mines, "perks": perks.duplicate(), "mag_lv": mag_lv, "reserve_lv": reserve_lv,
 		"skill1": borrowed_skill, "skill1_cd": borrowed_cd_max, "skill2": borrowed_skill2, "skill2_cd": borrowed_cd_max2,
 	}
@@ -2278,6 +2440,7 @@ func import_state(d: Dictionary) -> void:
 	mag_ammo = d.get("mag", mag_ammo)
 	reserve_ammo = d.get("reserve", reserve_ammo)
 	upgraded = d.get("upgraded", upgraded)
+	weapon_mods = d.get("mods", {}).duplicate(true)
 	stat_burned = d.get("stats", stat_burned)
 	revives = int(d.get("revives", revives))
 	grenades = int(d.get("grenades", grenades))
@@ -2339,6 +2502,8 @@ func hit_stop(dur: float, scale: float) -> void:
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
+	if is_instance_valid(tac_laser_dot):
+		tac_laser_dot.queue_free()
 
 
 # Jumping into a waist/chest-high obstacle vaults over it: enough lift to clear
@@ -2431,11 +2596,11 @@ func _detonate_c4() -> void:
 # while it is on and recharges while it is off; it flickers when nearly empty.
 # An Overlord's psychic scream knocks it out for a few seconds.
 # ---------------------------------------------------------------------------
-const FLASH_ENERGY := 3.4
-const FLASH_DRAIN := 1.0 / 150.0 # full battery lasts 150 s
+const FLASH_ENERGY := 4.8
+const FLASH_DRAIN := 1.0 / 180.0 # full battery lasts 180 s
 const FLASH_CHARGE := 1.0 / 45.0
 var flashlight: SpotLight3D
-var flashlight_on: bool = false
+var flashlight_on: bool = true
 var flash_battery: float = 1.0
 var flash_jam: float = 0.0
 
@@ -2456,18 +2621,19 @@ func _update_flashlight(delta: float) -> void:
 	if Input.is_action_just_pressed("flashlight") and not _input_blocked() and not is_dead:
 		if flashlight_on:
 			flashlight_on = false
-			GameState.play_sfx("dry_fire", -8.0, 1.7)
+			GameState.play_sfx("flashlight_click", -3.0, 0.88)
 		elif flash_battery > 0.12:
 			flashlight_on = true
-			GameState.play_sfx("dry_fire", -8.0, 2.0)
+			GameState.play_sfx("flashlight_click", -3.0, 1.05)
 		else:
 			status_banner_requested.emit("FLASHLIGHT BATTERY IS RECHARGING", Color(1.0, 0.8, 0.3))
 	flash_jam = maxf(0.0, flash_jam - delta)
+	_flash_hit_flicker = maxf(0.0, _flash_hit_flicker - delta)
 	if flashlight_on:
 		flash_battery = maxf(0.0, flash_battery - FLASH_DRAIN * delta)
 		if flash_battery <= 0.0:
 			flashlight_on = false
-			GameState.play_sfx("dry_fire", -6.0, 1.2)
+			GameState.play_sfx("flashlight_click", -3.0, 0.75)
 			status_banner_requested.emit("FLASHLIGHT BATTERY EMPTY — IT RECHARGES WHILE OFF", Color(1.0, 0.5, 0.3))
 	else:
 		flash_battery = minf(1.0, flash_battery + FLASH_CHARGE * delta)
@@ -2475,7 +2641,120 @@ func _update_flashlight(delta: float) -> void:
 	var e := FLASH_ENERGY
 	if flash_jam > 0.0:
 		e *= 0.0 if randf() < 0.85 else 0.5
+	elif _flash_hit_flicker > 0.0:
+		e *= 0.08 if randf() < 0.55 else 0.78
 	elif flash_battery < 0.2:
 		e *= (0.35 + 0.65 * flash_battery / 0.2) * (0.3 if randf() < 0.12 else 1.0)
 	flashlight.visible = lit
 	flashlight.light_energy = e
+	if flashlight_spill:
+		flashlight_spill.visible = lit
+		flashlight_spill.light_energy = e * 0.11
+	if flash_beam_mesh:
+		flash_beam_mesh.visible = lit and e > 0.8
+	# Spring-lag tactical weapon light so beam trails mouse whip & dips on reload/sprint
+	if flash_pivot and is_instance_valid(gun_rig):
+		var want_rx: float = gun_rig.rotation.x * 0.42 - sway.y * 0.45
+		var want_ry: float = gun_rig.rotation.y * 0.36 - sway.x * 0.55
+		var want_rz: float = gun_rig.rotation.z * 0.30
+		flash_pivot.rotation.x = lerpf(flash_pivot.rotation.x, want_rx, clampf(14.0 * delta, 0.0, 1.0))
+		flash_pivot.rotation.y = lerpf(flash_pivot.rotation.y, want_ry, clampf(14.0 * delta, 0.0, 1.0))
+		flash_pivot.rotation.z = lerpf(flash_pivot.rotation.z, want_rz, clampf(12.0 * delta, 0.0, 1.0))
+
+
+func _update_stress(delta: float) -> void:
+	if is_dead or extracted:
+		stress = move_toward(stress, 0.0, delta * 0.5)
+		return
+	var cam_xf := camera.global_transform
+	var fwd := -cam_xf.basis.z
+	var near_d := 99.0
+	var close_n := 0
+	var unseen_close := false
+	var boss_near := false
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var z := node as ZombieEnemy
+		if z == null or z.is_dead:
+			continue
+		var off := z.global_position - global_position
+		off.y = 0.0
+		var d := off.length()
+		if d < 10.5:
+			near_d = minf(near_d, d)
+			if d < 8.0:
+				close_n += 1
+				if d < 7.5 and fwd.dot(off / maxf(d, 0.01)) < 0.25:
+					unseen_close = true
+		if (z.is_boss or z.tier >= 3) and d < 16.0:
+			boss_near = true
+	var target := clampf((9.8 - near_d) / 8.2, 0.0, 0.70)
+	if unseen_close:
+		target += 0.18
+	if close_n > 1:
+		target += 0.10 * float(mini(close_n - 1, 3))
+	if boss_near:
+		target += 0.14
+	if hp < max_hp * 0.45:
+		target += 0.22 * clampf(1.0 - hp / maxf(1.0, max_hp * 0.45), 0.0, 1.0)
+	if not flashlight_lit() and not is_monster_form:
+		target += 0.14
+	var horror_node := get_tree().current_scene.get_node_or_null("Horror") if get_tree().current_scene else null
+	if horror_node and horror_node.get("blackout") == true:
+		target += 0.18
+	if is_downed:
+		target = maxf(target, 0.85)
+	target = clampf(target, 0.0, 1.0)
+	if target > stress:
+		stress = lerpf(stress, target, clampf(2.4 * delta, 0.0, 1.0))
+	else:
+		stress = move_toward(stress, target, delta * 0.18)
+
+	if stress > 0.32:
+		_breath_cd -= delta
+		if _breath_cd <= 0.0:
+			_breath_cd = lerpf(2.9, 1.55, stress)
+			GameState.play_sfx("breath_panic", lerpf(-16.0, -5.5, stress), lerpf(0.94, 1.12, stress))
+	else:
+		_breath_cd = minf(_breath_cd, 0.35)
+
+	if stress > 0.48 or is_downed:
+		_stress_beat_cd -= delta
+		if _stress_beat_cd <= 0.0:
+			_stress_beat_cd = lerpf(0.92, 0.42, stress)
+			GameState.play_sfx("heartbeat", lerpf(-13.0, -2.5, stress), lerpf(0.95, 1.15, stress))
+	else:
+		_stress_beat_cd = minf(_stress_beat_cd, 0.25)
+
+
+func _update_tac_laser() -> void:
+	if tac_laser_beam == null or tac_laser_dot == null:
+		return
+	var cfg := get_weapon_cfg(get_current_weapon_id())
+	var active := not is_dead and not is_monster_form and gun_rig != null and gun_rig.visible and bool(cfg.get("has_laser", false))
+	if not active:
+		tac_laser_beam.visible = false
+		tac_laser_dot.visible = false
+		return
+	var start_pt: Vector3 = muzzle_light.global_position
+	var dir: Vector3 = -camera.global_basis.z
+	var end_pt: Vector3 = start_pt + dir * 28.0
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(camera.global_position, camera.global_position + dir * 28.0, 1 | 4)
+	q.exclude = [get_rid()]
+	var hit := space.intersect_ray(q)
+	if not hit.is_empty():
+		end_pt = hit["position"]
+		tac_laser_dot.global_position = end_pt - dir * 0.03
+		tac_laser_dot.visible = true
+	else:
+		tac_laser_dot.visible = false
+	var span := start_pt.distance_to(end_pt)
+	if span > 0.08:
+		tac_laser_beam.visible = true
+		var mid := (start_pt + end_pt) * 0.5
+		tac_laser_beam.global_position = mid
+		tac_laser_beam.look_at(end_pt, Vector3.UP)
+		tac_laser_beam.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+		tac_laser_beam.scale = Vector3(1.0, span, 1.0)
+	else:
+		tac_laser_beam.visible = false
