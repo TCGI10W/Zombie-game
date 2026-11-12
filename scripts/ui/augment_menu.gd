@@ -5,6 +5,8 @@ extends Control
 
 signal closed()
 
+const HI := preload("res://scripts/ui/hud_icons.gd")
+
 var player: PlayerController
 var _points_lbl: Label
 var _cards: Dictionary = {} # stat id -> {level, bar, progress, now}
@@ -15,6 +17,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	visible = false
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	theme = HI.theme()
 
 	var dim := ColorRect.new()
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -38,7 +41,11 @@ func _ready() -> void:
 	panel.add_child(v)
 
 	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
 	v.add_child(head)
+	var furnace_icon := HI.icon("flame", 34, Color(1.0, 0.55, 0.22))
+	furnace_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(furnace_icon)
 	var tv := VBoxContainer.new()
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(tv)
@@ -52,11 +59,16 @@ func _ready() -> void:
 	sub.add_theme_font_size_override("font_size", 14)
 	sub.add_theme_color_override("font_color", Color(0.85, 0.78, 0.72))
 	tv.add_child(sub)
+	var pts_box := HBoxContainer.new()
+	pts_box.add_theme_constant_override("separation", 8)
+	pts_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(pts_box)
+	pts_box.add_child(HI.icon("coin", 24, Color(0.98, 0.8, 0.3)))
 	_points_lbl = Label.new()
 	_points_lbl.add_theme_font_size_override("font_size", 28)
 	_points_lbl.add_theme_color_override("font_color", Color(0.98, 0.8, 0.3))
 	_points_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	head.add_child(_points_lbl)
+	pts_box.add_child(_points_lbl)
 
 	var grid := GridContainer.new()
 	grid.columns = 4
@@ -68,12 +80,22 @@ func _ready() -> void:
 	for st in GameState.STATS:
 		grid.add_child(_build_card(st))
 
-	var foot := Label.new()
-	foot.text = "[E] or [ESC] — CLOSE"
-	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	foot.add_theme_font_size_override("font_size", 14)
-	foot.add_theme_color_override("font_color", Color(0.7, 0.66, 0.62))
+	var foot := HBoxContainer.new()
+	foot.alignment = BoxContainer.ALIGNMENT_CENTER
+	foot.add_theme_constant_override("separation", 8)
 	v.add_child(foot)
+	foot.add_child(HI.keycap(GameState.key_label("interact"), 13))
+	var or_lbl := Label.new()
+	or_lbl.text = "or"
+	or_lbl.add_theme_font_size_override("font_size", 13)
+	or_lbl.add_theme_color_override("font_color", Color(0.7, 0.66, 0.62))
+	foot.add_child(or_lbl)
+	foot.add_child(HI.keycap(GameState.key_label("pause"), 13))
+	var close_lbl := Label.new()
+	close_lbl.text = "CLOSE"
+	close_lbl.add_theme_font_size_override("font_size", 14)
+	close_lbl.add_theme_color_override("font_color", Color(0.7, 0.66, 0.62))
+	foot.add_child(close_lbl)
 
 
 func _style(bg: Color, border: Color, corner: int, bw: int, margin: int) -> StyleBoxFlat:
@@ -100,7 +122,11 @@ func _build_card(st: Dictionary) -> Control:
 	card.add_child(cv)
 
 	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 7)
 	cv.add_child(row)
+	var stat_icon := HI.icon(HI.stat_icon(st["id"]), 20, col)
+	stat_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(stat_icon)
 	var name_lbl := Label.new()
 	name_lbl.text = st["name"]
 	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -150,9 +176,11 @@ func _build_card(st: Dictionary) -> Control:
 	btns.add_theme_constant_override("separation", 6)
 	cv.add_child(btns)
 	var id: String = st["id"]
-	for spec in [["+250", 250], ["+1000", 1000], ["NEXT LV", -1]]:
+	for spec in [["+250", 250, "coin"], ["+1000", 1000, "coin"], ["NEXT LV", -1, "flame"]]:
 		var b := Button.new()
-		b.text = spec[0]
+		b.text = " " + spec[0]
+		b.icon = HI.tex(spec[2])
+		b.add_theme_constant_override("icon_max_width", 14)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size = Vector2(0, 34)
 		b.focus_mode = Control.FOCUS_NONE
@@ -226,7 +254,7 @@ func _burn(id: String, requested: int) -> void:
 
 
 func _refresh() -> void:
-	_points_lbl.text = "%s PTS" % preload("res://scripts/world/supply_depot.gd").fmt(GameState.points)
+	_points_lbl.text = preload("res://scripts/world/supply_depot.gd").fmt(GameState.points)
 	_points_lbl.add_theme_color_override("font_color", Color(0.98, 0.8, 0.3))
 	for st in GameState.STATS:
 		var id: String = st["id"]

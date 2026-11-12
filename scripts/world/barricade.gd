@@ -12,6 +12,7 @@ var boards: int = MAX_BOARDS
 var interact_radius: float = 2.7
 var _board_nodes: Array[MeshInstance3D] = []
 var _board_rest: Array[Transform3D] = []
+var _board_tweens: Dictionary = {}
 var _repair_t: float = 0.0
 
 
@@ -78,13 +79,22 @@ func net_apply(action: String, _args: Array) -> void:
 				_do_repair()
 
 
+func _kill_board_tween(i: int) -> void:
+	var tw: Tween = _board_tweens.get(i)
+	if tw and tw.is_valid():
+		tw.kill()
+	_board_tweens.erase(i)
+
+
 func _do_tear() -> void:
 	if boards <= 0:
 		return
 	boards -= 1
 	var b := _board_nodes[boards]
+	_kill_board_tween(boards)
 	var out_dir := global_basis.z
 	var tw := b.create_tween()
+	_board_tweens[boards] = tw
 	tw.set_parallel(true)
 	tw.tween_property(b, "global_position", b.global_position + out_dir * 1.4 + Vector3(randf_range(-0.6, 0.6), -b.position.y + 0.05, 0), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(b, "rotation", Vector3(randf_range(-1.2, 1.2), randf_range(-1.0, 1.0), randf_range(-1.5, 1.5)), 0.35)
@@ -111,11 +121,11 @@ func _do_repair() -> void:
 	if boards >= MAX_BOARDS:
 		return
 	var b := _board_nodes[boards]
-	b.create_tween().kill()
+	_kill_board_tween(boards)
 	b.transform = _board_rest[boards]
 	b.visible = true
 	b.scale = Vector3(1.2, 1.2, 1.2)
-	b.create_tween().tween_property(b, "scale", Vector3.ONE, 0.12)
+	_board_tweens[boards] = b.create_tween().tween_property(b, "scale", Vector3.ONE, 0.12)
 	boards += 1
 
 
@@ -123,10 +133,11 @@ func _do_repair() -> void:
 func repair_all() -> void:
 	while boards < MAX_BOARDS:
 		var b := _board_nodes[boards]
+		_kill_board_tween(boards)
 		b.transform = _board_rest[boards]
 		b.visible = true
 		b.scale = Vector3(1.15, 1.15, 1.15)
-		b.create_tween().tween_property(b, "scale", Vector3.ONE, 0.2)
+		_board_tweens[boards] = b.create_tween().tween_property(b, "scale", Vector3.ONE, 0.2)
 		boards += 1
 
 

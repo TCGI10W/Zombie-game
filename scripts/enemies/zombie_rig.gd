@@ -54,6 +54,9 @@ var arm_hit_vel: Vector2 = Vector2.ZERO
 var pend: Vector2 = Vector2.ZERO # dangling-arm swing (left, right)
 var pend_vel: Vector2 = Vector2.ZERO
 var stagger: float = 0.0 # 0..1 after leg hits; the owner slows down while > 0
+var twitch_amt: float = 0.0 # sudden head and spine jerks (broken, unnatural motion)
+var _tw: Vector3 = Vector3.ZERO
+var _tw_t: float = 0.5
 var stagger_left: bool = true
 var lean: Vector2 = Vector2.ZERO # (forward, roll) from acceleration and turning
 var _prev_vel: Vector3 = Vector3.ZERO
@@ -205,6 +208,15 @@ func update(delta: float, mode: String, speed: float, extra: Dictionary = {}) ->
 
 	if mode != "dead":
 		_apply_reactions(tgt, mode)
+		if twitch_amt > 0.0:
+			_tw_t -= delta
+			if _tw_t <= 0.0:
+				_tw_t = randf_range(0.25, 2.2)
+				_tw = Vector3(randf_range(-0.5, 0.5), randf_range(-1.0, 1.0), randf_range(-0.9, 0.9)) * twitch_amt
+			_tw = _tw.lerp(Vector3.ZERO, clampf(5.0 * delta, 0.0, 1.0))
+			tgt["Head"] = tgt.get("Head", Vector3.ZERO) + _tw * 1.6
+			tgt["Spine"] = tgt.get("Spine", Vector3.ZERO) + Vector3(_tw.x, _tw.y * 0.4, _tw.z * 0.5)
+			tgt["UpperArmL"] = tgt.get("UpperArmL", Vector3.ZERO) + Vector3(_tw.z, 0.0, _tw.x) * 0.8
 		if stagger > 0.0 and mode != "crawl":
 			hips_off.y -= 0.1 * stagger
 

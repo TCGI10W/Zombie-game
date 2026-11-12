@@ -65,6 +65,7 @@ var post_fx_enabled: bool = true
 var graphics_quality: int = 2 # 0 low, 1 medium, 2 high
 var vsync_on: bool = true
 var show_fps: bool = false
+var menu_sound: bool = true # main-menu ambience + UI sounds
 var _best_round_at_start: int = 0
 var rebuild_points_round: int = 0 # points earned rebuilding barriers this round
 const REBUILD_POINTS_CAP := 500
@@ -343,6 +344,7 @@ func load_save() -> void:
 		graphics_quality = int(cfg.get_value("settings", "graphics", 2))
 		vsync_on = bool(cfg.get_value("settings", "vsync", true))
 		show_fps = bool(cfg.get_value("settings", "show_fps", false))
+		menu_sound = bool(cfg.get_value("settings", "menu_sound", true))
 		difficulty = clampi(int(cfg.get_value("settings", "difficulty", 1)), 0, DIFFICULTIES.size() - 1)
 		career_xp = int(cfg.get_value("records", "career_xp", 0))
 		nemesis = cfg.get_value("records", "nemesis", {})
@@ -378,6 +380,7 @@ func write_save() -> void:
 	cfg.set_value("settings", "graphics", graphics_quality)
 	cfg.set_value("settings", "vsync", vsync_on)
 	cfg.set_value("settings", "show_fps", show_fps)
+	cfg.set_value("settings", "menu_sound", menu_sound)
 	cfg.set_value("settings", "difficulty", difficulty)
 	cfg.set_value("records", "career_xp", career_xp)
 	cfg.set_value("records", "nemesis", nemesis)
@@ -407,7 +410,8 @@ func apply_volume() -> void:
 func record_run() -> bool:
 	if game_mode == "infinite":
 		best_round_infinite = maxi(best_round_infinite, current_round)
-	best_round = maxi(best_round, current_round)
+	else:
+		best_round = maxi(best_round, current_round)
 	best_kills = maxi(best_kills, total_kills)
 	write_save()
 	return current_round > _best_round_at_start
@@ -441,6 +445,10 @@ func _setup_input_map() -> void:
 	_bind_keys("borrowed_skill", [KEY_X])
 	_bind_keys("borrowed_skill_2", [KEY_Z])
 	_bind_keys("map", [KEY_M])
+	_bind_keys("flashlight", [KEY_L])
+	var mmb := InputEventMouseButton.new()
+	mmb.button_index = MOUSE_BUTTON_MIDDLE
+	InputMap.action_add_event("flashlight", mmb)
 	_bind_keys("scoreboard", [KEY_TAB])
 	_bind_mouse("fire", MOUSE_BUTTON_LEFT)
 	_bind_mouse("aim", MOUSE_BUTTON_RIGHT)
@@ -455,7 +463,7 @@ const REBINDABLE := [
 	["reload", "RELOAD"], ["interact", "INTERACT / BUY"], ["melee", "KNIFE"], ["grenade", "GRENADE"],
 	["skill_1", "SKILL 1"], ["skill_2", "SKILL 2 (ULTIMATE)"], ["weapon_1", "WEAPON 1"], ["weapon_2", "WEAPON 2"],
 	["throw_c4", "C4 (TAP / HOLD)"], ["place_mine", "PLACE MINE"], ["borrowed_skill", "RELIC SKILL 1"], ["borrowed_skill_2", "RELIC SKILL 2"],
-	["map", "FULL MAP"], ["scoreboard", "SCOREBOARD (HOLD)"],
+	["flashlight", "FLASHLIGHT"], ["map", "FULL MAP"], ["scoreboard", "SCOREBOARD (HOLD)"],
 ]
 var _default_events: Dictionary = {}
 
@@ -666,7 +674,7 @@ func play_sfx(sfx_name: String, volume_db: float = 0.0, pitch_scale: float = 1.0
 func reset_run() -> void:
 	_zombie_roar_cooldown = 0.0
 	_zombie_roar_slots.clear()
-	_best_round_at_start = best_round
+	_best_round_at_start = best_round_infinite if game_mode == "infinite" else best_round
 	points_mult = 1.0
 	points = start_points()
 	_run_finished = false
@@ -806,7 +814,7 @@ func _boss_config(round_num: int) -> Dictionary:
 				"type": "phantom",
 				"name": prefix + "WRAITH-11 — VOLT REAPER",
 				"subtitle": "PHASE-BLINKING ASSASSIN // TELEPORTS WITH SHOCK BLADES",
-				"model": "res://assets/models/boss_necromancer.glb",
+				"model": "res://assets/models/boss_phantom.glb",
 				"max_hp": roundf(1550.0 * hp_mult),
 				"endurance": 0.20,
 				"speed": 5.6,
@@ -876,15 +884,16 @@ const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD", "VETERAN", "NIGHTMARE", "AP
 # Every rule a difficulty changes, as multipliers (1.0 = Normal).
 #  hp/dmg/speed: zombies   crowd: zombies per round   special: how often special
 #  zombies appear   boss: extra boss health   regen: your health regen
+#  horror: 0 = a normal zombie shooter .. 1 = dark, lights fail, things stalk you
 #  points: points you earn   score: run score at the end
 const DIFFICULTIES := [
-	{"hp": 0.75, "dmg": 0.7, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 0.75},
-	{"hp": 1.0, "dmg": 1.0, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.0},
-	{"hp": 1.35, "dmg": 1.3, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.5},
-	{"hp": 1.7, "dmg": 1.55, "speed": 1.08, "crowd": 1.2, "special": 1.25, "boss": 1.1, "regen": 1.0, "points": 1.0, "score": 2.0},
-	{"hp": 2.2, "dmg": 1.85, "speed": 1.15, "crowd": 1.4, "special": 1.5, "boss": 1.25, "regen": 0.8, "points": 1.0, "score": 2.75},
-	{"hp": 2.8, "dmg": 2.2, "speed": 1.22, "crowd": 1.6, "special": 2.0, "boss": 1.4, "regen": 0.65, "points": 0.9, "score": 3.5},
-	{"hp": 3.6, "dmg": 2.6, "speed": 1.3, "crowd": 1.8, "special": 2.5, "boss": 1.6, "regen": 0.5, "points": 0.8, "score": 4.5},
+	{"hp": 0.75, "dmg": 0.7, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 0.75, "horror": 0.0},
+	{"hp": 1.0, "dmg": 1.0, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.0, "horror": 0.2},
+	{"hp": 1.2, "dmg": 1.15, "speed": 1.0, "crowd": 1.0, "special": 1.0, "boss": 1.0, "regen": 1.0, "points": 1.0, "score": 1.5, "horror": 0.4},
+	{"hp": 1.4, "dmg": 1.3, "speed": 1.04, "crowd": 1.1, "special": 1.2, "boss": 1.05, "regen": 1.0, "points": 1.0, "score": 2.0, "horror": 0.55},
+	{"hp": 1.65, "dmg": 1.45, "speed": 1.08, "crowd": 1.2, "special": 1.4, "boss": 1.15, "regen": 0.9, "points": 1.0, "score": 2.75, "horror": 0.7},
+	{"hp": 1.95, "dmg": 1.65, "speed": 1.12, "crowd": 1.3, "special": 1.7, "boss": 1.25, "regen": 0.8, "points": 0.95, "score": 3.5, "horror": 0.85},
+	{"hp": 2.3, "dmg": 1.9, "speed": 1.16, "crowd": 1.4, "special": 2.0, "boss": 1.35, "regen": 0.7, "points": 0.9, "score": 4.5, "horror": 1.0},
 ]
 const FINAL_ROUND := 20
 const META_UNLOCKS := [
@@ -908,6 +917,11 @@ var _run_finished: bool = false
 
 func diff(key: String) -> float:
 	return float(DIFFICULTIES[clampi(difficulty, 0, DIFFICULTIES.size() - 1)].get(key, 1.0))
+
+
+# How frightening the game is on this difficulty (0..1)
+func horror() -> float:
+	return diff("horror") if DIFFICULTIES[clampi(difficulty, 0, DIFFICULTIES.size() - 1)].has("horror") else 0.0
 
 
 func diff_hp_mult() -> float:
@@ -939,6 +953,19 @@ func diff_lines(i: int) -> Array[String]:
 	pct.call("Boss health", "boss")
 	pct.call("Your health regen", "regen")
 	pct.call("Points earned", "points")
+	var hr := float(d.get("horror", 0.0))
+	if hr <= 0.0:
+		out.append("No horror: bright, classic zombie game")
+	else:
+		var bits: Array[String] = ["darker, flashlight needed" if hr < 0.5 else "dark, flashlight needed"]
+		if hr >= 0.35:
+			bits.append("lights fail")
+		bits.append("stalking zombies, sound scares")
+		if hr >= 0.55:
+			bits.append("no minimap")
+		if hr >= 0.7:
+			bits.append("no zombie count")
+		out.append("Horror %d%%: %s" % [roundi(hr * 100.0), ", ".join(bits)])
 	if out.is_empty():
 		out.append("The standard experience")
 	out.append("Score x%s" % str(snappedf(float(d["score"]), 0.01)))

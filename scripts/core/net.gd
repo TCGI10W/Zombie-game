@@ -242,6 +242,8 @@ func leave() -> void:
 	transport = ""
 	players.clear()
 	in_game = false
+	clock_offset = 0.0
+	clock_synced = false
 	lobby_changed.emit()
 
 

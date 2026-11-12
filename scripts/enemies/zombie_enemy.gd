@@ -57,6 +57,10 @@ var _shield_hint_cd: float = 0.0
 var fx_cast: String = "" # skill being wound up right now (shown on the HUD)
 var fx_cast_t: float = 0.0
 var fx_enraged: bool = false
+# How it moves (host): "" plain, "lurch" drag-step, "burst" stands then
+# sprints, "lurker" freezes while you look at it and rushes when you don't
+var move_style: String = ""
+var _style_t: float = 0.0
 var _spitter_tinted: bool = false
 static var _shield_tip_t: float = -100.0
 var _zig: float = 0.0
@@ -222,6 +226,39 @@ func setup_regular(round_num: int, variant: String = "walker") -> void:
 		_add_riot_shield()
 	if is_spitter:
 		_tint_spitter()
+	if rig:
+		rig.twitch_amt = randf_range(0.12, 0.3) + 0.55 * GameState.horror() * randf()
+	_style_t = randf() * 10.0
+
+
+# True while the target is looking this way (lurkers freeze)
+func _looked_at() -> bool:
+	var p := target_player
+	if not is_instance_valid(p):
+		return false
+	var fwd: Vector3 = -p.global_basis.z
+	if p is PlayerController and is_instance_valid((p as PlayerController).camera):
+		fwd = -(p as PlayerController).camera.global_basis.z
+	var to_me := global_position + Vector3(0, 1.2, 0) - (p.global_position + Vector3(0, 1.6, 0))
+	var d := to_me.length()
+	return d < 32.0 and fwd.dot(to_me / maxf(d, 0.01)) > 0.8
+
+
+# Speed factor of this zombie's way of moving (0 = standing still)
+func _style_mult(delta: float, flat_dist: float) -> float:
+	if move_style == "" or flat_dist < 3.5 or buff_t > 0.0:
+		return 1.0
+	_style_t += delta
+	match move_style:
+		"lurch":
+			return 0.4 + 1.25 * maxf(0.0, sin(_style_t * 2.7))
+		"burst":
+			return 0.0 if fmod(_style_t, 4.2) < 1.7 else 1.75
+		"lurker":
+			if flat_dist > 6.0 and _looked_at():
+				return 0.0
+			return 1.7
+	return 1.0
 
 
 func setup_boss(config: Dictionary) -> void:
@@ -718,7 +755,16 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 				_lunge_t = 0.45
 				velocity.y = 3.4
 				_play_3d_roar("zombie_attack_roar", 1.25)
-		var spd := base_speed * speed_mult * _stagger_mult() * (1.35 if order_kind == "flank_run" else 1.0) * (2.3 if _lunge_t > 0.0 else 1.0)
+		var style := _style_mult(delta, flat_dist)
+		if style <= 0.01:
+			# Standing in the dark, watching: only the head twitches
+			velocity.x = move_toward(velocity.x, 0.0, 30.0 * delta)
+			velocity.z = move_toward(velocity.z, 0.0, 30.0 * delta)
+			_face_direction(to_p.normalized(), delta * 3.0)
+			if rig:
+				rig.update(delta, "idle", 0.0)
+			return
+		var spd := base_speed * speed_mult * _stagger_mult() * (1.35 if order_kind == "flank_run" else 1.0) * (2.3 if _lunge_t > 0.0 else 1.0) * style
 		velocity.x = lerp(velocity.x, move_dir.x * spd, 8.0 * delta)
 		velocity.z = lerp(velocity.z, move_dir.z * spd, 8.0 * delta)
 		_face_direction(move_dir, delta * 8.0)
@@ -1494,9 +1540,13 @@ func _try_ragdoll() -> bool:
 		rd.queue_free()
 		return false
 	ragdolled = true
-	# Keep this node a moment so the death gurgle finishes, then clean up
-	create_tween().tween_callback(queue_free).set_delay(2.6)
+	# The skinned mesh stays under this node while the ragdoll drives its
+	# proxies, so stay alive until the ragdoll has tumbled and sunk (3.4+1.4s).
+	create_tween().tween_callback(queue_free).set_delay(5.1)
 	return true
+
+
+var _flash_saved: Dictionary = {} # mesh -> overlay to restore after the flash
 
 
 func _set_flash(on: bool) -> void:
@@ -1506,8 +1556,17 @@ func _set_flash(on: bool) -> void:
 		_flash_mat.albedo_color = Color(1.0, 0.85, 0.8, 0.55)
 		_flash_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	for m in _meshes:
-		if is_instance_valid(m):
-			m.material_overlay = _flash_mat if on else null
+		if not is_instance_valid(m):
+			continue
+		if on:
+			if not _flash_saved.has(m):
+				_flash_saved[m] = m.material_overlay
+			m.material_overlay = _flash_mat
+		elif m.material_overlay == _flash_mat:
+			# Restore the tier glow / spitter tint, unless something else
+			# already replaced the overlay while the flash was up.
+			m.material_overlay = _flash_saved.get(m)
+			_flash_saved.erase(m)
 
 
 func _spawn_blood(pt: Vector3, big: bool) -> void:
@@ -1853,7 +1912,7 @@ func _spit_visual(target_pos: Vector3, dmg: float, radius: float = 1.6) -> void:
 	, 0.0, 1.0, 0.75)
 	tw.tween_callback(func():
 		glob.queue_free()
-		if is_inside_tree():
+		if is_instance_valid(self) and is_inside_tree():
 			_spawn_acid_pool(target_pos, dmg, radius)
 	)
 
@@ -2090,6 +2149,9 @@ func _commander_fx_local(kind: String, pos: Vector3, amount: float) -> void:
 			_spawn_shockwave_ring(pos, 12.0, Color(0.75, 0.3, 1.0))
 			_flash_light(pos + Vector3(0, 1.5, 0), Color(0.75, 0.3, 1.0), 14.0)
 			_hurt_local_in(pos, 12.0, amount, 2.5, false)
+			var lp := get_tree().get_first_node_in_group("player")
+			if lp and lp.has_method("jam_flashlight") and (lp as Node3D).global_position.distance_to(pos) < 16.0:
+				lp.jam_flashlight(5.0) # the scream kills your light
 		"ctoxin":
 			_play_3d_roar("zombie_attack_roar", 0.8)
 			if rig:

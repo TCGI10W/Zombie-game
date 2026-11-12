@@ -70,6 +70,7 @@ func _ready() -> void:
 	lbl.position = Vector3(0, 0.95, -0.5)
 	lbl.rotation.y = PI
 	add_child(lbl)
+	_price_lbl = lbl
 
 	_display = Node3D.new()
 	_display.position = Vector3(0, 0.55, 0)

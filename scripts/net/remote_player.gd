@@ -34,6 +34,9 @@ var bleed_left: float = 0.0
 var interact_radius: float = 2.3
 var revive_progress: float = 0.0
 var _revive_hold_t: float = 0.0
+var gift_progress: float = 0.0
+var _gift_hold_t: float = 0.0
+var _last_gift_tap: float = -10.0
 
 var rig = null
 var model: Node3D
@@ -56,6 +59,8 @@ func setup(p_id: int, p_name: String, p_color: Color) -> void:
 
 
 const GIFT_POINTS := 500
+const GIFT_TAP_WINDOW := 0.4
+const GIFT_ALL_TIME := 3.0
 
 
 func _ready() -> void:
@@ -177,6 +182,7 @@ func apply_state(t: float, pos: Vector3, yaw: float, s: Dictionary) -> void:
 		_arrival_lag = lerpf(_arrival_lag, lag, 0.03)
 	buffer.push(t, pos, yaw, s)
 	pitch = s.get("pitch", 0.0)
+	_set_flashlight(s.get("light", false))
 	var was_down := is_downed
 	is_downed = s.get("downed", false)
 	is_dead = s.get("dead", false)
@@ -256,44 +262,93 @@ func apply_stun(_d: float) -> void:
 
 
 # ---------------------------------------------------------------------------
-# REVIVE (this machine's player holds [E] on a downed teammate)
+# REVIVE + POINT SHARING (this machine's player presses [E] on a teammate)
+#   downed teammate : hold [E] to revive
+#   standing mate   : double-tap [E] shares 500, hold [E] 3s sends everything
 # ---------------------------------------------------------------------------
 func get_prompt(p: Node3D) -> String:
 	if is_dead or extracted or p.is_downed or p.is_dead:
 		return ""
 	if is_downed:
 		return "[HOLD E] REVIVE %s  (+150 PTS)" % display_name
-	if GameState.points >= GIFT_POINTS:
-		return "[E] GIVE %d POINTS TO %s" % [GIFT_POINTS, display_name]
-	return ""
+	if GameState.points <= 0:
+		return ""
+	return "[E] x2 SHARE %d · HOLD 3s SEND ALL → %s" % [GIFT_POINTS, display_name]
 
 
 func try_purchase(p: Node3D) -> void:
-	if is_downed or is_dead or GameState.points < GIFT_POINTS:
+	if is_downed or is_dead or extracted:
 		return
-	var ng := get_tree().get_first_node_in_group("net_game")
-	if ng and GameState.try_pay(p, GIFT_POINTS):
-		ng.send_points(peer_id, GIFT_POINTS)
-		p.status_banner_requested.emit("SENT %d POINTS TO %s" % [GIFT_POINTS, display_name], Color(0.95, 0.85, 0.35))
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _last_gift_tap > GIFT_TAP_WINDOW:
+		_last_gift_tap = now
+		return
+	_last_gift_tap = -10.0
+	_gift(p, mini(GIFT_POINTS, GameState.points))
 
 
-func interact_hold(_p: Node3D, delta: float) -> void:
-	if not is_downed:
+func interact_hold(p: Node3D, delta: float) -> void:
+	if is_downed:
+		_revive_hold_t = 0.15
+		revive_progress += delta / REVIVE_TIME
+		var ng := get_tree().get_first_node_in_group("net_game")
+		if ng:
+			ng.send_revive_progress(peer_id, revive_progress)
+			if revive_progress >= 1.0:
+				revive_progress = 0.0
+				ng.send_revive(peer_id)
+				# Reward for the rescue
+				GameState.add_points(150)
+				if is_instance_valid(p):
+					p.hp = minf(p.max_hp, p.hp + 20.0)
+					p.hp_changed.emit(p.hp, p.max_hp, p.overshield)
+					p.status_banner_requested.emit("REVIVED %s  +150" % display_name, Color(0.4, 1.0, 0.6))
 		return
-	_revive_hold_t = 0.15
-	revive_progress += delta / REVIVE_TIME
+	if is_dead or extracted or GameState.points <= 0:
+		return
+	_gift_hold_t = 0.15
+	gift_progress = clampf(gift_progress + delta / GIFT_ALL_TIME, 0.0, 1.0)
+	if gift_progress >= 1.0:
+		gift_progress = 0.0
+		_gift_hold_t = 0.0
+		_send_all(p)
+
+
+func _gift(p: Node3D, amount: int) -> void:
 	var ng := get_tree().get_first_node_in_group("net_game")
-	if ng:
-		ng.send_revive_progress(peer_id, revive_progress)
-		if revive_progress >= 1.0:
-			revive_progress = 0.0
-			ng.send_revive(peer_id)
-			# Reward for the rescue
-			GameState.add_points(150)
-			if is_instance_valid(_p):
-				_p.hp = minf(_p.max_hp, _p.hp + 20.0)
-				_p.hp_changed.emit(_p.hp, _p.max_hp, _p.overshield)
-				_p.status_banner_requested.emit("REVIVED %s  +150" % display_name, Color(0.4, 1.0, 0.6))
+	if ng == null or amount <= 0 or not GameState.try_pay(p, amount):
+		return
+	ng.send_points(peer_id, amount)
+	p.status_banner_requested.emit("SENT %d POINTS TO %s" % [amount, display_name], Color(0.95, 0.85, 0.35))
+
+
+# Everything you carry, split evenly between the standing mates around you.
+func _send_all(p: Node3D) -> void:
+	var total := GameState.points
+	var mates := _standing_mates(p)
+	var ng := get_tree().get_first_node_in_group("net_game")
+	if total <= 0 or mates.is_empty() or ng == null or not GameState.try_pay(p, total):
+		return
+	var each: int = total / mates.size()
+	var left: int = total - each * mates.size()
+	for i in mates.size():
+		var amt: int = each + (left if i == 0 else 0)
+		if amt > 0:
+			ng.send_points(int(mates[i]), amt)
+	p.status_banner_requested.emit("SENT ALL %d POINTS TO THE SQUAD" % total, Color(0.95, 0.85, 0.35))
+
+
+# The local player is a PlayerController, so the cast drops it; every avatar
+# in range is a recipient, including the one you are holding [E] on.
+func _standing_mates(p: Node3D) -> Array:
+	var out: Array = []
+	for n in get_tree().get_nodes_in_group("net_players"):
+		var av := n as RemotePlayer
+		if av == null or av.is_downed or av.is_dead or av.extracted:
+			continue
+		if p.global_position.distance_to(av.global_position) <= interact_radius * 1.5:
+			out.append(av.peer_id)
+	return out
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +359,10 @@ func _process(delta: float) -> void:
 		_revive_hold_t -= delta
 		if _revive_hold_t <= 0.0:
 			revive_progress = 0.0
+	if _gift_hold_t > 0.0:
+		_gift_hold_t -= delta
+		if _gift_hold_t <= 0.0:
+			gift_progress = 0.0
 	# Dead teammates vanish; the one we're watching through is hidden too
 	visible = not extracted and not is_dead and not spectated
 	if not buffer.has_data():
@@ -369,3 +428,23 @@ func _pose_aim() -> void:
 		n["UpperArmL"].rotation = Vector3(1.3, 0.0, 0.55)
 	if n.has("ForearmL"):
 		n["ForearmL"].rotation = Vector3(0.45, 0.0, 0.0)
+
+
+# A teammate's flashlight: a beam from their head, where they look
+var _spot: SpotLight3D
+
+
+func _set_flashlight(on: bool) -> void:
+	if _spot == null:
+		if not on:
+			return
+		_spot = SpotLight3D.new()
+		_spot.light_color = Color(1.0, 0.95, 0.85)
+		_spot.light_energy = 3.0
+		_spot.spot_range = 26.0
+		_spot.spot_angle = 27.0
+		_spot.spot_angle_attenuation = 0.7
+		_spot.position = Vector3(0, 1.55, -0.3)
+		add_child(_spot)
+	_spot.visible = on and not is_dead
+	_spot.rotation.x = pitch

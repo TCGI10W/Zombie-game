@@ -3,10 +3,10 @@ extends Control
 # north up). Shows the zones, doors and stations, your squad, relics, the boss
 # and commanders. Regular zombies are NOT shown: listen for them.
 #
-# Station letters:  A ammo cache   W wall weapon   F augment furnace
-#   $ supply depot   + second wind   ? mystery crate   G generator
-#   R radio   U weapon forge   D locked door
+# Station glyphs use the shared HUD icon sheet: ammo, wall weapon, furnace,
+# supply depot, second wind, mystery crate, generator, radio, forge, door.
 
+const HI := preload("res://scripts/ui/hud_icons.gd")
 const MINI := 172.0
 const RANGE := 30.0 # metres from the centre of the minimap to its edge
 const MAP_MIN := Vector2(-54.0, -62.0)
@@ -22,7 +22,7 @@ var big: bool = false
 var _canvas: Control
 var _big_canvas: Control
 var _zone_lbl: Label
-var _stations: Array = [] # {pos, letter, color, node}
+var _stations: Array = [] # {pos, icon, color, node}
 var _fillable: Dictionary = {} # zone id -> polygon can be filled
 var _font: Font
 var _acc: float = 0.0
@@ -42,12 +42,7 @@ func setup(p_player: Node3D, p_arena: Node, p_wave: Node) -> void:
 	frame.size = Vector2(MINI, MINI)
 	frame.clip_contents = true
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.03, 0.04, 0.06, 0.72)
-	sb.border_color = Color(0.75, 0.2, 0.16, 0.9)
-	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(6)
-	frame.add_theme_stylebox_override("panel", sb)
+	frame.add_theme_stylebox_override("panel", HI.panel(Color(0.03, 0.04, 0.06, 0.78), Color(0.75, 0.2, 0.16, 0.9), 6, 2, 0))
 	add_child(frame)
 	_canvas = Control.new()
 	_canvas.size = Vector2(MINI, MINI)
@@ -55,14 +50,17 @@ func setup(p_player: Node3D, p_arena: Node, p_wave: Node) -> void:
 	_canvas.draw.connect(_draw_mini)
 	frame.add_child(_canvas)
 
-	_zone_lbl = Label.new()
-	_zone_lbl.position = Vector2(14, 84 + MINI + 2)
-	_zone_lbl.add_theme_font_size_override("font_size", 13)
+	var zrow := HBoxContainer.new()
+	zrow.position = Vector2(14, 84 + MINI + 6)
+	zrow.add_theme_constant_override("separation", 6)
+	zrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(zrow)
+	zrow.add_child(HI.icon("map", 14, HI.CYAN))
+	_zone_lbl = HI.label("", 13, Color(0.8, 0.84, 0.9))
 	_zone_lbl.add_theme_constant_override("outline_size", 5)
 	_zone_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	_zone_lbl.add_theme_color_override("font_color", Color(0.8, 0.84, 0.9))
-	_zone_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_zone_lbl)
+	zrow.add_child(_zone_lbl)
+	zrow.add_child(HI.keycap(GameState.key_label("map"), 11))
 
 	_big_canvas = Control.new()
 	_big_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -86,43 +84,43 @@ func _index_stations() -> void:
 		var n3 := n as Node3D
 		if n3 == null or n3.is_in_group("barricades"):
 			continue
-		var letter := ""
+		var icon := ""
 		var col := Color.WHITE
 		var path: String = (n3.get_script() as Script).resource_path if n3.get_script() else ""
 		if n3 is WallStation:
 			match (n3 as WallStation).station_type:
 				"ammo_box":
-					letter = "A"
+					icon = "bullet"
 					col = Color(1.0, 0.8, 0.25)
 				"forge":
-					letter = "U"
+					icon = "anvil"
 					col = Color(1.0, 0.5, 0.2)
 				_:
-					letter = "W"
+					icon = "rifle"
 					col = Color(0.4, 0.85, 1.0)
 		elif path.ends_with("augment_furnace.gd"):
-			letter = "F"
+			icon = "flame"
 			col = Color(1.0, 0.55, 0.2)
 		elif path.ends_with("supply_depot.gd"):
-			letter = "$"
+			icon = "box"
 			col = Color(0.5, 1.0, 0.55)
 		elif path.ends_with("second_wind_station.gd"):
-			letter = "+"
+			icon = "cross"
 			col = Color(0.4, 1.0, 0.6)
 		elif path.ends_with("mystery_crate.gd"):
-			letter = "?"
+			icon = "crate"
 			col = Color(0.8, 0.55, 1.0)
 		elif path.ends_with("power_generator.gd"):
-			letter = "G"
+			icon = "bolt"
 			col = Color(1.0, 0.95, 0.4)
 		elif path.ends_with("exfil_radio.gd"):
-			letter = "R"
+			icon = "radio"
 			col = Color(0.6, 0.95, 1.0)
 		elif path.ends_with("zone_door.gd"):
-			letter = "D"
+			icon = "door"
 			col = Color(1.0, 0.4, 0.3)
-		if letter != "":
-			_stations.append({"pos": n3.global_position, "letter": letter, "color": col, "node": n3})
+		if icon != "":
+			_stations.append({"pos": n3.global_position, "icon": icon, "color": col, "node": n3})
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -145,7 +143,7 @@ func _process(delta: float) -> void:
 	if big:
 		_big_canvas.queue_redraw()
 	var zid := String(arena.zone_at(player.global_position))
-	_zone_lbl.text = "%s   %s MAP" % [arena.zone_names.get(zid, "OUTSIDE"), GameState.key_label("map")]
+	_zone_lbl.text = arena.zone_names.get(zid, "OUTSIDE")
 
 
 # ---------------------------------------------------------------------------
@@ -210,12 +208,13 @@ func _draw_station(cv: Control, at: Vector2, st: Dictionary, s: float) -> void:
 	var node: Node = st["node"]
 	if not is_instance_valid(node):
 		return
-	if st["letter"] == "D" and node.get("_opened") == true:
+	if st["icon"] == "door" and node.get("_opened") == true:
 		return
 	var col: Color = st["color"]
-	cv.draw_rect(Rect2(at - Vector2(5, 5) * s, Vector2(10, 10) * s), Color(0.02, 0.02, 0.03, 0.85))
-	cv.draw_rect(Rect2(at - Vector2(5, 5) * s, Vector2(10, 10) * s), col, false, 1.0)
-	cv.draw_string(_font, at + Vector2(-3.4, 3.6) * s, String(st["letter"]), HORIZONTAL_ALIGNMENT_LEFT, -1, int(9 * s), col)
+	var r := 8.0 * s
+	cv.draw_rect(Rect2(at - Vector2(r, r), Vector2(r * 2.0, r * 2.0)), Color(0.02, 0.03, 0.05, 0.88))
+	cv.draw_rect(Rect2(at - Vector2(r, r), Vector2(r * 2.0, r * 2.0)), Color(col.r, col.g, col.b, 0.5), false, 1.0)
+	cv.draw_texture_rect(HI.tex(st["icon"]), Rect2(at - Vector2(6, 6) * s, Vector2(12, 12) * s), false, col)
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +283,9 @@ func _draw_big() -> void:
 	var frame := Rect2(top_left - Vector2(18, 44), size_px + Vector2(36, 96))
 	_big_canvas.draw_rect(frame, Color(0.02, 0.03, 0.045, 0.96))
 	_big_canvas.draw_rect(frame, Color(0.75, 0.2, 0.16, 0.9), false, 2.0)
-	_big_canvas.draw_string(_font, frame.position + Vector2(16, 28), "OUTPOST NACHT-7  —  TACTICAL MAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
-	_big_canvas.draw_string(_font, frame.position + Vector2(frame.size.x - 150, 28), "%s TO CLOSE" % GameState.key_label("map"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.72, 0.78))
+	_big_canvas.draw_texture_rect(HI.tex("map"), Rect2(frame.position + Vector2(16, 11), Vector2(20, 20)), false, Color(0.95, 0.95, 0.98))
+	_big_canvas.draw_string(_font, frame.position + Vector2(44, 28), "OUTPOST NACHT-7  —  TACTICAL MAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
+	_big_canvas.draw_string(_font, frame.position + Vector2(frame.size.x - 130, 28), "[%s] CLOSE" % GameState.key_label("map"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.72, 0.78))
 	for zid in arena.zone_polys:
 		var open: bool = arena.is_zone_open(zid)
 		var centre := Vector2.ZERO
@@ -323,5 +323,33 @@ func _draw_big() -> void:
 	tri.append(tri[0])
 	_big_canvas.draw_polyline(tri, Color.BLACK, 1.5)
 	var lc := Color(0.75, 0.78, 0.84)
-	_big_canvas.draw_string(_font, Vector2(frame.position.x + 16, frame.end.y - 30), "A AMMO   W WEAPON   F FURNACE   $ SUPPLY DEPOT   + SECOND WIND   ? MYSTERY CRATE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, lc)
-	_big_canvas.draw_string(_font, Vector2(frame.position.x + 16, frame.end.y - 12), "G GENERATOR   U WEAPON FORGE   R RADIO   D LOCKED DOOR   DIAMOND = COMMANDER   RED DOT = BOSS   STAR = RELIC", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, lc)
+	_legend_row(_big_canvas, Vector2(frame.position.x + 16, frame.end.y - 32), [
+		["bullet", "AMMO", Color(1.0, 0.8, 0.25)],
+		["rifle", "WEAPON", Color(0.4, 0.85, 1.0)],
+		["flame", "FURNACE", Color(1.0, 0.55, 0.2)],
+		["box", "SUPPLY", Color(0.5, 1.0, 0.55)],
+		["cross", "SECOND WIND", Color(0.4, 1.0, 0.6)],
+		["crate", "CRATE", Color(0.8, 0.55, 1.0)],
+	], lc)
+	var x := _legend_row(_big_canvas, Vector2(frame.position.x + 16, frame.end.y - 12), [
+		["bolt", "GENERATOR", Color(1.0, 0.95, 0.4)],
+		["anvil", "FORGE", Color(1.0, 0.5, 0.2)],
+		["radio", "RADIO", Color(0.6, 0.95, 1.0)],
+		["door", "DOOR", Color(1.0, 0.4, 0.3)],
+	], lc)
+	var y2 := frame.end.y - 12
+	for mk in [["commander", "COMMANDER", Color(1.0, 0.6, 0.2)], ["boss", "BOSS", Color(1.0, 0.2, 0.15)], ["relic", "RELIC", Color(0.85, 0.6, 1.0)]]:
+		_draw_marker(_big_canvas, Vector2(x + 6, y2 - 4), mk[0], mk[2], 0.8)
+		x += 17
+		_big_canvas.draw_string(_font, Vector2(x, y2), mk[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, lc)
+		x += _font.get_string_size(mk[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 18
+
+
+func _legend_row(cv: Control, at: Vector2, entries: Array, lc: Color) -> float:
+	var x := at.x
+	for e in entries:
+		cv.draw_texture_rect(HI.tex(e[0]), Rect2(Vector2(x, at.y - 11), Vector2(13, 13)), false, e[2])
+		x += 17
+		cv.draw_string(_font, Vector2(x, at.y), e[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, lc)
+		x += _font.get_string_size(e[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 18
+	return x

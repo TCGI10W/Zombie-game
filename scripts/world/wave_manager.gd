@@ -367,6 +367,8 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 			variant = "shielded"
 		elif round_num >= 6 and randf() < 0.07 * sp and _count_alive("bloater") < int(2 * sp):
 			variant = "bloater"
+		elif round_num >= 3 and randf() < 0.03 + 0.09 * GameState.horror():
+			variant = "crawler" # scuttler: fast, low, hard to see in the dark
 		elif round_num >= 3 and roll < 0.22:
 			variant = "armored"
 		elif round_num >= 2 and roll < 0.52:
@@ -393,6 +395,20 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	z.base_damage *= GameState.diff_dmg_mult()
 	z.base_speed *= GameState.diff("speed") * (1.15 if ev == "blood_moon" else 1.0)
 	z.target_player = _nearest_player(sp)
+	if variant == "crawler" and forced_pos == Vector3.INF:
+		z.base_speed *= 1.9
+		z.point_reward = 90
+	elif variant == "walker" or variant == "armored":
+		# Nobody moves the same: drag-steppers, ones that stand and then
+		# sprint, and (with horror) ones that only move when you look away
+		var hr := GameState.horror()
+		var sr := randf()
+		if sr < 0.3 * hr:
+			z.move_style = "lurker"
+		elif sr < 0.3 * hr + 0.18:
+			z.move_style = "burst"
+		elif sr < 0.3 * hr + 0.5:
+			z.move_style = "lurch"
 	if window:
 		z.set_entry_window(window)
 	z.died.connect(_on_enemy_died)

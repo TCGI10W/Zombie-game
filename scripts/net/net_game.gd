@@ -275,6 +275,8 @@ func _send_state() -> void:
 		f |= 8
 	if player.is_downed and player.self_reviving:
 		f |= 16
+	if player.flashlight_lit():
+		f |= 32
 	b.put_u8(f)
 	b.put_u8(int(clampf(player.hp / maxf(1.0, player.max_hp), 0.0, 1.0) * 255.0))
 	b.put_u8(maxi(0, weapon_keys.find(player.get_current_weapon_id())))
@@ -305,7 +307,7 @@ func _r_state(data: PackedByteArray) -> void:
 		av.kills = b.get_u16()
 		av.downs = b.get_u8()
 	av.apply_state(t, pos, yaw, {"pitch": pitch, "downed": (f & 1) != 0, "dead": (f & 2) != 0,
-		"extracted": (f & 4) != 0, "crouch": (f & 8) != 0, "self_revive": (f & 16) != 0, "hp": hp,
+		"extracted": (f & 4) != 0, "crouch": (f & 8) != 0, "self_revive": (f & 16) != 0, "light": (f & 32) != 0, "hp": hp,
 		"weapon": weapon_keys[widx] if widx < weapon_keys.size() else "pistol", "points": pts, "bleed": bleed})
 
 
@@ -451,7 +453,7 @@ func _c_hits(data: PackedByteArray) -> void:
 	var b := StreamPeerBuffer.new()
 	b.data_array = data
 	var me := Net.my_id()
-	while b.get_position() + 15 <= data.size():
+	while b.get_position() + 13 <= data.size():
 		var id := b.get_u16()
 		var pos := Vector3(float(b.get_16()), float(b.get_16()), float(b.get_16())) / 100.0
 		var dmg := float(b.get_u8()) * 4.0
@@ -496,10 +498,11 @@ func send_points(peer: int, amount: int) -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func _r_points(amount: int) -> void:
-	GameState.points += clampi(amount, 0, 5000)
-	GameState.points_changed.emit(GameState.points, amount)
+	var got := maxi(0, amount)
+	GameState.points += got
+	GameState.points_changed.emit(GameState.points, got)
 	GameState.play_sfx("buy_ching", -2.0, 1.2)
-	player.status_banner_requested.emit("%s SENT YOU %d POINTS" % [Net.player_name(multiplayer.get_remote_sender_id()), amount], Color(0.95, 0.85, 0.35))
+	player.status_banner_requested.emit("%s SENT YOU %d POINTS" % [Net.player_name(multiplayer.get_remote_sender_id()), got], Color(0.95, 0.85, 0.35))
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -820,6 +823,11 @@ func _update_hud(delta: float) -> void:
 			if is_instance_valid(av) and av.revive_progress > 0.0:
 				prog = av.revive_progress
 				text = "REVIVING %s..." % av.display_name
+		if prog <= 0.0:
+			for av in avatars.values():
+				if is_instance_valid(av) and av.gift_progress > 0.0:
+					prog = av.gift_progress
+					text = "SENDING ALL POINTS TO %s..." % av.display_name
 	_bar_bg.visible = prog > 0.0
 	_bar_fill.size = Vector2(300.0 * clampf(prog, 0.0, 1.0), 10)
 	if text != "":

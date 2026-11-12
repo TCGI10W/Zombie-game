@@ -55,6 +55,10 @@ func _ready() -> void:
 	wave_mgr.setup(arena, player, enemies_container)
 
 	GameState.apply_graphics()
+	var horror: Node = (load("res://scripts/world/horror_director.gd") as GDScript).new()
+	horror.name = "Horror"
+	add_child(horror)
+	horror.setup(arena, player, hud, wave_mgr)
 
 	if Net.is_online():
 		var ng := NetGame.new()

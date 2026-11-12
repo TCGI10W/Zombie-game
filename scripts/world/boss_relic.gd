@@ -97,6 +97,7 @@ func _ready() -> void:
 
 	var lbl := Label3D.new()
 	lbl.text = "%s RELIC\n%s" % [RARITY_NAMES[r], describe(kind)]
+	lbl.modulate = col
 	if owner_peer != 0:
 		lbl.text += "\nFOR %s" % Net.player_name(owner_peer)
 		if owner_peer != Net.my_id():
@@ -105,7 +106,6 @@ func _ready() -> void:
 	lbl.outline_size = 10
 	lbl.pixel_size = 0.004
 	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	lbl.modulate = col
 	lbl.position.y = 1.75
 	lbl.no_depth_test = true
 	lbl.render_priority = 2

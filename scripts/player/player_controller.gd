@@ -261,6 +261,20 @@ func _build_camera_and_viewmodels() -> void:
 	fill.light_cull_mask = VIEWMODEL_LAYER # only lights the gun & hands, not zombies in your face
 	camera.add_child(fill)
 
+	flashlight = SpotLight3D.new()
+	flashlight.light_color = Color(1.0, 0.95, 0.85)
+	flashlight.light_energy = FLASH_ENERGY
+	flashlight.spot_range = 30.0
+	flashlight.spot_angle = 27.0
+	flashlight.spot_angle_attenuation = 0.7
+	flashlight.spot_attenuation = 0.8
+	flashlight.shadow_enabled = true
+	flashlight.light_volumetric_fog_energy = 1.6
+	flashlight.position = Vector3(0.18, -0.12, 0.0)
+	flashlight.visible = false
+	camera.add_child(flashlight)
+	flashlight_on = GameState.horror() >= 0.4
+
 	muzzle_light = OmniLight3D.new()
 	muzzle_light.light_color = Color(1.0, 0.72, 0.30)
 	muzzle_light.light_energy = 3.6
@@ -416,6 +430,7 @@ func stamina_recover_time() -> float:
 # TIMERS
 # ---------------------------------------------------------------------------
 func _update_timers(delta: float) -> void:
+	_update_flashlight(delta)
 	fire_cooldown = maxf(0.0, fire_cooldown - delta)
 	monster_rend_cd = maxf(0.0, monster_rend_cd - delta)
 	monster_slam_cd = maxf(0.0, monster_slam_cd - delta)
@@ -2313,7 +2328,11 @@ func hit_stop(dur: float, scale: float) -> void:
 		return
 	_hit_stop_on = true
 	Engine.time_scale = scale
-	await get_tree().create_timer(dur, true, false, true).timeout
+	# Node-bound so freeing the player cancels the wait instead of resuming it
+	var t := create_tween()
+	t.set_ignore_time_scale(true)
+	t.tween_interval(dur)
+	await t.finished
 	Engine.time_scale = 1.0
 	_hit_stop_on = false
 
@@ -2405,3 +2424,58 @@ func _detonate_c4() -> void:
 			any = true
 	if any:
 		GameState.play_sfx("radio_beep", -2.0, 1.4)
+
+
+# ---------------------------------------------------------------------------
+# FLASHLIGHT: toggle with [L] or the middle mouse button. The battery drains
+# while it is on and recharges while it is off; it flickers when nearly empty.
+# An Overlord's psychic scream knocks it out for a few seconds.
+# ---------------------------------------------------------------------------
+const FLASH_ENERGY := 3.4
+const FLASH_DRAIN := 1.0 / 150.0 # full battery lasts 150 s
+const FLASH_CHARGE := 1.0 / 45.0
+var flashlight: SpotLight3D
+var flashlight_on: bool = false
+var flash_battery: float = 1.0
+var flash_jam: float = 0.0
+
+
+func jam_flashlight(seconds: float) -> void:
+	flash_jam = maxf(flash_jam, seconds)
+	if flashlight_on:
+		status_banner_requested.emit("YOUR FLASHLIGHT DIES...", Color(0.75, 0.3, 1.0))
+
+
+func flashlight_lit() -> bool:
+	return flashlight != null and flashlight.visible
+
+
+func _update_flashlight(delta: float) -> void:
+	if flashlight == null:
+		return
+	if Input.is_action_just_pressed("flashlight") and not _input_blocked() and not is_dead:
+		if flashlight_on:
+			flashlight_on = false
+			GameState.play_sfx("dry_fire", -8.0, 1.7)
+		elif flash_battery > 0.12:
+			flashlight_on = true
+			GameState.play_sfx("dry_fire", -8.0, 2.0)
+		else:
+			status_banner_requested.emit("FLASHLIGHT BATTERY IS RECHARGING", Color(1.0, 0.8, 0.3))
+	flash_jam = maxf(0.0, flash_jam - delta)
+	if flashlight_on:
+		flash_battery = maxf(0.0, flash_battery - FLASH_DRAIN * delta)
+		if flash_battery <= 0.0:
+			flashlight_on = false
+			GameState.play_sfx("dry_fire", -6.0, 1.2)
+			status_banner_requested.emit("FLASHLIGHT BATTERY EMPTY — IT RECHARGES WHILE OFF", Color(1.0, 0.5, 0.3))
+	else:
+		flash_battery = minf(1.0, flash_battery + FLASH_CHARGE * delta)
+	var lit := flashlight_on and not is_dead and not is_monster_form
+	var e := FLASH_ENERGY
+	if flash_jam > 0.0:
+		e *= 0.0 if randf() < 0.85 else 0.5
+	elif flash_battery < 0.2:
+		e *= (0.35 + 0.65 * flash_battery / 0.2) * (0.3 if randf() < 0.12 else 1.0)
+	flashlight.visible = lit
+	flashlight.light_energy = e
