@@ -69,8 +69,8 @@ func _ready() -> void:
 	m_dark_conc = MaterialLib.get_world("concrete", 0.5, Color(0.5, 0.51, 0.55), 0.0, 1.0, 0.0, 0.4)
 	m_metal = MaterialLib.get_world("rusted_metal", 0.5, Color(0.85, 0.82, 0.8), 0.35, 0.9, 0.0, 0.25)
 	m_wood = MaterialLib.get_world("wood_planks", 0.5, Color(0.9, 0.85, 0.78), 0.0, 1.0, 0.0, 0.3)
-	m_stone = MaterialLib.get_world("concrete", 0.4, Color(0.66, 0.62, 0.58), 0.0, 1.0, 0.0, 0.6)
-	m_brick = MaterialLib.get_world("concrete", 0.6, Color(0.62, 0.42, 0.36), 0.0, 1.0, 0.0, 0.5)
+	m_stone = MaterialLib.get_world("stone_block", 0.4, Color(0.9, 0.88, 0.85), 0.0, 1.0, 0.0, 0.6)
+	m_brick = MaterialLib.get_world("brick", 0.6, Color(0.95, 0.92, 0.9), 0.0, 1.0, 0.0, 0.5)
 	m_fence = MaterialLib.get_world("rusted_metal", 0.5, Color(0.55, 0.52, 0.5), 0.4, 0.9, 0.0, 0.2)
 
 	_build_environment()
@@ -83,6 +83,8 @@ func _ready() -> void:
 	_build_cemetery()
 	_build_outside()
 	_window_lights()
+	_dress_kit()
+	_psx_subdivide(self)
 	_bake_navigation()
 	_scatter_blood.call_deferred()
 
@@ -230,7 +232,7 @@ func _build_ground() -> void:
 	_add_floor_tile(Vector3(1, 0, -33), Vector2(42, 10), tile)
 	_add_floor_tile(Vector3(35, 0, 0), Vector2(30, 24), tile)
 	_add_floor_tile(Vector3(42, 0, 22), Vector2(16, 20), tile)
-	var htile := MaterialLib.get_world("concrete_floor", 0.5, Color(0.62, 0.68, 0.66), 0.0, 0.9, 0.0, 0.0, true)
+	var htile := MaterialLib.get_world("tiles", 0.5, Color(0.9, 0.92, 0.9), 0.0, 0.9, 0.0, 0.0, true)
 	_add_floor_tile(Vector3(-32, 0, -3), Vector2(24, 18), htile)
 	_add_floor_tile(Vector3(-38, 0, -21), Vector2(12, 18), htile)
 
@@ -401,6 +403,7 @@ func _build_hospital() -> void:
 		_add_lamp(p, lab_col, 2.0, p.z < -15.0)
 	for g in [[Vector3(-41.5, 0, 2.5), 90.0], [Vector3(-35.0, 0, 2.5), 90.0], [Vector3(-41.5, 0, -8.0), 90.0], [Vector3(-38.0, 0, -26.0), 0.0]]:
 		_prop("prop_gurney", g[0], g[1], Vector3(0.8, 1.1, 2.0), Vector3(0, 0.55, 0))
+		_prop("prop_iv_stand", g[0] + Vector3(0.75, 0, 0.6), 0.0, Vector3.ZERO, Vector3.ZERO)
 	_prop("prop_lockers", Vector3(-21.0, 0, -9.0), -90.0, Vector3(2.0, 2.0, 0.55), Vector3(0, 1.0, 0))
 	_prop("prop_desk", Vector3(-26.0, 0, 3.5), 0.0, Vector3(1.6, 1.0, 0.8), Vector3(0, 0.5, 0))
 	var vat_glass := MaterialLib.get_emissive(Color(0.3, 1.0, 0.45), 2.2, 0.55)
@@ -472,7 +475,8 @@ func _build_cemetery() -> void:
 			var gp := Vector3(27.0 + 2.6 * float(i) + (1.3 if row % 2 == 1 else 0.0), 0.35, -30.0 - 3.6 * float(row))
 			if gp.x > 44.0:
 				continue
-			_add_static_box(gp, Vector3(0.8, 0.7, 0.18), m_stone, Vector3(0, randf_range(-0.12, 0.12), 0))
+			var gm := "prop_grave_cross" if (row + i) % 3 == 0 else "prop_gravestone"
+			_prop(gm, Vector3(gp.x, 0, gp.z), 180.0 + randf_range(-7.0, 7.0), Vector3(0.8, 0.8, 0.25), Vector3(0, 0.4, 0))
 	# Crypt
 	_add_static_box(Vector3(44.0, 2.0, -44.0), Vector3(6.0, 4.0, 7.0), m_stone)
 	_add_static_box(Vector3(44.0, 4.3, -44.0), Vector3(6.8, 0.6, 7.8), m_dark_conc)
@@ -787,7 +791,8 @@ func _add_sandbags(pos: Vector3, rot_deg: float) -> void:
 func _add_crate_stack(pos: Vector3, height: int) -> void:
 	for i in range(height):
 		var s := 1.2 - float(i) * 0.15
-		_add_static_box(pos + Vector3(randf_range(-0.1, 0.1), s * 0.5 + float(i) * 1.2, randf_range(-0.1, 0.1)), Vector3(s, s, s), m_wood, Vector3(0, randf_range(-0.3, 0.3), 0))
+		var c := pos + Vector3(randf_range(-0.1, 0.1), float(i) * 1.2, randf_range(-0.1, 0.1))
+		_prop("prop_wood_crate", c, randf_range(-17.0, 17.0), Vector3(s, s, s), Vector3(0, s * 0.5, 0), s / 1.2)
 
 
 func _add_fire_barrel(bpos: Vector3) -> void:
@@ -895,3 +900,41 @@ func _add_invisible_collider(pos: Vector3, size: Vector3, rot_y_deg: float) -> v
 	cs.shape = bs
 	sb.add_child(cs)
 	add_child(sb)
+
+
+# Extra set dressing from the Blender map kit, placed beside existing cover
+# so no walkway or spawn window gets blocked. Small clutter has no collider.
+func _dress_kit() -> void:
+	# plaza
+	_prop("prop_traffic_cone", Vector3(-9.6, 0, -6.3), 0.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_traffic_cone", Vector3(-10.4, 0, -1.6), 40.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_trash_bags", Vector3(15.0, 0, 11.6), 20.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_pallet", Vector3(18.2, 0, 11.2), 15.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_street_sign", Vector3(-14.2, 0, -6.6), 30.0, Vector3(0.2, 2.6, 0.2), Vector3(0, 1.3, 0))
+	_prop("prop_jersey_barrier", Vector3(12.8, 0, -7.2), 30.0, Vector3(2.0, 1.0, 0.6), Vector3(0, 0.5, 0))
+	# warehouse yard
+	_prop("prop_pallet", Vector3(48.4, 0, 11.6), 5.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_pipe_stack", Vector3(43.2, 0, 28.5), 0.0, Vector3(1.8, 1.1, 3.0), Vector3(0, 0.55, 0))
+	_prop("prop_wood_crate", Vector3(48.6, 0, 7.6), 12.0, Vector3(1.2, 1.2, 1.2), Vector3(0, 0.6, 0))
+	# rail yard
+	_prop("prop_dumpster", Vector3(-42.5, 0, 28.6), 0.0, Vector3(2.0, 1.4, 1.2), Vector3(0, 0.7, 0))
+	_prop("prop_trash_bags", Vector3(-40.6, 0, 28.2), 80.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_jersey_barrier", Vector3(-35.0, 0, 18.4), 80.0, Vector3(2.0, 1.0, 0.6), Vector3(0, 0.5, 0))
+	# outside the walls
+	for b in [Vector3(-30, 0, 12), Vector3(56, 0, -9), Vector3(-48, 0, 22)]:
+		_prop("prop_jersey_barrier", b, b.x * 3.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_bench", Vector3(24, 0, 44), 0.0, Vector3.ZERO, Vector3.ZERO)
+	_prop("prop_street_sign", Vector3(-28, 0, 7), 120.0, Vector3.ZERO, Vector3.ZERO)
+
+
+# The PS1 vertex snap moves whole triangles, so one huge face (the 150 m
+# ground, long walls) slides its texture around as the camera moves. Cutting
+# every box into ~2 m cells keeps each snap local, so surfaces stay put.
+func _psx_subdivide(n: Node) -> void:
+	for c in n.get_children():
+		if c is MeshInstance3D and (c as MeshInstance3D).mesh is BoxMesh:
+			var bm := (c as MeshInstance3D).mesh as BoxMesh
+			bm.subdivide_width = clampi(int(bm.size.x / 2.0), 0, 80)
+			bm.subdivide_height = clampi(int(bm.size.y / 2.0), 0, 80)
+			bm.subdivide_depth = clampi(int(bm.size.z / 2.0), 0, 80)
+		_psx_subdivide(c)
