@@ -248,6 +248,22 @@ func _build_camera_and_viewmodels() -> void:
 	camera.current = true
 	head_pivot.add_child(camera)
 
+	# Scrapshift ink outline: full-screen quad reading depth + normals
+	var ink := MeshInstance3D.new()
+	ink.name = "InkOutline"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(1, 1)
+	quad.flip_faces = true
+	ink.mesh = quad
+	ink.extra_cull_margin = 16384.0
+	ink.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ink_mat := ShaderMaterial.new()
+	ink_mat.shader = load("res://shaders/outline.gdshader")
+	ink.material_override = ink_mat
+	ink.visible = GameState.retro_enabled
+	ink.add_to_group("ink_outline")
+	camera.add_child(ink)
+
 	gun_rig = Node3D.new()
 	gun_rig.position = HIP_POS
 	camera.add_child(gun_rig)
@@ -346,9 +362,53 @@ func _physics_process(delta: float) -> void:
 		if is_instance_valid(_extract_node) and _extract_node.get_meta("riding", false):
 			global_position = _extract_node.global_position + Vector3(0, 0.6, 0)
 		return
+	if is_instance_valid(driving):
+		_drive_tick(delta)
+		return
 	_update_timers(delta)
 	_handle_movement(delta)
 	_handle_combat_inputs(delta)
+	_animate_viewmodels(delta)
+
+
+# ---------------------------------------------------------------------------
+# VEHICLES (open world): the player rides in the seat, the car reads the
+# move keys itself; interact again steps out.
+var driving: Node3D = null
+var _saved_layers := Vector2i.ZERO
+var _drive_grace := 0.0
+
+
+func enter_vehicle(v: Node3D) -> void:
+	driving = v
+	_saved_layers = Vector2i(collision_layer, collision_mask)
+	collision_layer = 0
+	collision_mask = 0
+	velocity = Vector3.ZERO
+	_drive_grace = 0.4
+	nearby_station = null
+	interact_prompt_changed.emit("[E] LEAVE VEHICLE")
+
+
+func exit_vehicle() -> void:
+	if not is_instance_valid(driving):
+		return
+	var out: Vector3 = driving.leave(self)
+	driving = null
+	global_position = out
+	collision_layer = _saved_layers.x
+	collision_mask = _saved_layers.y
+	interact_prompt_changed.emit("")
+
+
+func _drive_tick(delta: float) -> void:
+	_update_timers(delta)
+	global_position = driving.seat_position() - Vector3(0, 0.9, 0)
+	velocity = Vector3.ZERO
+	_drive_grace -= delta
+	if is_downed or (_drive_grace <= 0.0 and Input.is_action_just_pressed("interact") and not _input_blocked()):
+		exit_vehicle()
+		return
 	_animate_viewmodels(delta)
 
 

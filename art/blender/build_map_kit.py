@@ -276,6 +276,51 @@ def build_textures():
     letters = (YY > 50) & (YY < 80) & ((XX // 6) % 3 != 0) & (XX > 12) & (XX < 116)
     c[letters] = (.1, .1, .1)
     tex("sign", mix(c, c * .5, (fbm(271, 4) - .55) * 3))
+    # ---- open-world surfaces
+    # wood clapboard siding (houses, barn): overlapping boards, flaking paint
+    lap = (YY % 16) / 16.0
+    flake = np.clip((fbm(400, 6, 4) - .6) * 6, 0, 1)
+    h = lap * .5 + (1 - flake) * .2
+    for name, a, b in (("siding_white", (.5, .5, .46), (.72, .7, .64)), ("siding_red", (.3, .08, .06), (.5, .14, .1)),
+                       ("siding_blue", (.2, .26, .3), (.36, .44, .48))):
+        paint = ramp(fbm(401) * .6 + lap * .4, [(0, a), (1, b)])
+        wood = ramp(grain2 * .7 + fbm(402) * .3, [(0, (.16, .11, .07)), (1, (.36, .26, .16))])
+        tex(name, mix(paint, wood, flake), h, 1.8, 1.4)
+    # asphalt roof shingles
+    ids, edge = cells(8, 8, 0.5, seed=9)
+    h = ((YY % 16) / 16.0) * .5 + (edge > 1) * .2
+    c = ramp(per_cell(ids, 410) * .5 + fbm(411) * .5, [(0, (.1, .1, .11)), (1, (.27, .25, .24))])
+    c = mix(c, c * np.array([.8, .95, .7]), (fbm(412, 3) - .5) * 3)
+    tex("shingles", c, h, 1.8, 1.6)
+    # tin roof: wide corrugation, rust streaks running down
+    rib = np.sin(XX / N * np.pi * 2 * 6) * .5 + .5
+    streak = noise(N, 32, 420)[:1].repeat(N, 0)
+    c = mix(ramp(rib * .5 + fbm(421) * .5, [(0, (.32, .34, .35)), (1, (.52, .53, .52))]),
+            ramp(fbm(422, 8), [(0, (.3, .12, .05)), (1, (.55, .3, .12))]), (streak - .45) * 3 + (fbm(423) - .6) * 4)
+    tex("tin_roof", c, rib * .6, 1.6, 1.0)
+    # dead grass / meadow ground
+    blades = white(430)
+    h = fbm(431, 8) * .5 + blades * .5
+    c = ramp(fbm(432, 4) * .6 + blades * .4, [(0, (.13, .13, .06)), (.5, (.25, .24, .11)), (1, (.38, .35, .18))])
+    c = mix(c, ramp(fbm(433, 8), [(0, (.12, .09, .06)), (1, (.22, .17, .11))]), (fbm(434, 3) - .6) * 4)
+    tex("grass", c, h, 1.2, 1.0)
+    # gravel
+    peb2 = np.clip(blur((white(440) > .9).astype(float), 1) * 3, 0, 1)
+    tex("gravel", ramp(peb2 * .6 + white(441) * .4, [(0, (.16, .15, .14)), (1, (.46, .44, .4))]), peb2, 2.2, 1.6)
+    # dirt road: two wheel ruts, puddle-dark patches
+    rut = np.exp(-((XX - 36) / 9.0) ** 2) + np.exp(-((XX - 92) / 9.0) ** 2)
+    h = fbm(450, 8) * .4 - rut * .4 + peb * .3
+    c = ramp(fbm(451, 4) * .6 + white(452) * .4, [(0, (.16, .12, .08)), (1, (.36, .29, .2))])
+    c = mix(c, c * .6, rut * .6 + (fbm(453, 3) - .65) * 4)
+    tex("dirt_road", c, h, 1.6, 1.2)
+    # hay
+    straw = np.sin(XX / N * np.pi * 2 * 20 + fbm(460, 8) * 12) * .5 + .5
+    tex("hay", ramp(straw * .6 + fbm(461) * .4, [(0, (.35, .27, .1)), (1, (.72, .6, .3))]), straw * .5, 1.4)
+    # window: dark glass, frame, cross bar, dirt
+    frame = (np.minimum.reduce([XX, YY, N - 1 - XX, N - 1 - YY]) < 8) | (np.abs(XX - 64) < 4) | (np.abs(YY - 64) < 4)
+    c = ramp(fbm(470) * .3 + (np.abs(XX - YY) < 12) * .3, [(0, (.04, .05, .06)), (1, (.2, .25, .27))])
+    c[frame] = ramp(fbm(471)[frame], [(0, (.4, .38, .34)), (1, (.6, .58, .52))])
+    tex("window", c, frame * .6, 1.6)
     # world-shader macro variation map (greyscale, 256)
     m = fbm(300, 2, 5, 256)
     TEX["macro_noise"] = np.repeat(m[..., None], 3, 2)
@@ -1014,4 +1059,5 @@ def main():
     print("KIT OK %d props %d textures" % (len(roots), len(TEX)))
 
 
-main()
+if __name__ == "__main__":
+    main()

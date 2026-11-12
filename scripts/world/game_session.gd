@@ -14,7 +14,7 @@ func _ready() -> void:
 	GameState.reset_run()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-	arena = BunkerArena.new()
+	arena = OpenWorld.new()
 	arena.name = "BunkerArena"
 	add_child(arena)
 

@@ -275,17 +275,30 @@ func _draw_big() -> void:
 	if not is_instance_valid(player) or arena == null:
 		return
 	var vp := get_viewport_rect().size
-	var span := MAP_MAX - MAP_MIN
+	var mmin: Vector2 = arena.get("map_min") if "map_min" in arena else MAP_MIN
+	var mmax: Vector2 = arena.get("map_max") if "map_max" in arena else MAP_MAX
+	var span := mmax - mmin
 	var scale_px := minf((vp.x * 0.62) / span.x, (vp.y * 0.78) / span.y)
 	var size_px := span * scale_px
 	var top_left := (vp - size_px) * 0.5
 	var to_map := func(w: Vector2) -> Vector2:
-		return top_left + (w - MAP_MIN) * scale_px
+		return top_left + (w - mmin) * scale_px
 	var frame := Rect2(top_left - Vector2(18, 44), size_px + Vector2(36, 96))
 	_big_canvas.draw_rect(frame, Color(0.02, 0.03, 0.045, 0.96))
 	_big_canvas.draw_rect(frame, Color(0.75, 0.2, 0.16, 0.9), false, 2.0)
-	_big_canvas.draw_string(_font, frame.position + Vector2(16, 28), "OUTPOST NACHT-7  —  TACTICAL MAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
+	_big_canvas.draw_string(_font, frame.position + Vector2(16, 28), ("THE COUNTY  —  TACTICAL MAP" if "locations" in arena else "OUTPOST NACHT-7  —  TACTICAL MAP"), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
 	_big_canvas.draw_string(_font, frame.position + Vector2(frame.size.x - 150, 28), "%s TO CLOSE" % GameState.key_label("map"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.72, 0.78))
+	# open world: roads and location names under the zones
+	if "locations" in arena:
+		for rd in arena.ROADS:
+			var pts := PackedVector2Array()
+			for p in rd[0]:
+				pts.append(to_map.call(p))
+			_big_canvas.draw_polyline(pts, Color(0.55, 0.52, 0.45, 0.8), maxf(2.0, float(rd[1]) * scale_px))
+		for lid in arena.locations:
+			var loc: Dictionary = arena.locations[lid]
+			var c3: Vector3 = loc["center"]
+			_big_canvas.draw_string(_font, to_map.call(Vector2(c3.x, c3.z)) + Vector2(-40, -30), loc["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.85, 0.5))
 	for zid in arena.zone_polys:
 		var open: bool = arena.is_zone_open(zid)
 		var centre := Vector2.ZERO
