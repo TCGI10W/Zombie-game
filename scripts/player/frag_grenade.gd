@@ -34,8 +34,8 @@ func _ready() -> void:
 	cs.shape = sphere
 	add_child(cs)
 
-	if ResourceLoader.exists("res://assets/models/prop_grenade.glb"):
-		var m: Node3D = (load("res://assets/models/prop_grenade.glb") as PackedScene).instantiate()
+	if ResourceLoader.exists("res://art/models/prop_grenade.glb"):
+		var m: Node3D = (load("res://art/models/prop_grenade.glb") as PackedScene).instantiate()
 		m.scale = Vector3.ONE * 1.3
 		add_child(m)
 

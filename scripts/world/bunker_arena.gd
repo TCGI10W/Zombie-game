@@ -362,8 +362,8 @@ func _build_warehouse() -> void:
 			[Vector3(45.0, 1.6, -7.0), Vector3(1.2, 3.2, 7.0)], [Vector3(38.0, 1.6, 26.0), Vector3(1.2, 3.2, 8.0)],
 			[Vector3(46.0, 1.6, 18.0), Vector3(1.2, 3.2, 6.0)]]:
 		_add_static_box(r[0], r[1], m_metal)
-	if ResourceLoader.exists("res://assets/models/prop_truck.glb"):
-		var truck: Node3D = (load("res://assets/models/prop_truck.glb") as PackedScene).instantiate()
+	if ResourceLoader.exists("res://art/models/prop_truck.glb"):
+		var truck: Node3D = (load("res://art/models/prop_truck.glb") as PackedScene).instantiate()
 		truck.position = Vector3(38.0, 0, 2.0)
 		truck.rotation_degrees.y = 90.0
 		add_child(truck)
@@ -592,43 +592,54 @@ func _build_environment() -> void:
 	var env := Environment.new()
 	world_env = env
 
+	# Overcast dusk: grey sky, pale bright horizon, washed-out colours
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.03, 0.045, 0.08)
-	sky_mat.sky_horizon_color = Color(0.08, 0.10, 0.15)
-	sky_mat.ground_bottom_color = Color(0.02, 0.02, 0.03)
-	sky_mat.ground_horizon_color = Color(0.06, 0.07, 0.10)
-	# Stars, Milky Way, moonlit clouds and the moon itself
-	if ResourceLoader.exists("res://assets/textures/sky_night.png"):
-		sky_mat.sky_cover = load("res://assets/textures/sky_night.png")
-		sky_mat.sky_cover_modulate = Color(1.45, 1.45, 1.55, 1.0)
+	sky_mat.sky_top_color = Color(0.30, 0.34, 0.38)
+	sky_mat.sky_horizon_color = Color(0.72, 0.72, 0.68)
+	sky_mat.sky_curve = 0.12
+	sky_mat.ground_bottom_color = Color(0.10, 0.10, 0.09)
+	sky_mat.ground_horizon_color = Color(0.55, 0.56, 0.52)
+	sky_mat.sun_angle_max = 40.0
+	sky_mat.sun_curve = 0.08
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.14, 0.17, 0.24)
-	env.ambient_light_energy = 1.15
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.3
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_sky_contribution = 0.85
+	env.ambient_light_color = Color(0.42, 0.44, 0.42)
+	env.ambient_light_energy = 0.9
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 1.0
+	env.tonemap_white = 6.0
 	env.glow_enabled = true
-	env.glow_intensity = 0.65
-	env.glow_bloom = 0.18
+	env.glow_intensity = 0.35
+	env.glow_bloom = 0.08
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	env.ssao_enabled = true
+	env.ssao_intensity = 1.6
 	env.ssr_enabled = true
+	# Desaturated, slightly green-grey grade
+	env.adjustment_enabled = true
+	env.adjustment_saturation = 0.55
+	env.adjustment_contrast = 1.08
+	env.adjustment_brightness = 0.98
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.02
-	env.volumetric_fog_albedo = Color(0.14, 0.17, 0.23)
-	env.volumetric_fog_emission = Color(0.02, 0.025, 0.04)
+	env.volumetric_fog_density = 0.012
+	env.volumetric_fog_albedo = Color(0.62, 0.63, 0.60)
+	env.volumetric_fog_emission = Color(0.05, 0.05, 0.05)
+	env.volumetric_fog_sky_affect = 0.4
 	we.environment = env
 	add_child(we)
 
+	# Low, weak sun behind cloud cover (soft shadows)
 	var moon := DirectionalLight3D.new()
-	moon.light_color = Color(0.58, 0.68, 0.90)
-	moon.light_energy = 1.15
+	moon.light_color = Color(0.95, 0.90, 0.80)
+	moon.light_energy = 0.9
 	moon.shadow_enabled = true
-	moon.rotation_degrees = Vector3(-52.0, -34.0, 0.0)
+	moon.shadow_blur = 2.5
+	moon.rotation_degrees = Vector3(-18.0, -34.0, 0.0)
 	add_child(moon)
 
 
@@ -676,7 +687,7 @@ func skull_found() -> void:
 
 
 func _prop(model: String, pos: Vector3, rot_deg: float, col_size: Vector3, col_off: Vector3, scale_f: float = 1.0) -> void:
-	var path := "res://assets/models/%s.glb" % model
+	var path := "res://art/models/%s.glb" % model
 	if ResourceLoader.exists(path):
 		var inst: Node3D = (load(path) as PackedScene).instantiate()
 		inst.position = pos
@@ -764,8 +775,8 @@ func _add_window(pos: Vector3, outward: Vector3, zone_id: String) -> void:
 
 
 func _add_sandbags(pos: Vector3, rot_deg: float) -> void:
-	if ResourceLoader.exists("res://assets/models/prop_sandbags.glb"):
-		var inst := (load("res://assets/models/prop_sandbags.glb") as PackedScene).instantiate() as Node3D
+	if ResourceLoader.exists("res://art/models/prop_sandbags.glb"):
+		var inst := (load("res://art/models/prop_sandbags.glb") as PackedScene).instantiate() as Node3D
 		inst.position = pos
 		inst.rotation_degrees.y = rot_deg
 		inst.scale = Vector3.ONE * 1.35
@@ -780,8 +791,8 @@ func _add_crate_stack(pos: Vector3, height: int) -> void:
 
 
 func _add_fire_barrel(bpos: Vector3) -> void:
-	if ResourceLoader.exists("res://assets/models/prop_barrel.glb"):
-		var b := (load("res://assets/models/prop_barrel.glb") as PackedScene).instantiate() as Node3D
+	if ResourceLoader.exists("res://art/models/prop_barrel.glb"):
+		var b := (load("res://art/models/prop_barrel.glb") as PackedScene).instantiate() as Node3D
 		b.position = bpos
 		b.scale = Vector3.ONE * 1.15
 		add_child(b)

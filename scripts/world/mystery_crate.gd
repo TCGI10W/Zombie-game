@@ -28,8 +28,8 @@ func current_cost() -> int:
 
 func _ready() -> void:
 	add_to_group("wall_stations")
-	if ResourceLoader.exists("res://assets/models/prop_mystery_crate.glb"):
-		var m: Node3D = (load("res://assets/models/prop_mystery_crate.glb") as PackedScene).instantiate()
+	if ResourceLoader.exists("res://art/models/prop_mystery_crate.glb"):
+		var m: Node3D = (load("res://art/models/prop_mystery_crate.glb") as PackedScene).instantiate()
 		add_child(m)
 		_lid = m.find_child("LidPivot", true, false)
 

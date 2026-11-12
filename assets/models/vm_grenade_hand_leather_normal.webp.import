@@ -2,32 +2,28 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dklh6xs0b140d"
-path.s3tc="res://.godot/imported/vm_grenade_hand_leather_normal.webp-4fbd25ea87b452f30418fd0f5298bb3f.s3tc.ctex"
+uid="uid://7y44hlqjflq"
+path="res://.godot/imported/vm_grenade_hand_leather_normal.webp-4fbd25ea87b452f30418fd0f5298bb3f.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
-"vram_texture": true
-}
-generator_parameters={
-"md5": "f275dd08e5e33ca055a456b0c3007a88"
+"vram_texture": false
 }
 
 [deps]
 
 source_file="res://assets/models/vm_grenade_hand_leather_normal.webp"
-dest_files=["res://.godot/imported/vm_grenade_hand_leather_normal.webp-4fbd25ea87b452f30418fd0f5298bb3f.s3tc.ctex"]
+dest_files=["res://.godot/imported/vm_grenade_hand_leather_normal.webp-4fbd25ea87b452f30418fd0f5298bb3f.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=1
+compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=true
+mipmaps/generate=false
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""

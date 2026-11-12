@@ -54,8 +54,8 @@ var _was_paused: bool = false
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("wall_stations")
-	if ResourceLoader.exists("res://assets/models/prop_lockers.glb"):
-		add_child((load("res://assets/models/prop_lockers.glb") as PackedScene).instantiate())
+	if ResourceLoader.exists("res://art/models/prop_lockers.glb"):
+		add_child((load("res://art/models/prop_lockers.glb") as PackedScene).instantiate())
 	var body := StaticBody3D.new()
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()

@@ -14,8 +14,8 @@ var _t: float = 0.0
 
 func _ready() -> void:
 	add_to_group("wall_stations")
-	if ResourceLoader.exists("res://assets/models/prop_med_station.glb"):
-		add_child((load("res://assets/models/prop_med_station.glb") as PackedScene).instantiate())
+	if ResourceLoader.exists("res://art/models/prop_med_station.glb"):
+		add_child((load("res://art/models/prop_med_station.glb") as PackedScene).instantiate())
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
 	var cs := CollisionShape3D.new()

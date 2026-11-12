@@ -76,8 +76,8 @@ func _build_plaque() -> void:
 
 
 func _build_forge() -> void:
-	if ResourceLoader.exists("res://assets/models/prop_weapon_forge.glb"):
-		add_child((load("res://assets/models/prop_weapon_forge.glb") as PackedScene).instantiate())
+	if ResourceLoader.exists("res://art/models/prop_weapon_forge.glb"):
+		add_child((load("res://art/models/prop_weapon_forge.glb") as PackedScene).instantiate())
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
 	var cs := CollisionShape3D.new()

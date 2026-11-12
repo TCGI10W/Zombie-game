@@ -12,8 +12,8 @@ var _running: bool = false
 
 func _ready() -> void:
 	add_to_group("wall_stations")
-	if ResourceLoader.exists("res://assets/models/prop_generator.glb"):
-		var m: Node3D = (load("res://assets/models/prop_generator.glb") as PackedScene).instantiate()
+	if ResourceLoader.exists("res://art/models/prop_generator.glb"):
+		var m: Node3D = (load("res://art/models/prop_generator.glb") as PackedScene).instantiate()
 		add_child(m)
 		_lever = m.find_child("Lever", true, false)
 		_status = m.find_child("StatusLight", true, false) as MeshInstance3D

@@ -13,8 +13,8 @@ var _static_player: AudioStreamPlayer3D
 
 func _ready() -> void:
 	add_to_group("wall_stations")
-	if ResourceLoader.exists("res://assets/models/prop_radio_console.glb"):
-		add_child((load("res://assets/models/prop_radio_console.glb") as PackedScene).instantiate())
+	if ResourceLoader.exists("res://art/models/prop_radio_console.glb"):
+		add_child((load("res://art/models/prop_radio_console.glb") as PackedScene).instantiate())
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
 	var cs := CollisionShape3D.new()

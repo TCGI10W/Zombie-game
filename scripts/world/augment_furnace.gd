@@ -12,8 +12,8 @@ var _flare: float = 0.0
 func _ready() -> void:
 	add_to_group("wall_stations")
 	add_to_group("augment_furnace")
-	if ResourceLoader.exists("res://assets/models/prop_augment_furnace.glb"):
-		add_child((load("res://assets/models/prop_augment_furnace.glb") as PackedScene).instantiate())
+	if ResourceLoader.exists("res://art/models/prop_augment_furnace.glb"):
+		add_child((load("res://art/models/prop_augment_furnace.glb") as PackedScene).instantiate())
 
 	var body := StaticBody3D.new()
 	body.collision_layer = 1

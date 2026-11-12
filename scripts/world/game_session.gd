@@ -70,6 +70,27 @@ func _ready() -> void:
 		add_child(warm)
 		warm.start(self)
 
+	# Scrapshift retro look: low-res pixel grid + colour quantize, below PostFX
+	if true:
+		var rl := CanvasLayer.new()
+		rl.name = "RetroFX"
+		rl.layer = -2
+		rl.visible = GameState.retro_enabled
+		add_child(rl)
+		var rr := ColorRect.new()
+		rr.set_anchors_preset(Control.PRESET_FULL_RECT)
+		rr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var rm := ShaderMaterial.new()
+		rm.shader = load("res://shaders/retro_screen.gdshader")
+		rm.set_shader_parameter("render_lines", float(GameState.retro_lines))
+		rr.material = rm
+		rl.add_child(rr)
+		# PSX vertex snap + affine warp (Scrapshift RetroViewport values)
+		var win := get_viewport().get_visible_rect().size
+		var frame := Vector2(GameState.retro_lines * win.x / maxf(win.y, 1.0), GameState.retro_lines)
+		RenderingServer.global_shader_parameter_set("ps1_snap", frame / 3.0 if GameState.retro_enabled else Vector2.ZERO)
+		RenderingServer.global_shader_parameter_set("ps1_warp", 0.3 if GameState.retro_enabled else 0.0)
+
 	# Camera finishing pass (grain, vignette, grade) under the HUD
 	if true:
 		var layer := CanvasLayer.new()

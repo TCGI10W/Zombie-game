@@ -3,7 +3,42 @@ extends Node
 var _cache: Dictionary = {}
 
 
-func get_pbr(prefix: String, uv_scale: float = 0.35, tint: Color = Color.WHITE, metallic: float = 0.0, rough_mult: float = 1.0, triplanar: bool = true) -> StandardMaterial3D:
+# New Blender-made PSX kit lives in res://art/textures; old folder is only a
+# fallback for sets not rebuilt yet (characters, weapons).
+func tex(prefix: String, kind: String) -> String:
+	var p := "res://art/textures/%s_%s.png" % [prefix, kind]
+	if ResourceLoader.exists(p) or kind != "albedo":
+		return p
+	return "res://assets/textures/%s_%s.png" % [prefix, kind]
+
+
+const PS1Shader := preload("res://shaders/ps1.gdshader")
+
+
+# Scrapshift PS1 surface: nearest-filtered world triplanar texture, banded
+# light, PSX wobble from the ps1_snap/ps1_warp globals. Used for map surfaces
+# while the retro look is on (read at load, so a toggle applies next match).
+func get_ps1(prefix: String, uv_scale: float, tint: Color, metallic: float, rough_mult: float) -> ShaderMaterial:
+	var key := "ps1_%s_%.2f_%s_%.2f_%.2f" % [prefix, uv_scale, tint.to_html(), metallic, rough_mult]
+	if _cache.has(key):
+		return _cache[key]
+	var mat := ShaderMaterial.new()
+	mat.shader = PS1Shader
+	var a_path := tex(prefix, "albedo")
+	if ResourceLoader.exists(a_path):
+		mat.set_shader_parameter("albedo_texture", load(a_path))
+	mat.set_shader_parameter("albedo_color", tint)
+	mat.set_shader_parameter("triplanar", true)
+	mat.set_shader_parameter("triplanar_scale", uv_scale)
+	mat.set_shader_parameter("surface_metallic", metallic)
+	mat.set_shader_parameter("surface_roughness", clampf(0.6 * rough_mult + 0.2, 0.0, 1.0))
+	_cache[key] = mat
+	return mat
+
+
+func get_pbr(prefix: String, uv_scale: float = 0.35, tint: Color = Color.WHITE, metallic: float = 0.0, rough_mult: float = 1.0, triplanar: bool = true) -> Material:
+	if triplanar and GameState.retro_enabled:
+		return get_ps1(prefix, uv_scale, tint, metallic, rough_mult)
 	var key := "%s_%.2f_%s_%.2f_%.2f_%s" % [prefix, uv_scale, tint.to_html(), metallic, rough_mult, str(triplanar)]
 	if _cache.has(key):
 		return _cache[key]
@@ -13,9 +48,9 @@ func get_pbr(prefix: String, uv_scale: float = 0.35, tint: Color = Color.WHITE, 
 	mat.metallic = metallic
 	mat.roughness = rough_mult
 
-	var a_path := "res://assets/textures/%s_albedo.png" % prefix
-	var n_path := "res://assets/textures/%s_normal.png" % prefix
-	var r_path := "res://assets/textures/%s_rough.png" % prefix
+	var a_path := tex(prefix, "albedo")
+	var n_path := tex(prefix, "normal")
+	var r_path := tex(prefix, "rough")
 
 	if ResourceLoader.exists(a_path):
 		mat.albedo_texture = load(a_path)
@@ -26,7 +61,7 @@ func get_pbr(prefix: String, uv_scale: float = 0.35, tint: Color = Color.WHITE, 
 	if ResourceLoader.exists(r_path):
 		mat.roughness_texture = load(r_path)
 
-	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	if triplanar:
 		mat.uv1_triplanar = true
 		mat.uv1_world_triplanar = true
@@ -48,6 +83,8 @@ const WarnShader := preload("res://assets/shaders/warn_zone.gdshader")
 # optional rain puddles. `rotate_tiles` also turns the texture copies in 90
 # degree steps - only for surfaces without a direction (ground, floors).
 func get_world(prefix: String, uv_scale: float = 0.3, tint: Color = Color.WHITE, metallic: float = 0.0, rough_mult: float = 1.0, wetness: float = 0.0, grime: float = 0.45, rotate_tiles: bool = false) -> ShaderMaterial:
+	if GameState.retro_enabled:
+		return get_ps1(prefix, uv_scale, tint, metallic, rough_mult)
 	var key := "world_%s_%.2f_%s_%.2f_%.2f_%.2f_%.2f_%s" % [prefix, uv_scale, tint.to_html(), metallic, rough_mult, wetness, grime, str(rotate_tiles)]
 	if _cache.has(key):
 		return _cache[key]
@@ -55,11 +92,11 @@ func get_world(prefix: String, uv_scale: float = 0.3, tint: Color = Color.WHITE,
 	mat.shader = WorldShader
 	mat.set_shader_parameter("variation_rotate", rotate_tiles)
 	for pair in [["albedo_tex", "albedo"], ["normal_tex", "normal"], ["rough_tex", "rough"], ["height_tex", "height"]]:
-		var path := "res://assets/textures/%s_%s.png" % [prefix, pair[1]]
+		var path := tex(prefix, pair[1])
 		if ResourceLoader.exists(path):
 			mat.set_shader_parameter(pair[0], load(path))
-	if ResourceLoader.exists("res://assets/textures/macro_noise.png"):
-		mat.set_shader_parameter("macro_tex", load("res://assets/textures/macro_noise.png"))
+	if ResourceLoader.exists("res://art/textures/macro_noise.png"):
+		mat.set_shader_parameter("macro_tex", load("res://art/textures/macro_noise.png"))
 	mat.set_shader_parameter("tint", tint)
 	mat.set_shader_parameter("uv_scale", uv_scale)
 	mat.set_shader_parameter("metallic_value", metallic)
@@ -80,9 +117,9 @@ func get_box_strip(prefix: String, strip: int, strips: int, tint: Color = Color.
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = tint
 	mat.roughness = rough_mult
-	var a_path := "res://assets/textures/%s_albedo.png" % prefix
-	var n_path := "res://assets/textures/%s_normal.png" % prefix
-	var r_path := "res://assets/textures/%s_rough.png" % prefix
+	var a_path := tex(prefix, "albedo")
+	var n_path := tex(prefix, "normal")
+	var r_path := tex(prefix, "rough")
 	if ResourceLoader.exists(a_path):
 		mat.albedo_texture = load(a_path)
 	if ResourceLoader.exists(n_path):
@@ -90,7 +127,7 @@ func get_box_strip(prefix: String, strip: int, strips: int, tint: Color = Color.
 		mat.normal_texture = load(n_path)
 	if ResourceLoader.exists(r_path):
 		mat.roughness_texture = load(r_path)
-	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.uv1_scale = Vector3(3.0, 2.0 / float(strips), 1.0)
 	mat.uv1_offset = Vector3(0.0, float(strip) / float(strips), 0.0)
 	_cache[key] = mat

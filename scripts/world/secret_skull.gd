@@ -17,8 +17,8 @@ func _ready() -> void:
 	cs.shape = sp
 	cs.position.y = 0.14
 	add_child(cs)
-	if ResourceLoader.exists("res://assets/models/prop_skull.glb"):
-		_visual = (load("res://assets/models/prop_skull.glb") as PackedScene).instantiate()
+	if ResourceLoader.exists("res://art/models/prop_skull.glb"):
+		_visual = (load("res://art/models/prop_skull.glb") as PackedScene).instantiate()
 		_visual.scale = Vector3.ONE * 1.3
 		add_child(_visual)
 	_light = OmniLight3D.new()

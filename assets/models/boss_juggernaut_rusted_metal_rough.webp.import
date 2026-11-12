@@ -2,32 +2,28 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ba7fseresb8ha"
-path.s3tc="res://.godot/imported/boss_juggernaut_rusted_metal_rough.webp-ff5bae0d66879b044e80cf6704fe55d6.s3tc.ctex"
+uid="uid://wrcu4vgprsm1"
+path="res://.godot/imported/boss_juggernaut_rusted_metal_rough.webp-ff5bae0d66879b044e80cf6704fe55d6.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
-"vram_texture": true
-}
-generator_parameters={
-"md5": "1ce1e59734b4bdae4f921350d4f0cf90"
+"vram_texture": false
 }
 
 [deps]
 
 source_file="res://assets/models/boss_juggernaut_rusted_metal_rough.webp"
-dest_files=["res://.godot/imported/boss_juggernaut_rusted_metal_rough.webp-ff5bae0d66879b044e80cf6704fe55d6.s3tc.ctex"]
+dest_files=["res://.godot/imported/boss_juggernaut_rusted_metal_rough.webp-ff5bae0d66879b044e80cf6704fe55d6.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=2
-compress/channel_pack=1
-mipmaps/generate=true
+compress/normal_map=0
+compress/channel_pack=0
+mipmaps/generate=false
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""

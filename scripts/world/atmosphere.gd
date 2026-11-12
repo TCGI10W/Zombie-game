@@ -154,9 +154,9 @@ func _build_rain() -> void:
 func _build_fog() -> void:
 	if _env:
 		_env.fog_enabled = true
-		_env.fog_light_color = Color(0.07, 0.085, 0.12)
+		_env.fog_light_color = Color(0.58, 0.60, 0.58)
 		_env.fog_light_energy = 1.0
-		_env.fog_sky_affect = 0.35
+		_env.fog_sky_affect = 0.6
 		_env.fog_density = 0.0035
 	for f in [[Vector3(38, 0.4, -40), Vector3(34, 3.0, 30), 0.32, Color(0.5, 0.58, 0.56)],
 			[Vector3(-20, 0.3, 25), Vector3(54, 2.4, 18), 0.3, Color(0.6, 0.62, 0.7)],
