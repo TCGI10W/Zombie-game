@@ -41,7 +41,8 @@ func _ready() -> void:
 	add_child(weather)
 	weather.setup(arena.world_env)
 	wave_mgr.weather = weather
-	var atmo: Node3D = (load("res://scripts/world/atmosphere.gd") as GDScript).new()
+	var atmo_path := "res://scripts/world/open_world/outbreak_atmosphere.gd" if GameState.map_mode == "outbreak" else "res://scripts/world/atmosphere.gd"
+	var atmo: Node3D = (load(atmo_path) as GDScript).new()
 	atmo.name = "Atmosphere"
 	add_child(atmo)
 	atmo.setup(arena, weather)
