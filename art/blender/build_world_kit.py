@@ -397,8 +397,6 @@ def main():
     for fn in (p_gas_pump, p_gas_canopy, p_silo, p_water_tower, p_hay_bale, p_hay_stack, p_power_pylon,
                p_utility_pole, p_fence_wood, p_fence_metal, p_transformer, p_bus_stop, p_billboard, p_tractor, p_mailbox):
         roots.append(fn())
-    roots.append(vehicle("vehicle_pickup", K.mat("paint_olive"), 5.0, 1.95, (-.1, 1.4), (-2.4, -.1), .42, .86, 1.6))
-    roots.append(vehicle("vehicle_sedan", K.mat("siding_blue"), 4.4, 1.8, (-1.3, 1.0), None, .36, .8, 1.35))
     for r in roots:
         K.export(r)
     x = 0.0

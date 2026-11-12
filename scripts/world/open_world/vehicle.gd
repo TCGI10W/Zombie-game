@@ -11,8 +11,8 @@ extends RigidBody3D
 
 @export var model := "truck"
 @export var title := "SS-07 TRUCK"
-@export var engine_force := 9000.0
-@export var max_speed := 24.0  # m/s (~86 km/h)
+@export var engine_force := 13500.0
+@export var max_speed := 33.0  # m/s (~120 km/h)
 
 const SPRING := 42000.0
 const DAMP := 3800.0
@@ -44,16 +44,14 @@ func _ready() -> void:
 	add_to_group("wall_stations")
 	add_to_group("vehicles")
 	collision_layer = 1
-	collision_mask = 1 | 2 | 4
-	contact_monitor = true
-	max_contacts_reported = 6
-	body_entered.connect(_on_hit)
+	collision_mask = 1  # world only: zombies never stop the truck, the ram sensor handles them
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	angular_damp = 1.2
 	if model == "truck":
 		_setup_truck()
 	else:
 		_setup_kit_car()
+	_build_ram()
 
 
 func _setup_truck() -> void:
@@ -231,6 +229,7 @@ func _physics_process(delta: float) -> void:
 		global_transform = t
 		angular_velocity = Vector3.ZERO
 	_engine_sound(absf(speed), throttle)
+	_ram_tick(delta)
 	for b in _hit_cd.keys():
 		_hit_cd[b] -= delta
 		if _hit_cd[b] <= 0.0:
@@ -257,6 +256,62 @@ func _engine_sound(speed: float, throttle: float) -> void:
 		_phase = fmod(_phase + rpm / 22050.0, 1.0)
 		var s := (0.5 if _phase < 0.2 else -0.13) * (0.2 if driver == null else 0.55)
 		pb.push_frame(Vector2(s, s))
+
+
+# ---------------------------------------------------------------- ramming
+# A sensor box over the hull (slightly bigger) catches every zombie the truck
+# touches. Fast: a hit that scales with speed, the zombie is flung off the
+# bumper (or killed outright). Slow: rolling over them grinds them down and
+# shoves them aside, so a horde can be pushed through but not parked on.
+var _ram: Area3D
+
+
+func _build_ram() -> void:
+	_ram = Area3D.new()
+	_ram.collision_layer = 0
+	_ram.collision_mask = 4  # enemies
+	_ram.monitorable = false
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(2.9, 2.2, body_length + 0.6)
+	cs.shape = bs
+	cs.position = Vector3(0, 1.1, 0)
+	_ram.add_child(cs)
+	add_child(_ram)
+
+
+func _ram_tick(_delta: float) -> void:
+	if _ram == null:
+		return
+	var vel := linear_velocity
+	var spd := vel.length()
+	for body in _ram.get_overlapping_bodies():
+		if not body.is_in_group("enemies") or _hit_cd.has(body) or not body.has_method("take_damage"):
+			continue
+		if body.get("is_dead") == true:
+			continue
+		var rel: Vector3 = body.global_position - global_position
+		var ahead := rel.dot(vel.normalized()) if spd > 0.5 else 0.0
+		if spd >= 6.0 and ahead > -1.0:
+			# full-speed impact: damage grows with the square of speed
+			_hit_cd[body] = 0.5
+			var dmg := 25.0 + spd * spd * 1.6
+			# the ragdoll inherits this velocity, so a kill is thrown off the bumper
+			var side := global_basis.x * signf(rel.dot(global_basis.x)) * spd * 0.35
+			if body is CharacterBody3D:
+				(body as CharacterBody3D).velocity = vel * 1.1 + side + Vector3.UP * minf(3.0 + spd * 0.3, 9.0)
+			body.take_damage(dmg, body.global_position + Vector3(0, 1, 0), true, "vehicle")
+			if body.get("is_dead") != true and body.has_method("apply_stun"):
+				body.apply_stun(1.2)
+			linear_velocity *= 0.985
+			GameState.play_sfx("gore_splat", -2.0, randf_range(0.8, 1.0))
+		elif spd >= 1.5:
+			# rolling over: grind, and shove them out from under the wheels
+			_hit_cd[body] = 0.35
+			body.take_damage(10.0 + spd * 6.0, body.global_position, true, "vehicle")
+			if body is CharacterBody3D and body.get("is_dead") != true:
+				var out := Vector3(rel.x, 0, rel.z).normalized() * 4.0
+				(body as CharacterBody3D).velocity = out + Vector3.UP * 2.0
 
 
 func _on_hit(body: Node) -> void:

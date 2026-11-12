@@ -188,12 +188,10 @@ func _building(r: Rect2, style: String, zone: String, doors: Array, wins: Array,
 			var key := "%s%d" % [side, slot]
 			var rot: float = SIDE_ROT[side]
 			if special.has(key):
+				# Outbreak rules (Cold War's open maps): no buy doors, no
+				# barricades. Doorways are just open, windows are glazed.
 				var kind: String = special[key][0]
-				_kit("wall_%s_%s" % [style, kind], p, rot)
-				if kind == "window":
-					_add_window(p, SIDE_OUT[side], zone if zone != "" else "wilds")
-				elif int(special[key][1]) == -1:
-					_add_door(p, rot, zone, zone_cost)
+				_kit("wall_%s_%s" % [style, "door" if kind == "door" else "glass"], p, rot)
 			else:
 				_kit("wall_%s_glass" % style if slot % 2 == 1 else "wall_%s" % style, p, rot)
 	for c in [r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)]:
@@ -230,7 +228,7 @@ func _building(r: Rect2, style: String, zone: String, doors: Array, wins: Array,
 		zone_polys[zone] = [PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)])]
 		boss_points[zone] = [Vector3(r.get_center().x, 0.1, r.get_center().y)]
 		if not zones_open.has(zone):
-			zones_open[zone] = false
+			zones_open[zone] = true
 	# ceiling lamps run on emergency red until the power is on
 	var lc := r.get_center()
 	_add_lamp(Vector3(lc.x, 3.85, lc.y), Color(1.0, 0.9, 0.75), 2.2, false)
@@ -295,7 +293,8 @@ func _build_depot() -> void:
 	_prop("prop_car_wreck", Vector3(28, 0, 16), 70.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
 	_add_crate_stack(Vector3(-30, 0, 18), 2)
 	_add_vehicle("truck", "SS-07 TRUCK", Vector3(-22, 0.4, -18), 90.0)
-	_add_vehicle("vehicle_sedan", "SEDAN", Vector3(28, 0.4, -6), 0.0)
+	_add_vehicle("truck", "SS-07 TRUCK", Vector3(-262, 0.4, 168), 0.0)
+	_add_vehicle("truck", "SS-07 TRUCK", Vector3(-238, 0.4, -240), 180.0)
 
 
 func _build_farm() -> void:
@@ -516,15 +515,28 @@ func location_at(p: Vector3) -> String:
 # A walkable point 26-44 m from the focus (zombies jog in from the dark).
 func open_spawn_point(focus: Vector3, near: float = 26.0, far: float = 44.0) -> Vector3:
 	var map := get_world_3d().navigation_map
-	for i in range(20):
+	# Outbreak style: out of sight (behind the camera when we can), on the
+	# ground navmesh, and with a real path to the player (no roofs, no
+	# sealed shop interiors, no islands).
+	var cam := get_viewport().get_camera_3d()
+	var view := -cam.global_basis.z if cam else Vector3.ZERO
+	view.y = 0.0
+	var goal := NavigationServer3D.map_get_closest_point(map, focus)
+	for i in range(24):
 		var ang := randf() * TAU
+		var dir := Vector3(cos(ang), 0.0, sin(ang))
+		if i < 16 and view.length() > 0.1 and dir.dot(view.normalized()) > 0.35:
+			continue
 		var d := randf_range(near, far)
-		var c := focus + Vector3(cos(ang) * d, 0.0, sin(ang) * d)
+		var c := focus + dir * d
 		c.y = terrain.height_at(c.x, c.z)
 		var s := NavigationServer3D.map_get_closest_point(map, c)
-		if s == Vector3.ZERO or s.distance_to(c) > 4.0 or s.distance_to(focus) < near * 0.8:
+		if s == Vector3.ZERO or s.distance_to(c) > 3.0 or s.distance_to(focus) < near * 0.8:
 			continue
-		if not is_zone_open(zone_at(s)):
+		if absf(s.y - c.y) > 1.5:
+			continue  # a roof or a ledge, not the ground
+		var path := NavigationServer3D.map_get_path(map, s, goal, true)
+		if path.is_empty() or path[path.size() - 1].distance_to(goal) > 2.5:
 			continue
 		return s + Vector3(0, 0.1, 0)
 	var c2 := focus + Vector3(near, 0, 0)
@@ -611,7 +623,32 @@ func _bake_tile(t: Vector2i, async: bool) -> void:
 		region.navigation_mesh = nm
 
 
-func _physics_process(_delta: float) -> void:
+var _rescue_t := 0.0
+
+
+# Anything that slips under the land (a shove off a ledge, a bad spawn) is
+# put back on the surface instead of falling forever.
+func _rescue_fallen(delta: float) -> void:
+	_rescue_t -= delta
+	if _rescue_t > 0.0:
+		return
+	_rescue_t = 1.0
+	for n in get_tree().get_nodes_in_group("enemies") + get_tree().get_nodes_in_group("vehicles") + get_tree().get_nodes_in_group("player"):
+		var b := n as Node3D
+		if b == null:
+			continue
+		var g := terrain.height_at(b.global_position.x, b.global_position.z)
+		if b.global_position.y < g - 3.0:
+			b.global_position = Vector3(b.global_position.x, g + 1.0, b.global_position.z)
+			if b is CharacterBody3D:
+				(b as CharacterBody3D).velocity = Vector3.ZERO
+			elif b is RigidBody3D:
+				(b as RigidBody3D).linear_velocity = Vector3.ZERO
+
+
+func _physics_process(delta: float) -> void:
+	if terrain:
+		_rescue_fallen(delta)
 	if _nav_source == null or _nav_busy:
 		return
 	if _nav_dirty:
