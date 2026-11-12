@@ -321,6 +321,37 @@ def build_textures():
     c = ramp(fbm(470) * .3 + (np.abs(XX - YY) < 12) * .3, [(0, (.04, .05, .06)), (1, (.2, .25, .27))])
     c[frame] = ramp(fbm(471)[frame], [(0, (.4, .38, .34)), (1, (.6, .58, .52))])
     tex("window", c, frame * .6, 1.6)
+    # ---- interiors + street dressing
+    weave2 = (((XX // 3) + (YY // 3)) % 2) * .15
+    tex("fabric", ramp(fbm(500) * .6 + weave2, [(0, (.16, .2, .24)), (1, (.32, .38, .42))]), weave2 + fbm(501) * .2, 1.2)
+    tex("fabric_red", ramp(fbm(502) * .6 + weave2, [(0, (.28, .07, .06)), (1, (.5, .14, .1))]), weave2 + fbm(503) * .2, 1.2)
+    tape = np.abs(YY - 64) < 7
+    c = ramp(fbm(510) * .6 + white(511) * .2, [(0, (.42, .31, .18)), (1, (.6, .46, .28))])
+    c[tape] = c[tape] * .7 + np.array([.55, .5, .4]) * .3
+    tex("cardboard", c, tape * .2 + fbm(512) * .2, 1.2)
+    # shop goods: rows of little packets/cans in faded colours, shelf lips between
+    ids, edge = cells(8, 4, 0.3, seed=12)
+    hue = per_cell(ids, 520)
+    pal = np.array([[.55, .15, .1], [.15, .3, .5], [.6, .5, .15], [.2, .4, .2], [.6, .55, .5], [.4, .2, .4]])
+    c = pal[(hue * 6).astype(int) % 6] * (.6 + fbm(521)[..., None] * .5)
+    lip = (YY % 32) > 28
+    gap = edge < 1.2
+    c[gap] *= .3
+    c[lip] = (.35, .36, .37)
+    empty = per_cell(ids, 522) > .72  # looted gaps
+    c[empty & ~lip] = (.05, .05, .05)
+    tex("goods", c, (~gap) * .4 + lip * .3, 1.6)
+    tex("chalkboard", mix(ramp(fbm(530), [(0, (.08, .13, .1)), (1, (.15, .22, .17))]), np.array([.6, .62, .58]),
+                          (cracks(531, .02, 8) > .6) * .7 + ((YY % 24 < 1) & (XX > 10) & (XX < 110)) * .4))
+    tex("linen", ramp(fbm(540) * .5 + weave2, [(0, (.5, .49, .44)), (1, (.7, .69, .63))]), weave2, 1.0)
+    rows_c = np.sin(XX / N * np.pi * 2 * 8) * .5 + .5
+    tex("crops", ramp(rows_c * .5 + fbm(550, 8) * .5, [(0, (.15, .14, .06)), (.5, (.32, .3, .12)), (1, (.48, .42, .2))]), rows_c, 1.6)
+    leaf = white(560)
+    tex("foliage", ramp(fbm(561, 8) * .6 + leaf * .4, [(0, (.05, .08, .04)), (1, (.2, .25, .1))]), leaf * .6 + fbm(562) * .4, 2.0, 2.0)
+    rack = ((XX % 32) < 3) | ((YY % 32) < 3)
+    c = ramp(fbm(570) * .5, [(0, (.3, .32, .34)), (1, (.5, .52, .54))])
+    c[~rack] *= .55
+    tex("shelf_metal", c, rack * .6, 1.4)
     # world-shader macro variation map (greyscale, 256)
     m = fbm(300, 2, 5, 256)
     TEX["macro_noise"] = np.repeat(m[..., None], 3, 2)

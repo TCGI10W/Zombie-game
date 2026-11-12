@@ -37,7 +37,7 @@ func _ready() -> void:
 	zone_names = {"wilds": "THE COUNTY", "diner": "DINER"}
 	boss_points = {}
 	zone_polys = {}
-	player_spawn = Vector3(14.0, 0.3, -10.0)
+	player_spawn = Vector3(14.0, 0.3, -15.0)  # inside the depot diner
 	lz_pos = Vector3(-232.0, 0.0, -226.0)
 	m_conc = MaterialLib.get_world("concrete", 0.5, Color(0.8, 0.8, 0.82), 0.0, 1.0, 0.0, 0.5)
 	m_dark_conc = MaterialLib.get_world("concrete", 0.5, Color(0.5, 0.51, 0.55), 0.0, 1.0, 0.0, 0.4)
@@ -48,14 +48,13 @@ func _ready() -> void:
 	m_fence = m_metal
 	_build_environment()
 	world_env.volumetric_fog_density = 0.009
+	_make_locations()
 	_layout_land()
 	terrain.build()
 	_build_roads()
-	_build_depot()
-	_build_farm()
-	_build_village()
-	_build_town()
-	_build_plant()
+	for loc in _locs:
+		loc.build()
+		_register(loc.id, loc.title, Vector3(loc.center.x, 0, loc.center.y))
 	_build_wilds()
 	_psx_subdivide(self)
 	print("OpenWorld built in %d ms" % (Time.get_ticks_msec() - t0))
@@ -63,29 +62,53 @@ func _ready() -> void:
 
 
 # ---------------------------------------------------------------- land + roads
+# Roads stop at each place's edge (or join its own street) so no road ever
+# runs through a building. [points, width, texture]
 const ROADS := [
-	# [points, width, texture]
-	[[Vector2(0, 0), Vector2(120, 100), Vector2(260, 220)], 10.0, "asphalt"],
-	[[Vector2(260, 220), Vector2(330, 0), Vector2(300, -240)], 10.0, "asphalt"],
-	[[Vector2(230, -240), Vector2(372, -240)], 12.0, "asphalt"],
-	[[Vector2(300, -240), Vector2(0, -280), Vector2(-260, -260)], 10.0, "asphalt"],
-	[[Vector2(-260, -260), Vector2(-330, -40), Vector2(-280, 160)], 7.0, "dirt_road"],
-	[[Vector2(-280, 160), Vector2(-120, 90), Vector2(0, 0)], 7.0, "dirt_road"],
-	[[Vector2(0, 0), Vector2(0, -280)], 8.0, "dirt_road"],
+	[[Vector2(-44, 30), Vector2(44, 30)], 10.0, "asphalt"],                                   # depot street
+	[[Vector2(44, 30), Vector2(120, 100), Vector2(236, 214)], 10.0, "asphalt"],              # -> checkpoint -> village
+	[[Vector2(214, 220), Vector2(310, 220)], 8.0, "asphalt"],                                 # village street
+	[[Vector2(270, 216), Vector2(275, 180), Vector2(330, 0), Vector2(303, -190), Vector2(303, -232)], 10.0, "asphalt"],
+	[[Vector2(230, -240), Vector2(372, -240)], 12.0, "asphalt"],                              # Greymill main street
+	[[Vector2(236, -244), Vector2(0, -280), Vector2(-208, -262)], 10.0, "asphalt"],           # town -> plant
+	[[Vector2(-270, -208), Vector2(-330, -40), Vector2(-287, 112), Vector2(-284, 150)], 7.0, "dirt_road"],
+	[[Vector2(-230, 153), Vector2(-150, 100), Vector2(-120, 90), Vector2(-44, 30)], 7.0, "dirt_road"],
+	[[Vector2(0, -34), Vector2(0, -280)], 8.0, "dirt_road"],
+	[[Vector2(0, -112), Vector2(104, -112)], 6.0, "dirt_road"],                               # campground spur
 ]
-const PADS := [
-	Rect2(-44, -34, 88, 70),      # depot
-	Rect2(-330, 112, 100, 96),    # farm
-	Rect2(214, 172, 96, 100),     # village
-	Rect2(236, -290, 136, 100),   # town
-	Rect2(-312, -312, 104, 104),  # power plant
+const LOCATION_SCRIPTS := [
+	"res://scripts/world/open_world/locations/loc_depot.gd",
+	"res://scripts/world/open_world/locations/loc_farm.gd",
+	"res://scripts/world/open_world/locations/loc_village.gd",
+	"res://scripts/world/open_world/locations/loc_town.gd",
+	"res://scripts/world/open_world/locations/loc_plant.gd",
+	"res://scripts/world/open_world/locations/loc_checkpoint.gd",
+	"res://scripts/world/open_world/locations/loc_trailer_park.gd",
+	"res://scripts/world/open_world/locations/loc_campground.gd",
 ]
+var _locs: Array = []
+var pads: Array[Rect2] = []
+
+
+func _make_locations() -> void:
+	for path in LOCATION_SCRIPTS:
+		var loc: OWLocation = (load(path) as GDScript).new()
+		loc.w = self
+		_locs.append(loc)
+		pads.append(loc.pad)
+
+
+func get_location(lid: String) -> OWLocation:
+	for loc in _locs:
+		if loc.id == lid:
+			return loc
+	return null
 
 
 func _layout_land() -> void:
 	terrain = OpenTerrain.new()
 	terrain.name = "Terrain"
-	for r in PADS:
+	for r in pads:
 		terrain.add_flat(r)
 	for rd in ROADS:
 		terrain.add_road(PackedVector2Array(rd[0]), rd[1])
@@ -152,7 +175,25 @@ func _kit(name: String, pos: Vector3, rot_deg: float = 0.0, scale_f: float = 1.0
 	if scale_f != 1.0:
 		inst.scale = Vector3.ONE * scale_f
 	add_child(inst)
+	# small dressing fades out with distance (the fog hides it anyway), so a
+	# dense map costs nothing for the places you are not standing in
+	var vis := _vis_range(name)
+	if vis > 0.0:
+		for g in inst.find_children("*", "GeometryInstance3D", true, false):
+			(g as GeometryInstance3D).visibility_range_end = vis
+			(g as GeometryInstance3D).visibility_range_end_margin = 6.0
 	return inst
+
+
+func _vis_range(name: String) -> float:
+	if name.begins_with("int_"):
+		return 55.0
+	if name in ["ext_bush", "ext_corn", "prop_mailbox", "ext_trash_can", "ext_hydrant", "ext_campfire", "ext_picnic_table",
+			"prop_hay_bale", "ext_stop_sign", "prop_barrel", "prop_tire_stack", "ext_sign_board", "ext_awning"]:
+		return 110.0
+	if name in ["ext_pine", "prop_dead_tree", "prop_rubble", "prop_utility_pole", "prop_fence_wood", "prop_fence_metal"]:
+		return 240.0
+	return 0.0
 
 
 const SIDE_ROT := {"n": 0.0, "s": 180.0, "w": 90.0, "e": -90.0}
@@ -266,184 +307,39 @@ func _register(id: String, title: String, center: Vector3) -> void:
 
 
 # ---------------------------------------------------------------- locations
-func _build_depot() -> void:
-	_register("depot", "BUS DEPOT", Vector3.ZERO)
-	_slab(Rect2(-36, -26, 72, 52))
-	# gas station
-	_kit("prop_gas_canopy", Vector3(-14, 0, -8))
-	for x in [-17.0, -11.0]:
-		_kit("prop_gas_pump", Vector3(x, 0, -8))
-	_kit("prop_billboard", Vector3(-30, 0, -24), 20.0)
-	# diner: start room (open from the start), two windows, wall buys
-	var diner := Rect2(8, -18, 16, 12)
-	zone_names["diner"] = "DINER"
-	_building(diner, "plaster", "diner", [["s", 1, 0]], [["n", 1], ["e", 1]], "flat", "tiles")
-	_buy(diner, "w", 1, "weapon", "smg", "KURZ-9 SMG", 1000, 500)
-	_buy(diner, "n", 3, "ammo_box", "", "AMMO CACHE", 450, 0)
-	# bus garage: buyable, holds the mystery crate
-	var garage := Rect2(-4, 8, 20, 12)
-	zone_names["garage"] = "BUS GARAGE"
-	_building(garage, "metal", "garage", [["n", 2, -1]], [["s", 1], ["s", 3], ["w", 1]], "tin", "concrete", 750)
-	_place(CrateScript, Vector3(6, 0, 17.4), 180.0)
-	_buy(garage, "e", 1, "weapon", "rifle", "COMMANDO M14A", 1200, 600)
-	_place(FurnaceScript, Vector3(-24, 0, 10), 90.0)
-	_kit("prop_bus_stop", Vector3(2, 0, -24), 180.0)
-	for p in [Vector3(-30, 0, 8), Vector3(26, 0, 4), Vector3(0, 0, -28)]:
-		_post_light(p, Color(1.0, 0.82, 0.55), 2.0, 14.0)
-	_prop("prop_car_wreck", Vector3(28, 0, 16), 70.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
-	_add_crate_stack(Vector3(-30, 0, 18), 2)
-	_add_vehicle("truck", "SS-07 TRUCK", Vector3(-22, 0.4, -18), 90.0)
-	_add_vehicle("truck", "SS-07 TRUCK", Vector3(-262, 0.4, 168), 0.0)
-	_add_vehicle("truck", "SS-07 TRUCK", Vector3(-238, 0.4, -240), 180.0)
-
-
-func _build_farm() -> void:
-	var o := Vector2(-280, 160)
-	_register("farm", "OLD FARM", Vector3(o.x, 0, o.y))
-	var house := Rect2(o.x - 30, o.y - 36, 12, 8)
-	zone_names["farmhouse"] = "FARMHOUSE"
-	_building(house, "siding_white", "farmhouse", [["s", 1, -1]], [["n", 1], ["w", 0], ["e", 1]], "gable", "wood", 1000)
-	_buy(house, "n", 0, "weapon", "revolver", ".44 HAND CANNON", 1750, 875)
-	_skull(Vector3(house.position.x + 1.2, 2.3, house.position.y + 6.5), 90.0)
-	var barn := Rect2(o.x + 4, o.y - 30, 12, 20)
-	zone_names["barn"] = "BARN"
-	_building(barn, "siding_red", "barn", [["w", 2, -1]], [["e", 1], ["e", 3], ["n", 1], ["s", 1]], "tin", "wood", 1250)
-	_buy(barn, "e", 2, "weapon", "shotgun", "TRENCH-12 PUMP", 1500, 750)
-	_place(SecondWindScript, Vector3(barn.position.x + 6, 0, barn.end.y - 1.2), 180.0)
-	_kit("prop_silo", Vector3(o.x + 28, 0, o.y - 26))
-	_kit("prop_water_tower", Vector3(o.x - 40, 0, o.y + 4))
-	_kit("prop_tractor", Vector3(o.x - 6, 0, o.y - 8), 35.0)
-	for p in [Vector2(-8, 8), Vector2(-4, 10), Vector2(24, 2), Vector2(26, 6), Vector2(-14, -16)]:
-		_kit("prop_hay_bale", Vector3(o.x + p.x, 0, o.y + p.y), p.x * 13.0)
-	_kit("prop_hay_stack", Vector3(o.x + 20, 0, o.y - 8), 10.0)
-	# fenced fields south of the yard
-	_fence_line(o + Vector2(-44, 12), o + Vector2(36, 12))
-	_fence_line(o + Vector2(-44, 12), o + Vector2(-44, 44))
-	_fence_line(o + Vector2(36, 12), o + Vector2(36, 44))
-	_kit("prop_mailbox", Vector3(o.x - 34, 0, o.y - 22))
-	_post_light(Vector3(o.x - 10, 0, o.y - 24), Color(1.0, 0.8, 0.5), 1.8, 14.0)
-
-
-func _build_village() -> void:
-	var o := Vector2(260, 220)
-	_register("village", "HOLLOW CREEK", Vector3(o.x, 0, o.y))
-	var styles := ["siding_white", "siding_blue", "siding_red", "plaster"]
-	var homes := [Rect2(o.x - 40, o.y - 36, 8, 12), Rect2(o.x - 22, o.y - 36, 8, 12), Rect2(o.x + 14, o.y - 36, 8, 12),
-		Rect2(o.x - 40, o.y + 16, 8, 12), Rect2(o.x + 14, o.y + 16, 8, 12)]
-	for i in range(homes.size()):
-		var r: Rect2 = homes[i]
-		var side := "s" if r.position.y < o.y else "n"
-		if i == 1:
-			zone_names["house_a"] = "GREEN HOUSE"
-			_building(r, styles[i % 4], "house_a", [[side, 0, -1]], [["w", 1], ["e", 1]], "gable", "wood", 750)
-			_buy(r, "w", 2, "ammo_box", "", "AMMO CACHE", 450, 0)
-		elif i == 3:
-			zone_names["house_b"] = "CORNER HOUSE"
-			_building(r, styles[i % 4], "house_b", [[side, 1, -1]], [["e", 0], ["e", 2]], "gable", "wood", 1000)
-			_skull(Vector3(r.get_center().x, 0.9, r.get_center().y), 45.0)
-		else:
-			_building(r, styles[i % 4], "", [[side, i % 2, 0]], [], "gable", "wood")
-		_kit("prop_mailbox", Vector3(r.get_center().x + 3, 0, r.end.y + 2 if side == "s" else r.position.y - 2))
-	var school := Rect2(o.x + 34, o.y - 8, 8, 16)
-	zone_names["school"] = "SCHOOLHOUSE"
-	_building(school, "siding_red", "school", [["w", 1, -1]], [["e", 1], ["e", 2], ["n", 1]], "gable", "wood", 1500)
-	_buy(school, "e", 3, "weapon", "sniper", "LONGSHOT .50", 3500, 1750)
-	# fenced schoolyard: a bench and an old bus stop
-	_fence_line(o + Vector2(46, -10), o + Vector2(58, -10))
-	_fence_line(o + Vector2(58, -10), o + Vector2(58, 10))
-	_fence_line(o + Vector2(46, 10), o + Vector2(58, 10))
-	_prop("prop_bench", Vector3(o.x + 52, 0, o.y - 4), 90.0, Vector3.ZERO, Vector3.ZERO)
-	_kit("prop_bus_stop", Vector3(o.x + 50, 0, o.y + 6), 0.0)
-	for p in [Vector2(-10, -8), Vector2(10, 8), Vector2(-28, 2)]:
-		_post_light(Vector3(o.x + p.x, 0, o.y + p.y), Color(1.0, 0.82, 0.55), 1.8, 13.0)
-	_prop("prop_bench", Vector3(o.x, 0, o.y - 6), 0.0, Vector3.ZERO, Vector3.ZERO)
-	_prop("prop_car_wreck", Vector3(o.x - 4, 0, o.y + 6), 110.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
-
-
-func _build_town() -> void:
-	var z0 := -240.0
-	_register("town", "GREYMILL", Vector3(300, 0, z0))
-	_slab(Rect2(236, z0 - 12, 136, 4), "concrete_floor")  # sidewalks
-	_slab(Rect2(236, z0 + 8, 136, 4), "concrete_floor")
-	var styles := ["brick", "concrete", "brick", "plaster"]
-	for k in range(8):
-		var north := k < 4
-		var i := k % 4
-		var x := 244.0 + i * 30.0
-		var r := Rect2(x, z0 - 28, 16, 16) if north else Rect2(x + 6, z0 + 12, 16, 16)
-		var side := "s" if north else "n"
-		var style: String = styles[(k + 1) % 4]
-		if k == 0:
-			zone_names["store"] = "GENERAL STORE"
-			_building(r, style, "store", [[side, 1, -1]], [["w", 1], ["w", 2], ["n", 2]], "flat", "tiles", 1250)
-			_buy(r, "e", 1, "weapon", "rifle", "COMMANDO M14A", 1200, 600)
-			_buy(r, "n", 1, "ammo_box", "", "AMMO CACHE", 450, 0)
-		elif k == 2:
-			zone_names["police"] = "POLICE STATION"
-			_building(r, "concrete", "police", [[side, 2, -1]], [["e", 1], ["e", 2], ["n", 1]], "flat", "tiles", 2000)
-			_buy(r, "n", 2, "weapon", "lmg", "RAZORBACK LMG", 3000, 1500)
-			_buy(r, "w", 2, "ammo_box", "", "AMMO CACHE", 450, 0)
-		elif k == 5:
-			zone_names["bar"] = "RUSTY NAIL BAR"
-			_building(r, style, "bar", [[side, 1, -1]], [["s", 1], ["e", 2]], "flat", "wood", 1000)
-			_buy(r, "e", 1, "forge", "", "WEAPON FORGE", 5000, 0)
-			_place(SecondWindScript, Vector3(r.position.x + 1.2, 0, r.get_center().y), 90.0)
-		else:
-			_building(r, style, "", [], [], "flat")
-	_place(load("res://scripts/world/supply_depot.gd") as GDScript, Vector3(300, 0, z0 + 2), 180.0)
-	_kit("prop_water_tower", Vector3(340, 0, z0 - 46))
-	_kit("prop_billboard", Vector3(250, 0, z0 + 40), 180.0)
-	for i in range(6):
-		_post_light(Vector3(244 + i * 24, 0, z0 - 8.5), Color(1.0, 0.82, 0.55), 2.0, 14.0)
-	_prop("prop_car_wreck", Vector3(270, 0, z0 - 3), 95.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
-	_prop("prop_car_wreck", Vector3(326, 0, z0 + 4), -80.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
-	_prop("prop_dumpster", Vector3(262, 0, z0 - 30), 0.0, Vector3(2.0, 1.4, 1.2), Vector3(0, 0.7, 0))
-	_add_sandbags(Vector3(312, 0, z0 - 6), 0.0)
-	_add_vehicle("truck", "SS-07 TRUCK", Vector3(352, 0.4, z0 + 3), -90.0)
-
-
-func _build_plant() -> void:
-	var o := Vector2(-260, -260)
-	_register("plant", "POWER PLANT", Vector3(o.x, 0, o.y))
-	_slab(Rect2(o.x - 40, o.y - 36, 80, 72))
-	var hall := Rect2(o.x - 12, o.y - 28, 24, 12)
-	zone_names["plant"] = "TURBINE HALL"
-	_building(hall, "metal", "plant", [["s", 2, -1]], [["w", 1], ["e", 1], ["n", 1], ["n", 4]], "tin", "concrete", 1500)
-	_place(GeneratorScript, Vector3(o.x, 0, o.y - 25.5), 0.0)
-	_buy(hall, "w", 2, "ammo_box", "", "AMMO CACHE", 450, 0)
-	_skull(Vector3(hall.end.x - 1.0, 2.4, hall.position.y + 3.0), -90.0)
-	for i in range(3):
-		_kit("prop_transformer", Vector3(o.x - 24 + i * 6, 0, o.y + 10))
-	_fence_line(o + Vector2(-34, 2), o + Vector2(-34, 22), "prop_fence_metal")
-	_fence_line(o + Vector2(-34, 22), o + Vector2(-2, 22), "prop_fence_metal")
-	_place(RadioScript, Vector3(o.x + 20, 0, o.y + 18), 135.0)
-	_kit("prop_fuel_tank", Vector3(o.x + 26, 0, o.y - 16))
-	_prop("prop_pipe_stack", Vector3(o.x + 28, 0, o.y), 90.0, Vector3(3.0, 1.1, 1.8), Vector3(0, 0.55, 0))
-	for p in [Vector2(-20, 0), Vector2(20, 0), Vector2(0, 30)]:
-		_post_light(Vector3(o.x + p.x, 0, o.y + p.y), Color(0.75, 0.9, 1.0), 2.0, 14.0)
-	# pylons carry the power line toward town
-	for i in range(1, 9):
-		var t := float(i) / 9.0
-		var p := Vector2(-260, -260).lerp(Vector2(300, -240), t) + Vector2(0, -26)
-		_kit("prop_power_pylon", Vector3(p.x, terrain.height_at(p.x, p.y) - 0.2, p.y), 90.0)
-
-
 # Trees, rocks, wrecks and poles out in the county, on the terrain surface.
 func _build_wilds() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
+	# woods: pines grow in clumps where a forest noise is high; between them
+	# dead trees, brush and rock piles thin out across open fields
+	var woods := FastNoiseLite.new()
+	woods.seed = 31
+	woods.frequency = 0.012
 	var placed := 0
 	var tries := 0
-	while placed < 320 and tries < 4000:
+	while placed < 720 and tries < 9000:
 		tries += 1
 		var p := Vector2(rng.randf_range(-470, 470), rng.randf_range(-470, 470))
-		if _near_flat(p, 10.0):
+		if _near_flat(p, 8.0):
 			continue
 		var h := terrain.height_at(p.x, p.y)
-		if h > 30.0:
+		if h > 34.0:
 			continue
-		var kind := "prop_dead_tree" if rng.randf() < 0.82 else "prop_rubble"
-		var s := rng.randf_range(0.9, 1.5)
+		var forest := woods.get_noise_2d(p.x, p.y)
+		var roll := rng.randf()
+		var kind := ""
+		if forest > 0.15:
+			kind = "ext_pine" if roll < 0.7 else ("ext_bush" if roll < 0.92 else "prop_dead_tree")
+		elif roll < 0.18:
+			kind = "prop_dead_tree"
+		elif roll < 0.3:
+			kind = "ext_bush"
+		elif roll < 0.34:
+			kind = "prop_rubble"
+		else:
+			continue
+		var s := rng.randf_range(0.85, 1.45)
 		_kit(kind, Vector3(p.x, h - 0.15, p.y), rng.randf() * 360.0, s)
 		if kind == "prop_dead_tree":
 			_add_invisible_collider(Vector3(p.x, h + 1.5, p.y), Vector3(0.6 * s, 3.0, 0.6 * s), 0.0)
@@ -481,8 +377,8 @@ func _near_flat(p: Vector2, margin: float) -> bool:
 
 
 func _near_flat_pads(p: Vector2, margin: float) -> bool:
-	for r in PADS:
-		if (r as Rect2).grow(margin).has_point(p):
+	for r in pads:
+		if r.grow(margin).has_point(p):
 			return true
 	return false
 
@@ -507,9 +403,9 @@ func zone_at(p: Vector3) -> String:
 
 func location_at(p: Vector3) -> String:
 	var q := Vector2(p.x, p.z)
-	for i in range(PADS.size()):
-		if (PADS[i] as Rect2).grow(12.0).has_point(q):
-			return ["depot", "farm", "village", "town", "plant"][i]
+	for loc in _locs:
+		if (loc.pad as Rect2).grow(12.0).has_point(q):
+			return loc.id
 	return ""
 
 

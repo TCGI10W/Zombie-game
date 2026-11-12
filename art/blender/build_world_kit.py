@@ -407,4 +407,5 @@ def main():
     print("WORLD KIT OK %d pieces" % len(roots))
 
 
-main()
+if __name__ == "__main__":
+    main()
