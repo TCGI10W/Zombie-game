@@ -961,16 +961,14 @@ def render_topdown(path, fog):
 
 
 def export_glb(path, fog):
+    """Geometry + spawn empties only: the game (PvpMapArena) builds its own lights,
+    fog and materials for this map, and glTF cannot carry area lights or volumes."""
     bpy.ops.object.select_all(action="DESELECT")
     for o in bpy.context.scene.objects:
-        if o is not fog and o.type in ("MESH", "LIGHT", "EMPTY"):
+        if o is not fog and o.type in ("MESH", "EMPTY"):
             o.select_set(True)
-    kw = dict(filepath=path, export_format="GLB", export_yup=True, export_apply=True,
-              use_selection=True, export_extras=True, export_materials="EXPORT")
-    try:
-        bpy.ops.export_scene.gltf(export_lights=True, **kw)
-    except TypeError:
-        bpy.ops.export_scene.gltf(**kw)
+    bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True, export_apply=True,
+                              use_selection=True, export_extras=True, export_materials="EXPORT")
     print("Exported:", path)
 
 

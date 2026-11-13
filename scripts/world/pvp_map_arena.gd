@@ -2,7 +2,8 @@ class_name PvpMapArena
 extends BunkerArena
 # Dedicated competitive PvP battlegrounds sharing BunkerArena's public API and
 # world helpers: "dockyard" (Ironclad Dockyard), "black_site" (Sub-Zero Black
-# Site), and "quarry" (Sunscorch Refinery).
+# Site), "quarry" (Sunscorch Refinery) and "substation" (Gridlock Substation,
+# imported from tools/generate_substation_blockout.py).
 # Built with strict NavMesh clearance, flush 20° beveled deck ramps, vaultable
 # <= 1.0m low cover, obstacle-free 4x4 spawn courtyards per sector (96 slots),
 # solid perimeter boundaries, and zero visual rail collisions.
@@ -17,7 +18,7 @@ var _objectives_dom: Array = []
 
 
 func _init(p_map_id: String = "dockyard") -> void:
-	map_id = p_map_id if p_map_id in ["dockyard", "black_site", "quarry"] else "dockyard"
+	map_id = p_map_id if p_map_id in ["dockyard", "black_site", "quarry", "substation"] else "dockyard"
 
 
 func _ready() -> void:
@@ -34,6 +35,8 @@ func _ready() -> void:
 			_build_black_site()
 		"quarry":
 			_build_quarry()
+		"substation":
+			_build_substation()
 
 	for zk in zone_polys.keys():
 		zones_open[zk] = true
@@ -53,6 +56,7 @@ func get_map_title() -> String:
 		"dockyard": return "IRONCLAD DOCKYARD"
 		"black_site": return "SUB-ZERO BLACK SITE"
 		"quarry": return "SUNSCORCH REFINERY"
+		"substation": return "GRIDLOCK SUBSTATION"
 	return "OUTPOST NACHT-7"
 
 
@@ -88,6 +92,15 @@ func get_pvp_sector_zones() -> Dictionary:
 				3: "depot_south",
 				4: "boneyard_nw",
 				5: "spur_se",
+			}
+		"substation":
+			return {
+				0: "north_gate",
+				1: "south_gate",
+				2: "loading_dock",
+				3: "yard_sw",
+				4: "yard_nw",
+				5: "tank_farm",
 			}
 	return super.get_pvp_sector_zones()
 
@@ -803,3 +816,202 @@ func _build_quarry() -> void:
 		[Vector3(-74.0, 10.5, 58.0), Vector3(44.0, 22.0, 34.0), 19.0],
 	]:
 		_add_visual_box(mp[0], mp[1], mesa_mat, Vector3(0.0, deg_to_rad(float(mp[2])), 0.0))
+
+
+# ===========================================================================
+# MAP 5: GRIDLOCK SUBSTATION (90m x 64m rain-slicked night substation)
+# Geometry comes from assets/models/map_substation.glb, built and validated by
+# tools/generate_substation_blockout.py ("-col" meshes import as trimesh
+# collision, "-colonly" stair ramps as invisible colliders). Blender +Y (north)
+# becomes Godot -Z. Playable area is X -23..45; the HV yard west of the bunker
+# is sealed off. Lights, fog and materials are added here.
+# ===========================================================================
+const SUBSTATION_GLB := "res://assets/models/map_substation.glb"
+
+
+func _build_substation() -> void:
+	_bounds = Rect2(Vector2(-23.1, -32.0), Vector2(68.1, 64.0))
+	var xs: Array[float] = [-23.1, -12.0, 12.0, 45.0]
+	var zs: Array[float] = [-32.0, -9.0, 9.0, 32.0]
+	_setup_grid_zones(xs, zs, [
+		{"id": "yard_nw", "name": "NORTH-WEST YARD", "col": 0, "row": 0},
+		{"id": "north_gate", "name": "NORTH GATE", "col": 1, "row": 0},
+		{"id": "loading_dock", "name": "LOADING DOCK", "col": 2, "row": 0},
+		{"id": "server_bunker", "name": "SERVER BUNKER", "col": 0, "row": 1},
+		{"id": "cargo_pit", "name": "CARGO PIT", "col": 1, "row": 1},
+		{"id": "fuel_depot", "name": "FUEL DEPOT", "col": 2, "row": 1},
+		{"id": "yard_sw", "name": "SOUTH-WEST YARD", "col": 0, "row": 2},
+		{"id": "south_gate", "name": "SOUTH GATE", "col": 1, "row": 2},
+		{"id": "tank_farm", "name": "TANK FARM", "col": 2, "row": 2},
+	])
+
+	# Teams 0/1 use the two walled spawn courtyards; 2-5 the open corner yards.
+	player_spawn = Vector3(0.0, 0.1, -27.0)
+	_spawn_centers = {
+		0: Vector2(0.0, -27.0),
+		1: Vector2(0.0, 27.0),
+		2: Vector2(30.0, -26.0),
+		3: Vector2(-16.0, 26.0),
+		4: Vector2(-16.0, -26.0),
+		5: Vector2(30.0, 26.0),
+	}
+	_spawn_y = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
+	_objectives_snd = [
+		{"id": "A", "label": "SERVER BUNKER A", "kind": "bomb_site", "pos": Vector3(-17.35, 0.0, -8.0)},
+		{"id": "B", "label": "FUEL DEPOT B", "kind": "bomb_site", "pos": Vector3(34.0, 0.0, 6.0)},
+	]
+	_objectives_dom = [
+		{"id": "A", "label": "BUNKER A", "kind": "dom_flag", "pos": Vector3(-17.0, 0.0, 0.0)},
+		{"id": "B", "label": "CARGO PIT B", "kind": "dom_flag", "pos": Vector3(0.0, -1.2, 2.0)},
+		{"id": "C", "label": "DEPOT C", "kind": "dom_flag", "pos": Vector3(28.0, 0.0, 0.0)},
+	]
+	_hotspots = [
+		Vector3(0.0, -1.2, 2.0),
+		Vector3(0.0, 4.2, 0.0),
+		Vector3(-17.0, 0.0, 0.0),
+		Vector3(28.0, 0.0, 0.0),
+		Vector3(0.0, 0.0, -10.5),
+		Vector3(0.0, 0.0, 10.5),
+		Vector3(-13.3, 0.0, 0.0),
+		Vector3(40.0, 1.2, -16.0),
+		Vector3(36.0, 0.0, 11.0),
+	]
+
+	# Rainy dusk: low cold sun from the south-west (elevation 14, azimuth 215).
+	_build_map_environment(
+		Color(0.05, 0.07, 0.12), Color(0.24, 0.30, 0.40),
+		Color(0.03, 0.035, 0.045), Color(0.14, 0.17, 0.22),
+		Color(0.50, 0.58, 0.70), 0.80,
+		Color(0.47, 0.60, 0.78), 1.15, Vector3(-14.0, -35.0, 0.0), 1.12
+	)
+	world_env.fog_enabled = true
+	world_env.fog_light_color = Color(0.32, 0.38, 0.48)
+	world_env.fog_density = 0.012
+	world_env.fog_sky_affect = 0.4
+
+	var packed := load(SUBSTATION_GLB) as PackedScene
+	if packed == null:
+		push_error("Substation map missing: " + SUBSTATION_GLB + " (run tools/generate_substation_blockout.py --glb)")
+		_add_static_box(Vector3(10.0, -0.3, 0.0), Vector3(70.0, 0.6, 66.0), m_conc)
+		return
+	var geo := packed.instantiate() as Node3D
+	geo.name = "SubstationGeometry"
+	add_child(geo)
+	_dress_substation(geo)
+
+	# Six sodium floodlights over the choke points (ramps, breach, depot ends, east stair).
+	var lamp_mat := StandardMaterial3D.new()
+	lamp_mat.albedo_color = Color(1.0, 0.48, 0.10)
+	lamp_mat.emission_enabled = true
+	lamp_mat.emission = Color(1.0, 0.48, 0.10)
+	lamp_mat.emission_energy_multiplier = 4.0
+	for fp in [Vector3(0.0, 8.0, -10.5), Vector3(0.0, 8.0, 10.5), Vector3(-12.5, 8.0, 0.0),
+			Vector3(28.0, 8.0, -19.0), Vector3(28.0, 8.0, 19.0), Vector3(13.5, 8.0, 17.5)]:
+		var sl := SpotLight3D.new()
+		sl.light_color = Color(1.0, 0.48, 0.10)
+		sl.light_energy = 6.0
+		sl.spot_range = 16.0
+		sl.spot_angle = 58.0
+		sl.spot_attenuation = 0.8
+		sl.shadow_enabled = true
+		sl.position = fp
+		sl.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
+		add_child(sl)
+		_add_visual_box(fp + Vector3(0.0, 0.12, 0.0), Vector3(1.5, 0.18, 1.5), lamp_mat)
+
+	# Four cyan service lights inside the server bunker.
+	for bz in [-13.6, -6.4, 6.4, 13.6]:
+		var ol := OmniLight3D.new()
+		ol.light_color = Color(0.0, 0.90, 1.0)
+		ol.light_energy = 1.6
+		ol.omni_range = 8.0
+		ol.position = Vector3(-17.35, 3.6, bz)
+		add_child(ol)
+
+
+func _substation_material(mat_name: String) -> Material:
+	match mat_name:
+		"M_WetAsphalt":
+			return MaterialLib.get_world("asphalt", 0.35, Color(0.52, 0.55, 0.60), 0.02, 0.55, 0.85, 0.25, true)
+		"M_Concrete":
+			return MaterialLib.get_world("concrete", 0.40, Color(0.74, 0.74, 0.72), 0.0, 0.95, 0.25, 0.45)
+		"M_ConcreteDark":
+			return MaterialLib.get_world("concrete", 0.40, Color(0.46, 0.47, 0.50), 0.0, 0.95, 0.30, 0.55)
+		"M_PitConcreteWet":
+			return MaterialLib.get_world("concrete_floor", 0.40, Color(0.55, 0.56, 0.58), 0.0, 0.6, 0.80, 0.4, true)
+		"M_JerseyBarrier":
+			return MaterialLib.get_world("concrete", 0.45, Color(0.86, 0.85, 0.80), 0.0, 0.9, 0.3, 0.35)
+		"M_SteelGrating":
+			return MaterialLib.get_world("panzer_steel", 0.50, Color(0.62, 0.66, 0.70), 0.6, 0.7, 0.4, 0.2)
+		"M_FuelTank":
+			return MaterialLib.get_world("panzer_steel", 0.50, Color(0.88, 0.88, 0.84), 0.5, 0.7, 0.4, 0.15)
+		"M_ServerRack":
+			return MaterialLib.get_world("gunmetal", 0.60, Color(0.30, 0.32, 0.36), 0.7, 0.8, 0.0, 0.1)
+		"M_Transformer":
+			return MaterialLib.get_world("rusted_metal", 0.40, Color(0.55, 0.66, 0.55), 0.5, 1.0, 0.3, 0.3)
+		"M_RailHazard":
+			return _make_painted_metal(Color(0.95, 0.72, 0.16), 0.45, 0.3)
+		"M_ContainerRust":
+			return _make_painted_metal(Color(0.66, 0.24, 0.12), 0.48, 0.42)
+		"M_ContainerTeal":
+			return _make_painted_metal(Color(0.12, 0.44, 0.48), 0.48, 0.42)
+	return null
+
+
+func _dress_substation(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		var metal := false
+		if mi.mesh != null:
+			for i in range(mi.mesh.get_surface_count()):
+				var src: Material = mi.mesh.surface_get_material(i)
+				var mname: String = src.resource_name if src != null else ""
+				var mat: Material = _substation_material(mname)
+				if mat != null:
+					mi.set_surface_override_material(i, mat)
+				if mname in ["M_SteelGrating", "M_FuelTank", "M_ServerRack", "M_RailHazard", "M_ContainerRust", "M_ContainerTeal", "M_Transformer"]:
+					metal = true
+		mi.set_meta("surface", "metal" if metal else "concrete")
+	if node is StaticBody3D:
+		var sb := node as StaticBody3D
+		sb.collision_layer = 1 | HitboxRig.BALLISTIC_WORLD_LAYER
+		var parent := sb.get_parent()
+		var surf: String = "concrete"
+		if parent != null and parent.has_meta("surface"):
+			surf = String(parent.get_meta("surface"))
+		elif sb.name.begins_with("Stair_East"):
+			surf = "metal"
+		sb.set_meta("surface", surf)
+	for c in node.get_children():
+		_dress_substation(c)
+
+
+# The pit floor (-1.2 m) and the catwalk (+4.2 m) sit outside the default bake
+# height window, so this map bakes with a taller box.
+func _bake_navigation() -> void:
+	if map_id != "substation":
+		super._bake_navigation()
+		return
+	if is_inside_tree() and get_world_3d() != null:
+		var nmap := get_world_3d().navigation_map
+		NavigationServer3D.map_set_cell_size(nmap, 0.15)
+		NavigationServer3D.map_set_cell_height(nmap, 0.15)
+	var nav_mesh := NavigationMesh.new()
+	nav_mesh.cell_size = 0.15
+	nav_mesh.cell_height = 0.15
+	nav_mesh.agent_radius = 0.45
+	nav_mesh.agent_height = 1.95
+	nav_mesh.agent_max_climb = 0.30
+	nav_mesh.agent_max_slope = 44.0
+	nav_mesh.region_min_size = 12.0
+	nav_mesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
+	nav_mesh.geometry_collision_mask = 1 | 16
+	var mb: Rect2 = get_map_bounds()
+	nav_mesh.filter_baking_aabb = AABB(
+		Vector3(mb.position.x - 1.0, -1.7, mb.position.y - 1.0),
+		Vector3(mb.size.x + 2.0, 8.5, mb.size.y + 2.0)
+	)
+	var source := NavigationMeshSourceGeometryData3D.new()
+	NavigationServer3D.parse_source_geometry_data(nav_mesh, source, self)
+	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
+	nav_region.navigation_mesh = nav_mesh

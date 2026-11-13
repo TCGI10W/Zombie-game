@@ -1078,7 +1078,7 @@ const PVP_MODES := {
 	"snd": {"name": "SEARCH & DESTROY", "short": "S&D", "tag": "NO RESPAWN", "icon": "bolt", "desc": "1 life per round. Plant or defuse C4 at Site A or B across 2, 4, or 6 squads."},
 	"dom": {"name": "DOMINATION", "short": "DOMINATION", "tag": "3 FLAGS", "icon": "flag", "desc": "Capture & hold Objectives A, B, and C to earn +1 pt per flag every 2s to 150."},
 }
-const PVP_MAP_ORDER: Array[String] = ["nacht", "dockyard", "black_site", "quarry"]
+const PVP_MAP_ORDER: Array[String] = ["nacht", "dockyard", "black_site", "quarry", "substation"]
 const PVP_MAPS := {
 	"nacht": {
 		"id": "nacht", "name": "OUTPOST NACHT-7", "short": "NACHT-7", "tag": "LARGE · 6 SECTORS",
@@ -1099,6 +1099,11 @@ const PVP_MAPS := {
 		"id": "quarry", "name": "SUNSCORCH REFINERY", "short": "REFINERY", "tag": "OPEN · DESERT BASIN",
 		"icon": "flame", "accent": Color(1.00, 0.68, 0.22),
 		"desc": "Canyon oil refinery with long sightlines, trenches & cracking towers.",
+	},
+	"substation": {
+		"id": "substation", "name": "GRIDLOCK SUBSTATION", "short": "SUBSTATION", "tag": "MEDIUM · 3-LANE NIGHT",
+		"icon": "bolt", "accent": Color(1.00, 0.48, 0.10),
+		"desc": "Rain-soaked power substation: sunken cargo pit & sniper catwalk, server bunker, fuel depot.",
 	},
 }
 const PVP_TEAMS := [

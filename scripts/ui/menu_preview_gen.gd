@@ -184,6 +184,26 @@ static func map_banner(map_id: String) -> ImageTexture:
 			_fill_disc(img, 95, 20, 9, Color(1.0, 0.56, 0.14, 0.72), true)
 			_fill_disc(img, 95, 21, 4, Color(1.0, 0.92, 0.55, 0.95))
 			_fill_rect(img, 0, 72, W, 30, Color(0.32, 0.19, 0.10))
+		"substation":
+			accent = Color(1.00, 0.48, 0.10)
+			_fill_grad(img, Color(0.03, 0.05, 0.10), Color(0.16, 0.20, 0.30), Color(0.05, 0.06, 0.08), 0.64)
+			# Transmission pylons
+			for px in [40, 200]:
+				_draw_line(img, px, 14, px - 14, 70, Color(0.10, 0.12, 0.16), 2)
+				_draw_line(img, px, 14, px + 14, 70, Color(0.10, 0.12, 0.16), 2)
+				_fill_rect(img, px - 18, 24, 36, 2, Color(0.10, 0.12, 0.16))
+			_draw_line(img, 22, 25, 218, 25, Color(0.20, 0.24, 0.30), 1)
+			# Bunker block, catwalk and fuel tanks
+			_fill_rect(img, 62, 46, 46, 26, Color(0.18, 0.20, 0.24))
+			_fill_rect(img, 100, 40, 76, 3, Color(0.75, 0.55, 0.10))
+			_fill_rect(img, 176, 50, 14, 22, Color(0.52, 0.54, 0.54))
+			_fill_rect(img, 192, 54, 12, 18, Color(0.46, 0.48, 0.48))
+			# Sodium floodlight glow
+			for gx in [118, 158]:
+				_fill_disc(img, gx, 30, 20, Color(1.0, 0.48, 0.10, 0.30), true)
+				_fill_disc(img, gx, 30, 4, Color(1.0, 0.80, 0.50, 0.95))
+			_fill_rect(img, 0, 72, W, 30, Color(0.06, 0.07, 0.09))
+			_fill_rect(img, 0, 74, W, 2, Color(0.30, 0.22, 0.12, 0.6))
 		_: # "random"
 			accent = Color(0.45, 0.90, 1.0)
 			var ids := ["nacht", "dockyard", "black_site", "quarry"]
@@ -585,6 +605,23 @@ static func build_map_diorama(root: Node3D, map_id: String, pvp_mode: String, te
 			_hcyl(root, 0.04, 1.40, Vector3(0.0, 0.08, 0.38), _holo_mat("rusted_metal", Color(0.66, 0.44, 0.26)), Vector3(0, 0, PI * 0.5))
 			_hbox(root, Vector3(0.38, 0.20, 0.28), Vector3(-0.56, 0.12, 0.44), steel)
 			_hbox(root, Vector3(0.38, 0.20, 0.28), Vector3(0.56, 0.12, 0.44), steel)
+		"substation":
+			# Wet asphalt yard (90 x 64 m at 1:38) with the sunken cargo pit in the middle
+			var k := 1.0 / 38.0
+			_hbox(root, Vector3(90.0 * k, 0.05, 64.0 * k), Vector3(0, 0.0, 0), _holo_mat("asphalt", Color(0.20, 0.22, 0.26), 0.3, 0.1))
+			_hbox(root, Vector3(24.0 * k, 0.02, 18.0 * k), Vector3(0, 0.03, 0), _holo_mat("concrete", Color(0.10, 0.11, 0.13)))
+			_hbox(root, Vector3(6.06 * k, 2.59 * k, 2.44 * k), Vector3(-5.6 * k, 0.06, -3.7 * k), _holo_mat("rusted_metal", Color(0.70, 0.26, 0.12)), deg_to_rad(22.0))
+			_hbox(root, Vector3(6.06 * k, 2.59 * k, 2.44 * k), Vector3(5.6 * k, 0.06, 3.7 * k), _holo_mat("panzer_steel", Color(0.12, 0.46, 0.50)), deg_to_rad(-15.0))
+			# Sniper catwalk, server bunker (west), divider + fuel tanks + loading dock (east)
+			_hbox(root, Vector3(37.5 * k, 0.03, 2.4 * k), Vector3(-4.05 * k, 4.2 * k + 0.03, 0), _holo_emissive(Color(1.0, 0.62, 0.16), 1.2))
+			_hbox(root, Vector3(9.0 * k, 4.3 * k, 36.6 * k), Vector3(-18.7 * k, 2.15 * k + 0.03, 0), conc)
+			_hbox(root, Vector3(0.3 * k, 3.6 * k, 36.0 * k), Vector3(17.15 * k, 1.8 * k + 0.03, 0), conc)
+			for tz in [8.0, 14.0]:
+				_hcyl(root, 1.5 * k, 3.8 * k, Vector3(38.5 * k, 1.9 * k + 0.03, tz * k), steel)
+			_hbox(root, Vector3(10.0 * k, 1.2 * k, 8.0 * k), Vector3(40.0 * k, 0.6 * k + 0.03, -16.0 * k), conc)
+			for sz in [-1.0, 1.0]:
+				_hbox(root, Vector3(18.0 * k, 3.6 * k, 0.3 * k), Vector3(0, 1.8 * k + 0.03, sz * 21.85 * k), conc)
+				_hcyl(root, 0.03, 0.05, Vector3(0, 8.0 * k, sz * 10.5 * k), _holo_emissive(Color(1.0, 0.48, 0.10), 2.4))
 
 	# Team Spawn Beacons for selected Team Preset (2, 4, or 6 teams)
 	var team_count := clampi(team_preset, 2, 6)
