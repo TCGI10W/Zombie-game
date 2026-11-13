@@ -286,7 +286,7 @@ func _draw_big() -> void:
 	var frame := Rect2(top_left - Vector2(18, 44), size_px + Vector2(36, 96))
 	_big_canvas.draw_rect(frame, Color(0.02, 0.03, 0.045, 0.96))
 	_big_canvas.draw_rect(frame, Color(0.75, 0.2, 0.16, 0.9), false, 2.0)
-	_big_canvas.draw_string(_font, frame.position + Vector2(16, 28), ("THE COUNTY  —  TACTICAL MAP" if "locations" in arena else "OUTPOST NACHT-7  —  TACTICAL MAP"), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
+	_big_canvas.draw_string(_font, frame.position + Vector2(16, 28), (String(arena.get("map_title")) if "map_title" in arena else ("THE COUNTY  —  TACTICAL MAP" if "locations" in arena else "OUTPOST NACHT-7  —  TACTICAL MAP")), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
 	_big_canvas.draw_string(_font, frame.position + Vector2(frame.size.x - 150, 28), "%s TO CLOSE" % GameState.key_label("map"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.72, 0.78))
 	# open world: roads and location names under the zones
 	if "locations" in arena:

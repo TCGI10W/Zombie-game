@@ -15,8 +15,9 @@ func _build_fog() -> void:
 
 func _build_fires() -> void:
 	# a few burning wrecks / barrels at real County spots, on the ground
-	for f in [[Vector3(-2, 0.5, 18), 0.6], [Vector3(-150, 0.4, 59), 0.5], [Vector3(122, 0.4, -106), 0.5],
-			[Vector3(102, 0.5, 88), 0.6], [Vector3(286, 0.5, -239), 0.9], [Vector3(-304, 0.7, 154), 0.6]]:
+	var spots: Array = arena.get("fire_spots") if "fire_spots" in arena else [[Vector3(-2, 0.5, 18), 0.6], [Vector3(-150, 0.4, 59), 0.5],
+			[Vector3(122, 0.4, -106), 0.5], [Vector3(102, 0.5, 88), 0.6], [Vector3(286, 0.5, -239), 0.9], [Vector3(-304, 0.7, 154), 0.6]]
+	for f in spots:
 		_fire(f[0], f[1])
 
 
@@ -35,7 +36,8 @@ func _ambient_event(cam_pos: Vector3) -> void:
 	var far := cam_pos + ring * _rng.randf_range(30.0, 60.0) + Vector3(0, 4, 0)
 	var near := cam_pos + ring * _rng.randf_range(4.0, 9.0) + Vector3(0, 2, 0)
 	var r := _rng.randf()
-	var indoors := String(arena.zone_at(cam_pos)) != "wilds"
+	var outdoor: Array = arena.get("outdoor_zones") if "outdoor_zones" in arena else ["wilds"]
+	var indoors := not (String(arena.zone_at(cam_pos)) in outdoor)
 	if indoors:
 		_one_shot("creak" if r < 0.6 else "drip", near, -12.0, _rng.randf_range(0.8, 1.2))
 	elif r < 0.5:

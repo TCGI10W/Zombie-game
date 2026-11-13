@@ -15,7 +15,13 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 	# Two modes, two maps: the closed Nacht map (classic) or The County (outbreak)
-	arena = OpenWorld.new() if GameState.map_mode == "outbreak" else BunkerArena.new()
+	match GameState.map_mode:
+		"outbreak":
+			arena = OpenWorld.new()
+		"junction":
+			arena = JunctionMap.new()
+		_:
+			arena = BunkerArena.new()
 	arena.name = "BunkerArena"
 	add_child(arena)
 
@@ -41,7 +47,7 @@ func _ready() -> void:
 	add_child(weather)
 	weather.setup(arena.world_env)
 	wave_mgr.weather = weather
-	var atmo_path := "res://scripts/world/open_world/outbreak_atmosphere.gd" if GameState.map_mode == "outbreak" else "res://scripts/world/atmosphere.gd"
+	var atmo_path := "res://scripts/world/atmosphere.gd" if GameState.map_mode == "classic" else "res://scripts/world/open_world/outbreak_atmosphere.gd"
 	var atmo: Node3D = (load(atmo_path) as GDScript).new()
 	atmo.name = "Atmosphere"
 	add_child(atmo)
