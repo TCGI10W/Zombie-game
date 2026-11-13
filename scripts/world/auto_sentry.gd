@@ -102,7 +102,7 @@ func _physics_process(delta: float) -> void:
 	var mult := 1.0
 	if is_instance_valid(owner_player) and owner_player.has_method("dmg_mult"):
 		mult = owner_player.dmg_mult()
-	var res: Dictionary = target.take_damage(55.0 * mult, aim, false, "bullet")
+	var res: Dictionary = target.take_damage(55.0 * mult, aim, false, "bullet", "torso")
 	if res.get("killed", false) and is_instance_valid(owner_player):
 		owner_player._on_enemy_killed_by_player(target, false)
 	_light.light_energy = 3.0
@@ -122,7 +122,7 @@ func _pick_target() -> ZombieEnemy:
 		var d := z.global_position.distance_to(global_position)
 		if d >= best_d:
 			continue
-		var q := PhysicsRayQueryParameters3D.create(from, z.global_position + Vector3(0, 1.1, 0), 1)
+		var q := PhysicsRayQueryParameters3D.create(from, z.global_position + Vector3(0, 1.1, 0), HitboxRig.BALLISTIC_WORLD_LAYER)
 		if not space.intersect_ray(q).is_empty():
 			continue
 		best = z

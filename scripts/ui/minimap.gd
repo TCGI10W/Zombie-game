@@ -119,6 +119,10 @@ func _index_stations() -> void:
 		elif path.ends_with("zone_door.gd"):
 			icon = "door"
 			col = Color(1.0, 0.4, 0.3)
+		elif path.ends_with("defense_pad.gd"):
+			var is_turret: bool = String(n3.get("pad_kind")) == "turret"
+			icon = "target" if is_turret else "arc"
+			col = Color(0.35, 0.92, 1.0) if is_turret else Color(0.76, 0.48, 1.0)
 		if icon != "":
 			_stations.append({"pos": n3.global_position, "icon": icon, "color": col, "node": n3})
 
@@ -151,6 +155,28 @@ func _process(delta: float) -> void:
 # ---------------------------------------------------------------------------
 func _markers() -> Array:
 	var out: Array = []
+	if GameState.is_pvp():
+		var my_t: int = int(player.team_id) if "team_id" in player else Net.my_team
+		for c in get_tree().get_nodes_in_group("pvp_combatants"):
+			var cn := c as Node3D
+			if cn == null or cn == player or not is_instance_valid(cn) or ("is_dead" in cn and cn.is_dead):
+				continue
+			if "team_id" in cn and int(cn.team_id) == my_t:
+				out.append([cn.global_position, "mate", GameState.pvp_team_color(my_t), false])
+		for z in get_tree().get_nodes_in_group("pvp_objectives"):
+			if is_instance_valid(z):
+				var zcol: Color = Color(1.0, 0.25, 0.2) if ("is_planted" in z and z.is_planted) else (
+					GameState.pvp_team_color(int(z.owner_team)) if ("owner_team" in z and int(z.owner_team) >= 0) else Color(1.0, 0.85, 0.25)
+				)
+				out.append([(z as Node3D).global_position, "pvp_obj_" + String(z.zone_id), zcol, true])
+		var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+		if pvp_dir and pvp_dir.has_method("get_minimap_pings"):
+			for ping in pvp_dir.get_minimap_pings():
+				out.append([Vector3(ping["pos"]), "fire_ping", Color(1.0, 0.24, 0.2), false])
+		for hb in get_tree().get_nodes_in_group("hazard_barrels"):
+			if is_instance_valid(hb) and hb.has_method("is_intact") and hb.is_intact():
+				out.append([(hb as Node3D).global_position, "barrel", Color(1.0, 0.38, 0.16), false])
+		return out
 	for p in get_tree().get_nodes_in_group("net_players"):
 		if p == player or not is_instance_valid(p) or p.get("is_dead") == true or p.get("extracted") == true:
 			continue
@@ -160,8 +186,24 @@ func _markers() -> Array:
 	for c in get_tree().get_nodes_in_group("commanders"):
 		if is_instance_valid(c) and not c.is_dead:
 			out.append([(c as Node3D).global_position, "commander", ZombieEnemy.TIER_COLORS[c.tier], true])
-	if wave_mgr and is_instance_valid(wave_mgr.active_boss) and not wave_mgr.active_boss.is_dead:
-		out.append([wave_mgr.active_boss.global_position, "boss", Color(1.0, 0.2, 0.15), true])
+	if wave_mgr:
+		var had_boss := false
+		for b in wave_mgr.active_bosses:
+			if is_instance_valid(b) and not b.is_dead:
+				out.append([b.global_position, "boss", Color(1.0, 0.2, 0.15), true])
+				had_boss = true
+		if not had_boss and is_instance_valid(wave_mgr.active_boss) and not wave_mgr.active_boss.is_dead:
+			out.append([wave_mgr.active_boss.global_position, "boss", Color(1.0, 0.2, 0.15), true])
+	for dp in get_tree().get_nodes_in_group("draft_pedestals"):
+		if is_instance_valid(dp):
+			var dcol: Color = dp.get("accent") if dp.get("accent") != null else Color(1.0, 0.85, 0.25)
+			out.append([(dp as Node3D).global_position, "draft", dcol, true])
+	for bz in get_tree().get_nodes_in_group("blitz_zones"):
+		if is_instance_valid(bz):
+			out.append([(bz as Node3D).global_position, "blitz", Color(1.0, 0.86, 0.22), true])
+	for hb in get_tree().get_nodes_in_group("hazard_barrels"):
+		if is_instance_valid(hb) and hb.has_method("is_intact") and hb.is_intact():
+			out.append([(hb as Node3D).global_position, "barrel", Color(1.0, 0.38, 0.16), false])
 	for pu in get_tree().get_nodes_in_group("net_powerups"):
 		if is_instance_valid(pu):
 			var mine: bool = pu.get("owner_peer") == null or int(pu.get("owner_peer")) == 0 or int(pu.get("owner_peer")) == Net.my_id()
@@ -176,7 +218,16 @@ func _markers() -> Array:
 
 func _draw_marker(cv: Control, at: Vector2, kind: String, col: Color, s: float) -> void:
 	var pulse := 0.75 + 0.25 * sin(_time * 6.0)
+	if kind.begins_with("pvp_obj_"):
+		var zid: String = kind.substr(8)
+		cv.draw_circle(at, 7.0 * s * pulse, Color(col.r, col.g, col.b, 0.35))
+		cv.draw_arc(at, 6.2 * s, 0.0, TAU, 18, col, 1.8 * s)
+		cv.draw_string(_font, at + Vector2(-4, 4) * s, zid, HORIZONTAL_ALIGNMENT_LEFT, -1, int(11 * s), Color.WHITE)
+		return
 	match kind:
+		"fire_ping":
+			cv.draw_circle(at, 4.5 * s * pulse, col)
+			cv.draw_arc(at, 6.5 * s, 0.0, TAU, 14, col, 1.2 * s)
 		"mate":
 			cv.draw_circle(at, 4.0 * s, Color.BLACK)
 			cv.draw_circle(at, 3.0 * s, col)
@@ -202,11 +253,25 @@ func _draw_marker(cv: Control, at: Vector2, kind: String, col: Color, s: float) 
 		"lz":
 			cv.draw_arc(at, 6.0 * s, 0.0, TAU, 20, col, 2.0 * s)
 			cv.draw_string(_font, at + Vector2(-4, 4) * s, "H", HORIZONTAL_ALIGNMENT_LEFT, -1, int(11 * s), col)
+		"draft":
+			cv.draw_circle(at, 6.5 * s * pulse, Color(col.r, col.g, col.b, 0.38))
+			cv.draw_circle(at, 3.8 * s, col)
+			cv.draw_arc(at, 6.2 * s, 0.0, TAU, 18, Color.WHITE, 1.0)
+		"blitz":
+			var br := 7.2 * s * pulse
+			cv.draw_arc(at, br, 0.0, TAU, 20, col, 1.8 * s)
+			cv.draw_colored_polygon(PackedVector2Array([at + Vector2(0, -4.6) * s, at + Vector2(4.6, 0) * s, at + Vector2(0, 4.6) * s, at + Vector2(-4.6, 0) * s]), col)
+			cv.draw_polyline(PackedVector2Array([at + Vector2(0, -4.6) * s, at + Vector2(4.6, 0) * s, at + Vector2(0, 4.6) * s, at + Vector2(-4.6, 0) * s, at + Vector2(0, -4.6) * s]), Color.BLACK, 1.0)
+		"barrel":
+			cv.draw_circle(at, 3.0 * s, Color.BLACK)
+			cv.draw_circle(at, 2.1 * s, col)
 
 
 func _draw_station(cv: Control, at: Vector2, st: Dictionary, s: float) -> void:
 	var node: Node = st["node"]
 	if not is_instance_valid(node):
+		return
+	if node is Node3D and not (node as Node3D).visible:
 		return
 	if st["icon"] == "door" and node.get("_opened") == true:
 		return
@@ -274,17 +339,21 @@ func _draw_big() -> void:
 	if not is_instance_valid(player) or arena == null:
 		return
 	var vp := get_viewport_rect().size
-	var span := MAP_MAX - MAP_MIN
-	var scale_px := minf((vp.x * 0.62) / span.x, (vp.y * 0.78) / span.y)
+	var mb: Rect2 = arena.get_map_bounds() if arena.has_method("get_map_bounds") else Rect2(MAP_MIN, MAP_MAX - MAP_MIN)
+	var map_min := mb.position
+	var span := mb.size
+	var max_h_frac: float = 0.66 if GameState.is_pvp() else 0.78
+	var scale_px := minf((vp.x * 0.62) / span.x, (vp.y * max_h_frac) / span.y)
 	var size_px := span * scale_px
-	var top_left := (vp - size_px) * 0.5
+	var top_left := (vp - size_px) * 0.5 + (Vector2(0.0, 38.0) if GameState.is_pvp() else Vector2.ZERO)
 	var to_map := func(w: Vector2) -> Vector2:
-		return top_left + (w - MAP_MIN) * scale_px
+		return top_left + (w - map_min) * scale_px
+	var map_title: String = arena.get_map_title() if arena.has_method("get_map_title") else "OUTPOST NACHT-7"
 	var frame := Rect2(top_left - Vector2(18, 44), size_px + Vector2(36, 96))
 	_big_canvas.draw_rect(frame, Color(0.02, 0.03, 0.045, 0.96))
 	_big_canvas.draw_rect(frame, Color(0.75, 0.2, 0.16, 0.9), false, 2.0)
 	_big_canvas.draw_texture_rect(HI.tex("map"), Rect2(frame.position + Vector2(16, 11), Vector2(20, 20)), false, Color(0.95, 0.95, 0.98))
-	_big_canvas.draw_string(_font, frame.position + Vector2(44, 28), "OUTPOST NACHT-7  —  TACTICAL MAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
+	_big_canvas.draw_string(_font, frame.position + Vector2(44, 28), "%s  —  TACTICAL MAP" % map_title, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.95, 0.95, 0.98))
 	_big_canvas.draw_string(_font, frame.position + Vector2(frame.size.x - 130, 28), "[%s] CLOSE" % GameState.key_label("map"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.72, 0.78))
 	for zid in arena.zone_polys:
 		var open: bool = arena.is_zone_open(zid)
@@ -323,6 +392,21 @@ func _draw_big() -> void:
 	tri.append(tri[0])
 	_big_canvas.draw_polyline(tri, Color.BLACK, 1.5)
 	var lc := Color(0.75, 0.78, 0.84)
+	if GameState.is_pvp():
+		var px := frame.position.x + 18.0
+		var py := frame.end.y - 16.0
+		var pvp_legend := [
+			["mate", "SQUADMATES", Color(0.35, 0.85, 1.0)],
+			["pvp_obj_A", "OBJECTIVE", Color(1.0, 0.85, 0.25)],
+			["fire_ping", "GUNFIRE PING", Color(1.0, 0.24, 0.2)],
+			["barrel", "HAZARD DRUM", Color(1.0, 0.38, 0.16)],
+		]
+		for mk in pvp_legend:
+			_draw_marker(_big_canvas, Vector2(px + 6.0, py - 4.0), mk[0], mk[2], 0.9)
+			px += 20.0
+			_big_canvas.draw_string(_font, Vector2(px, py), mk[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, lc)
+			px += _font.get_string_size(mk[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 24.0
+		return
 	_legend_row(_big_canvas, Vector2(frame.position.x + 16, frame.end.y - 32), [
 		["bullet", "AMMO", Color(1.0, 0.8, 0.25)],
 		["rifle", "WEAPON", Color(0.4, 0.85, 1.0)],
@@ -338,7 +422,10 @@ func _draw_big() -> void:
 		["door", "DOOR", Color(1.0, 0.4, 0.3)],
 	], lc)
 	var y2 := frame.end.y - 12
-	for mk in [["commander", "COMMANDER", Color(1.0, 0.6, 0.2)], ["boss", "BOSS", Color(1.0, 0.2, 0.15)], ["relic", "RELIC", Color(0.85, 0.6, 1.0)]]:
+	var map_markers := [["commander", "COMMANDER", Color(1.0, 0.6, 0.2)], ["boss", "BOSS", Color(1.0, 0.2, 0.15)], ["relic", "RELIC", Color(0.85, 0.6, 1.0)], ["barrel", "DRUM", Color(1.0, 0.38, 0.16)]]
+	if GameState.is_overdrive():
+		map_markers.append(["blitz", "BLITZ POD", Color(1.0, 0.86, 0.22)])
+	for mk in map_markers:
 		_draw_marker(_big_canvas, Vector2(x + 6, y2 - 4), mk[0], mk[2], 0.8)
 		x += 17
 		_big_canvas.draw_string(_font, Vector2(x, y2), mk[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, lc)

@@ -26,6 +26,16 @@ var alive_enemies: int = 0
 var boss_pending: bool = false
 var boss_intro_triggered: bool = false
 var active_boss: ZombieEnemy = null
+var active_bosses: Array[ZombieEnemy] = []
+
+
+func _od() -> Node:
+	var p := get_parent()
+	if p != null:
+		var n := p.get_node_or_null("Overdrive")
+		if n != null:
+			return n
+	return get_tree().get_first_node_in_group("overdrive")
 
 var spawn_timer: float = 0.0
 var boss_intro_timer: float = 0.0
@@ -51,6 +61,8 @@ var hound_timer: float = 0.0
 var kills_until_drop: int = 0
 var drops_this_round: int = 0
 var _nuking: bool = false
+var _blitz_spawned_round: int = 0
+var _round_total_zombies: int = 0
 
 
 func setup(p_arena: BunkerArena, p_player: PlayerController, p_container: Node3D) -> void:
@@ -85,6 +97,7 @@ func start_round(round_num: int) -> void:
 	in_intermission = false
 	drops_this_round = 0
 	zombies_to_spawn = int(round(float(6 + round_num * 3) * crowd * GameState.diff("crowd") * (1.8 if ev == "swarm" else 1.0)))
+	_round_total_zombies = zombies_to_spawn
 	hounds_to_spawn = 0
 	if hound_round:
 		zombies_to_spawn = 0
@@ -111,6 +124,8 @@ var _last_event_round: int = -9
 
 
 func _pick_event(round_num: int) -> String:
+	if GameState.is_overdrive():
+		return ""
 	if round_num < 4 or (round_num == GameState.FINAL_ROUND and GameState.game_mode == "casual"):
 		return ""
 	if round_num - _last_event_round < 2 or randf() > 0.42:
@@ -150,6 +165,9 @@ func _event_relic_drop() -> void:
 func _present_round(round_num: int, ev: String = "") -> void:
 	GameState.current_round = round_num
 	GameState.round_event = ev
+	for hb in get_tree().get_nodes_in_group("hazard_barrels"):
+		if is_instance_valid(hb) and hb.has_method("try_respawn"):
+			hb.try_respawn(round_num)
 	var atmo := get_parent().get_node_or_null("Atmosphere")
 	if atmo and atmo.has_method("set_event"):
 		atmo.set_event(ev)
@@ -157,15 +175,26 @@ func _present_round(round_num: int, ev: String = "") -> void:
 		var info: Dictionary = GameState.ROUND_EVENTS[ev]
 		get_tree().create_timer(3.0).timeout.connect(func():
 			if GameState.round_event == ev and is_instance_valid(player):
-				GameState.play_sfx("hound_round_sting", -2.0, 1.0)
+				GameState.play_sfx("thunder_far", -4.0, 0.95)
 				player.status_banner_requested.emit("%s — %s" % [info["name"], info["desc"]], info["color"]))
+	if GameState.is_overdrive():
+		var od := _od()
+		if od and od.has_method("roll_round_mutators"):
+			od.roll_round_mutators(round_num)
+			var sum: Array[String] = od.mutator_summary_lines()
+			if not sum.is_empty():
+				get_tree().create_timer(1.2).timeout.connect(func():
+					if is_instance_valid(player):
+						player.status_banner_requested.emit("CHAOS MUTATORS: " + "  •  ".join(sum), Color(1.0, 0.86, 0.24)))
 	GameState.round_changed.emit(round_num)
 	hound_round = round_num >= 5 and (round_num % 5 == 0) and not (round_num == GameState.FINAL_ROUND and GameState.game_mode == "casual")
-	if hound_round:
-		GameState.play_sfx("hound_round_sting", 0.0, 1.0)
-		GameState.play_sfx("hound_howl", -5.0, randf_range(0.95, 1.05))
+	if GameState.is_overdrive():
+		GameState.play_sfx("bolt_cycle", -2.0, 1.15)
+	elif hound_round:
+		GameState.play_sfx("thunder_far", -2.0, 0.92)
+		GameState.play_sfx("hound_howl", -4.0, randf_range(0.95, 1.05))
 	else:
-		GameState.play_sfx("round_sting", 0.0, 1.0)
+		GameState.play_sfx("thunder_far", -7.0, randf_range(0.90, 1.06))
 	GameState.rebuild_points_round = 0
 	if GameState.has_unlock("armor") and is_instance_valid(player) and not player.is_dead and player.overshield < 25.0:
 		player.overshield = 25.0
@@ -290,6 +319,11 @@ func _process(delta: float) -> void:
 			spawn_timer = maxf(0.55, 1.9 - float(GameState.current_round) * 0.12) * (0.6 if GameState.round_event == "swarm" else 1.0)
 			zombies_to_spawn -= 1
 			_spawn_regular_zombie(GameState.current_round)
+	if GameState.is_overdrive() and _blitz_spawned_round != GameState.current_round and zombies_to_spawn <= maxi(2, _round_total_zombies / 2):
+		_blitz_spawned_round = GameState.current_round
+		var od_mid := _od()
+		if od_mid and od_mid.has_method("spawn_blitz_zone"):
+			od_mid.spawn_blitz_zone(arena, player)
 
 	# Hound raid: dogs arrive in lightning strikes around the player
 	if hounds_to_spawn > 0 and alive_enemies < 6 + GameState.current_round / 5 + 2 * (Net.player_count() - 1):
@@ -299,8 +333,11 @@ func _process(delta: float) -> void:
 			hounds_to_spawn -= 1
 			_spawn_hound(GameState.current_round)
 
+	var crow_mgr := get_tree().get_first_node_in_group("crow_manager") if GameState.is_horror_mode() else null
+	var hold_for_mutations: bool = crow_mgr != null and crow_mgr.has_method("has_imminent_mutations") and bool(crow_mgr.has_imminent_mutations())
+
 	# Phase 2: the round boss arrives once the horde is dead
-	if zombies_to_spawn <= 0 and hounds_to_spawn <= 0 and alive_enemies <= 0 and boss_pending:
+	if zombies_to_spawn <= 0 and hounds_to_spawn <= 0 and alive_enemies <= 0 and not hold_for_mutations and boss_pending:
 		if not boss_intro_triggered:
 			boss_intro_triggered = true
 			boss_intro_timer = 2.5
@@ -323,17 +360,33 @@ func _process(delta: float) -> void:
 		return
 
 	# Phase 3: round over once the boss and its minions are dead
-	if zombies_to_spawn <= 0 and hounds_to_spawn <= 0 and not boss_pending and alive_enemies <= 0:
+	if zombies_to_spawn <= 0 and hounds_to_spawn <= 0 and not boss_pending and alive_enemies <= 0 and not hold_for_mutations:
 		in_intermission = true
-		GameState.play_sfx("round_end_sting", -1.5, 1.0)
+		if GameState.is_overdrive():
+			var od_end := _od()
+			if od_end and od_end.has_method("clear_blitz_zone"):
+				od_end.clear_blitz_zone()
 		if weather and weather.storm:
 			weather.set_storm(false)
-		intermission_timer = 8.0
+		intermission_timer = 12.0 if GameState.is_overdrive() else 8.0
 		_emit_wave_status()
+		var wait_s := 12 if GameState.is_overdrive() else 8
 		_banner(
-			"ROUND %s CLEARED! NEXT ROUND IN 8s — REBUILD WINDOWS & VISIT THE FURNACE!" % GameState.to_roman(GameState.current_round),
+			"ROUND %s CLEARED! NEXT ROUND IN %ds — [%s] READY NOW (+100)!" % [GameState.to_roman(GameState.current_round), wait_s, GameState.key_label("ready_round")],
 			Color(0.95, 0.82, 0.32)
 		)
+
+
+func skip_intermission() -> void:
+	if Net.is_client() or not in_intermission or exfil_state != 0 or intermission_timer <= 0.4:
+		return
+	var early := intermission_timer >= 2.0
+	intermission_timer = 0.0
+	GameState.play_sfx("bolt_cycle", -1.0, 1.08)
+	if early:
+		GameState.add_points(100)
+		_banner("EARLY READY BONUS +100! LAUNCHING ROUND %d!" % (GameState.current_round + 1), Color(0.45, 1.0, 0.58))
+	start_round(GameState.current_round + 1)
 
 
 # Picks an open window, favouring ones near the player.
@@ -385,16 +438,24 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 
 	var window: Node3D = null
 	var sp := forced_pos
-	var spawn_sleeper := forced_pos == Vector3.INF and variant == "walker" and round_num >= 2 and randf() < 0.14
+	var spawn_sleeper := forced_pos == Vector3.INF and variant == "walker" and round_num >= 2 and randf() < 0.14 and GameState.is_horror_mode()
 	if sp == Vector3.INF:
 		if spawn_sleeper:
 			sp = _hound_spawn_point()
 		else:
 			window = _pick_window()
 			if window:
-				var side := window.global_basis.x * randf_range(-1.5, 1.5)
+				var side := window.global_basis.x * randf_range(-0.85, 0.85)
 				sp = window.spawn_pos() + side
 				sp.y = 0.1
+				if arena.is_inside_tree() and arena.get_world_3d():
+					var wspace := arena.get_world_3d().direct_space_state
+					var wfrom: Vector3 = window.attack_pos() + Vector3(0.0, 0.8, 0.0)
+					var wto: Vector3 = sp + Vector3(0.0, 0.8, 0.0)
+					var whit := wspace.intersect_ray(PhysicsRayQueryParameters3D.create(wfrom, wto, 1))
+					if not whit.is_empty():
+						sp = (whit["position"] as Vector3).lerp(window.attack_pos(), 0.25)
+						sp.y = 0.1
 			else:
 				sp = arena.get_boss_spawn(_focus_pos())
 
@@ -405,6 +466,10 @@ func _spawn_regular_zombie(round_num: int, forced_pos: Vector3 = Vector3.INF, fo
 	z.hp = z.max_hp
 	z.base_damage *= GameState.diff_dmg_mult()
 	z.base_speed *= GameState.diff("speed") * (1.15 if ev == "blood_moon" else 1.0)
+	var od := _od()
+	if od and od.has_method("has_mutator") and od.has_mutator("swift_horde"):
+		z.base_speed *= 1.25
+		z.point_reward = int(round(float(z.point_reward) * 1.35))
 	z.target_player = _nearest_player(sp)
 	if variant == "crawler" and forced_pos == Vector3.INF:
 		z.base_speed *= 1.9
@@ -479,10 +544,10 @@ func _hound_spawn_point() -> Vector3:
 		var zone := arena.zone_at(snapped)
 		if zone == "" or not arena.is_zone_open(zone):
 			continue
-		return snapped
+		return arena.find_clear_ground_point(snapped, zone, 0.44)
 	var w := _pick_window()
 	if w:
-		return w.inside_pos()
+		return arena.find_clear_ground_point(w.inside_pos(), String(w.zone_id), 0.44)
 	return arena.get_boss_spawn(focus)
 
 
@@ -496,18 +561,36 @@ func _count_alive(kind: String) -> int:
 
 
 func _spawn_round_boss(round_num: int) -> void:
+	var kept: Array[ZombieEnemy] = []
+	for b in active_bosses:
+		if is_instance_valid(b) and not b.is_dead:
+			kept.append(b)
+	active_bosses = kept
 	var cfg := GameState.get_boss_config(round_num)
+	_spawn_single_boss(round_num, cfg, Vector3.ZERO)
+	var twin_every := int(GameState.diff("twin_every"))
+	if GameState.is_overdrive() and twin_every > 0 and round_num >= twin_every and (round_num % twin_every == 0):
+		var cfg2 := GameState.get_boss_config(round_num + 1)
+		_spawn_single_boss(round_num, cfg2, Vector3(3.2, 0.0, -2.5))
+		_banner("TWIN BOSS SHOWDOWN!", Color(1.0, 0.45, 0.2))
+
+
+func _spawn_single_boss(round_num: int, cfg: Dictionary, spawn_offset: Vector3 = Vector3.ZERO) -> ZombieEnemy:
 	var boss := ZombieEnemy.new()
 	boss.add_to_group("enemies")
 	enemies_container.add_child(boss)
-	boss.global_position = arena.get_boss_spawn(_focus_pos())
+	var raw_sp := arena.get_boss_spawn(_focus_pos()) + spawn_offset
+	boss.global_position = arena.find_clear_ground_point(raw_sp, "", 0.58)
 	boss.setup_boss(cfg)
 	# Bosses are tougher: +70% health, +30% damage, faster, more armor
 	boss.max_hp *= 1.7 * (1.0 + 0.65 * float(Net.player_count() - 1)) * GameState.diff_hp_mult() * GameState.diff("boss")
 	boss.hp = boss.max_hp
 	boss.base_damage *= 1.3 * GameState.diff_dmg_mult()
-	boss.base_speed *= 1.12 * minf(GameState.diff("speed"), 1.15)
+	boss.base_speed *= 1.12 * minf(GameState.diff("speed"), 1.28 if GameState.is_overdrive() else 1.15)
 	boss.endurance = minf(0.6, boss.endurance + 0.08)
+	var od := _od()
+	if od and od.has_method("decorate_boss"):
+		od.decorate_boss(boss, round_num)
 	boss.set_meta("final", bool(cfg.get("final", false)))
 	boss.target_player = _nearest_player(boss.global_position)
 	if is_instance_valid(boss.target_player):
@@ -518,14 +601,17 @@ func _spawn_round_boss(round_num: int) -> void:
 	boss.boss_damaged.connect(func(b: ZombieEnemy): boss_updated.emit(b))
 	boss.spawn_minion_requested.connect(func(pos: Vector3):
 		var safe := NavigationServer3D.map_get_closest_point(boss.get_world_3d().navigation_map, pos)
+		safe = arena.find_clear_ground_point(safe, "", 0.40)
 		_spawn_regular_zombie(round_num, safe + Vector3(0, 0.1, 0), "crawler")
 	)
 
+	active_bosses.append(boss)
 	active_boss = boss
 	alive_enemies += 1
 	_emit_wave_status()
 	boss_spawned.emit(boss)
 	_net_register(boss, {"k": "b", "r": round_num})
+	return boss
 
 
 func _on_enemy_died(enemy: ZombieEnemy, _was_headshot: bool) -> void:
@@ -535,6 +621,19 @@ func _on_enemy_died(enemy: ZombieEnemy, _was_headshot: bool) -> void:
 		_commander_slain(enemy)
 
 	if enemy.is_boss:
+		var remaining: Array[ZombieEnemy] = []
+		for b in active_bosses:
+			if is_instance_valid(b) and not b.is_dead and b != enemy:
+				remaining.append(b)
+		active_bosses = remaining
+		if not active_bosses.is_empty():
+			active_boss = active_bosses[0]
+			boss_spawned.emit(active_boss)
+			if enemy.get_meta("final", false):
+				if Net.is_online():
+					_c_victory.rpc()
+				_victory()
+			return
 		active_boss = null
 		if enemy.get_meta("final", false):
 			if Net.is_online():
@@ -714,13 +813,16 @@ func _boss_down(boss_name: String) -> void:
 		player.refill_all_ammo()
 		player.hp = minf(player.max_hp, player.hp + 45.0)
 		player.hp_changed.emit(player.hp, player.max_hp, player.overshield)
+	if GameState.is_overdrive():
+		var od := _od()
+		if od and od.has_method("spawn_boss_draft"):
+			od.spawn_boss_draft(Vector3(0.0, 0.0, 5.5), player)
 
 
 func _on_powerup_collected(kind: String) -> void:
 	if not is_instance_valid(player):
 		return
 	GameState.play_sfx("buy_ching", 2.0, 0.75)
-	GameState.play_sfx("round_sting", -4.0, 1.6)
 	match kind:
 		"max_ammo":
 			if not player.is_dead:
@@ -742,7 +844,7 @@ func _on_powerup_collected(kind: String) -> void:
 			player.status_banner_requested.emit("CARPENTER! EVERY WINDOW REBUILT  +200", Color(0.95, 0.72, 0.4))
 		"fire_sale":
 			GameState.activate_powerup("fire_sale", 30.0)
-			GameState.play_sfx("fire_sale", -1.0, 1.0)
+			GameState.play_sfx("crate_open", -1.0, 1.0)
 			player.status_banner_requested.emit("FIRE SALE! MYSTERY CRATE COSTS 10 POINTS FOR 30s", Color(1.0, 0.35, 0.25))
 	powerup_collected.emit(kind)
 
@@ -922,7 +1024,7 @@ func _extract_local() -> void:
 	if not is_instance_valid(player) or player.extracted:
 		return
 	player.extract_to(heli)
-	GameState.play_sfx("exfil_success", 0.0, 1.0)
+	GameState.play_sfx("radio_beep", 0.0, 0.95)
 	GameState.record_exfil()
 	exfil_won.emit()
 
@@ -1021,7 +1123,7 @@ func _victory() -> void:
 	for z in get_tree().get_nodes_in_group("enemies"):
 		if is_instance_valid(z) and not z.is_dead and not z.net_puppet:
 			z.take_damage(1.0e9, Vector3.ZERO, true, "explosive")
-	GameState.play_sfx("exfil_success", 0.0, 1.0)
+	GameState.play_sfx("radio_beep", 0.0, 0.95)
 	if is_instance_valid(player):
 		player.revive_invuln = 9999.0
 	run_won.emit()
@@ -1038,7 +1140,7 @@ func world_state() -> Dictionary:
 			doors.append(String(n.zone_id))
 		if "_running" in n and n._running:
 			power = true
-	return {"run_id": GameState.run_id, "round": GameState.current_round, "difficulty": GameState.difficulty, "mode": GameState.game_mode,
+	return {"run_id": GameState.run_id, "round": GameState.current_round, "difficulty": GameState.active_diff_index(), "mode": GameState.game_mode,
 		"doors": doors, "power": power, "players": Net.player_count()}
 
 
@@ -1291,3 +1393,20 @@ func _banner_all(text: String, col: Color) -> void:
 		player.status_banner_requested.emit(text, col)
 	if Net.is_online():
 		_c_banner.rpc(text, col)
+
+
+func spawn_crimson_reborn(pos: Vector3) -> ZombieEnemy:
+	var z := ZombieEnemy.new()
+	z.add_to_group("enemies")
+	enemies_container.add_child(z)
+	z.global_position = pos
+	z.setup_regular(maxi(1, GameState.current_round), "sprinter")
+	z.max_hp *= GameState.diff_hp_mult()
+	z.hp = z.max_hp
+	z.base_damage *= GameState.diff_dmg_mult()
+	z.base_speed *= GameState.diff("speed")
+	z.target_player = _nearest_player(pos)
+	z.make_crimson_reborn()
+	z.died.connect(_on_enemy_died)
+	alive_enemies += 1
+	return z

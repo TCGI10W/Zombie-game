@@ -18,6 +18,7 @@ signal session_ended(reason: String)
 enum Mode {OFFLINE, HOST, CLIENT}
 
 const MAX_PLAYERS := 8
+const MAX_PVP_PLAYERS := 32
 const PORT := 24680
 const STEAM_APP_ID := 480 # Valve's public test app ("Spacewar"); replace with your own App ID
 const NET_VERSION := "dp-coop-8"
@@ -31,7 +32,8 @@ var steam_ok: bool = false
 var steam_id: int = 0
 var my_name: String = "SURVIVOR"
 var lobby_id: int = 0
-var players: Dictionary = {} # peer_id -> {"name", "char", "color"}
+var players: Dictionary = {} # peer_id -> {"name", "char", "color", "team"}
+var my_team: int = 0
 var in_game: bool = false
 var status_text: String = ""
 var _pending_lobby: int = 0
@@ -114,7 +116,41 @@ func player_name(peer_id: int) -> String:
 
 
 func player_color(peer_id: int) -> Color:
+	if GameState.is_pvp() and players.has(peer_id):
+		return GameState.pvp_team_color(int((players[peer_id] as Dictionary).get("team", 0)))
 	return COLORS[int(players.get(peer_id, {}).get("color", 0)) % COLORS.size()]
+
+
+func active_max_players() -> int:
+	return MAX_PVP_PLAYERS if GameState.is_pvp() else MAX_PLAYERS
+
+
+func player_team(peer_id: int) -> int:
+	return int((players.get(peer_id, {}) as Dictionary).get("team", GameState.pvp_selected_team))
+
+
+func count_on_team(team_id: int) -> int:
+	var n := 0
+	for p in players.values():
+		if int((p as Dictionary).get("team", 0)) == team_id:
+			n += 1
+	return n
+
+
+func pick_open_team(preferred: int = 0) -> int:
+	var t_count: int = GameState.pvp_team_count()
+	var cap: int = GameState.pvp_max_per_team()
+	var pref: int = clampi(preferred, 0, t_count - 1)
+	if count_on_team(pref) < cap:
+		return pref
+	var best_t := pref
+	var best_n := 9999
+	for t in range(t_count):
+		var c := count_on_team(t)
+		if c < cap and c < best_n:
+			best_n = c
+			best_t = t
+	return best_t
 
 
 # Estimated host clock (seconds), kept by NetGame from snapshot timestamps
@@ -139,7 +175,7 @@ func host_steam() -> void:
 		return
 	leave()
 	_set_status("CREATING STEAM LOBBY...")
-	steam.createLobby(ClassDB.class_get_integer_constant("Steam", "LOBBY_TYPE_FRIENDS_ONLY"), MAX_PLAYERS)
+	steam.createLobby(ClassDB.class_get_integer_constant("Steam", "LOBBY_TYPE_FRIENDS_ONLY"), MAX_PVP_PLAYERS)
 
 
 func join_steam_lobby(lid: int) -> void:
@@ -160,7 +196,7 @@ func invite_friends() -> void:
 func host_direct(port: int = PORT) -> void:
 	leave()
 	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_server(port, MAX_PLAYERS - 1)
+	var err := peer.create_server(port, MAX_PVP_PLAYERS - 1)
 	if err != OK:
 		_fail("COULD NOT OPEN PORT %d (ERROR %d)" % [port, err])
 		return
@@ -223,8 +259,9 @@ func _start_peer(peer: MultiplayerPeer, new_mode: int, kind: String) -> void:
 	mode = new_mode
 	transport = kind
 	players.clear()
+	my_team = clampi(GameState.pvp_selected_team, 0, GameState.pvp_team_count() - 1)
 	if mode == Mode.HOST:
-		players[1] = {"name": my_name, "char": GameState.selected_character, "color": 0}
+		players[1] = {"name": my_name, "char": GameState.selected_character, "color": 0, "team": my_team}
 	lobby_changed.emit()
 
 
@@ -297,7 +334,7 @@ func _s_hello(pname: String, char_id: String, version: String) -> void:
 	if version != NET_VERSION:
 		_c_kick.rpc_id(id, "VERSION MISMATCH — EVERYONE NEEDS THE SAME BUILD")
 		return
-	if players.size() >= MAX_PLAYERS:
+	if players.size() >= active_max_players():
 		_c_kick.rpc_id(id, "LOBBY IS FULL")
 		return
 	var used := []
@@ -309,17 +346,22 @@ func _s_hello(pname: String, char_id: String, version: String) -> void:
 	var clean := pname.strip_edges().substr(0, 20)
 	if clean == "":
 		clean = "SURVIVOR"
-	players[id] = {"name": clean, "char": char_id, "color": col}
+	var team_id: int = pick_open_team(-1)
+	players[id] = {"name": clean, "char": char_id, "color": col, "team": team_id}
 	_c_players.rpc(players)
+	_c_match_config.rpc_id(id, _build_match_config())
 	lobby_changed.emit()
 	if in_game:
 		# Join in progress: load straight into the running game
-		_c_start_game.rpc_id(id, GameState.difficulty, GameState.run_id, false, true, GameState.game_mode)
+		_c_start_game.rpc_id(id, GameState.active_diff_index(), GameState.run_id, false, true, GameState.game_mode, _build_match_config())
 
 
 @rpc("authority", "call_remote", "reliable")
 func _c_players(list: Dictionary) -> void:
 	players = list
+	var me: int = my_id()
+	if players.has(me) and players[me] is Dictionary:
+		my_team = int((players[me] as Dictionary).get("team", my_team))
 	lobby_changed.emit()
 	_set_status("IN LOBBY — WAITING FOR THE HOST TO START")
 
@@ -350,24 +392,143 @@ func _s_set_char(char_id: String) -> void:
 		lobby_changed.emit()
 
 
+func set_team(tid: int) -> void:
+	var clamped: int = clampi(tid, 0, maxi(0, GameState.pvp_team_count() - 1))
+	my_team = clamped
+	GameState.pvp_selected_team = clamped
+	if not is_online():
+		return
+	if is_host():
+		_s_set_team(clamped)
+	else:
+		_s_set_team.rpc_id(1, clamped)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _s_set_team(tid: int) -> void:
+	if not is_host():
+		return
+	var id := multiplayer.get_remote_sender_id()
+	if id == 0:
+		id = 1
+	if not players.has(id):
+		return
+	var target: int = clampi(tid, 0, maxi(0, GameState.pvp_team_count() - 1))
+	var current: int = int((players[id] as Dictionary).get("team", 0))
+	if target != current and count_on_team(target) >= GameState.pvp_max_per_team():
+		target = pick_open_team(target)
+	players[id]["team"] = target
+	if id == 1:
+		my_team = target
+		GameState.pvp_selected_team = target
+	_c_players.rpc(players)
+	lobby_changed.emit()
+
+
+func _build_match_config() -> Dictionary:
+	return {
+		"game_mode": GameState.game_mode,
+		"pvp_mode": GameState.pvp_mode,
+		"pvp_map": GameState.pvp_map,
+		"active_pvp_map": GameState.active_pvp_map,
+		"team_preset": GameState.team_preset,
+		"pvp_player_cap": GameState.pvp_player_cap,
+	}
+
+
+func _apply_match_config(cfg: Dictionary) -> void:
+	if cfg.is_empty():
+		return
+	var gm: String = String(cfg.get("game_mode", GameState.game_mode))
+	if gm in ["casual", "infinite", "horror", "overdrive", "pvp"]:
+		GameState.game_mode = gm
+	var pm: String = String(cfg.get("pvp_mode", GameState.pvp_mode))
+	if GameState.PVP_MODES.has(pm):
+		GameState.pvp_mode = pm
+	var pmap: String = String(cfg.get("pvp_map", GameState.pvp_map))
+	if pmap == "random" or GameState.PVP_MAPS.has(pmap):
+		GameState.pvp_map = pmap
+	var amap: String = String(cfg.get("active_pvp_map", GameState.active_pvp_map))
+	if GameState.PVP_MAPS.has(amap):
+		GameState.active_pvp_map = amap
+	var tp: int = int(cfg.get("team_preset", GameState.team_preset))
+	if GameState.PVP_TEAM_PRESETS.has(tp):
+		GameState.team_preset = tp
+	var cap: int = int(cfg.get("pvp_player_cap", GameState.pvp_player_cap))
+	if cap in [0, 16, 24, 32]:
+		GameState.pvp_player_cap = cap
+
+
+func sync_match_config() -> void:
+	if not is_host():
+		return
+	var changed: bool = false
+	var t_count: int = GameState.pvp_team_count()
+	var t_max: int = GameState.pvp_max_per_team()
+	var counts: Array[int] = []
+	counts.resize(t_count)
+	for pid_v in players.keys():
+		var pid: int = int(pid_v)
+		var entry: Dictionary = players[pid]
+		var t: int = clampi(int(entry.get("team", 0)), 0, maxi(0, t_count - 1))
+		if counts[t] >= t_max:
+			t = pick_open_team(-1)
+		if int(entry.get("team", -1)) != t:
+			entry["team"] = t
+			if pid == 1:
+				my_team = t
+				GameState.pvp_selected_team = t
+			changed = true
+		counts[t] += 1
+	if changed:
+		_c_players.rpc(players)
+	_c_match_config.rpc(_build_match_config())
+	lobby_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_match_config(cfg: Dictionary) -> void:
+	_apply_match_config(cfg)
+	lobby_changed.emit()
+
+
 func start_game(resume: bool = false) -> void:
 	if mode != Mode.HOST:
 		return
+	var is_pvp_mode: bool = GameState.is_pvp()
+	if is_pvp_mode:
+		resume = false
+		GameState.resolve_pvp_map()
 	var rid := int(GameState.load_world().get("run_id", 0)) if resume else GameState.new_run_id()
 	if resume:
-		GameState.difficulty = int(GameState.load_world().get("difficulty", GameState.difficulty))
-		GameState.game_mode = String(GameState.load_world().get("mode", GameState.game_mode))
-	_c_start_game.rpc(GameState.difficulty, rid, resume, false, GameState.game_mode)
+		var w := GameState.load_world()
+		var wm := String(w.get("mode", GameState.game_mode))
+		GameState.game_mode = wm if wm in ["casual", "infinite", "horror", "overdrive", "pvp"] else "casual"
+		var wd := int(w.get("difficulty", GameState.active_diff_index()))
+		if GameState.is_overdrive():
+			GameState.overdrive_difficulty = clampi(wd, 0, GameState.OVERDRIVE_DIFFICULTIES.size() - 1)
+		else:
+			GameState.difficulty = clampi(wd, 0, GameState.DIFFICULTIES.size() - 1)
+	_c_start_game.rpc(GameState.active_diff_index(), rid, resume, false, GameState.game_mode, _build_match_config())
 
 
 @rpc("authority", "call_local", "reliable")
-func _c_start_game(diff: int, rid: int = 0, resume: bool = false, late: bool = false, mode: String = "casual") -> void:
-	GameState.difficulty = clampi(diff, 0, GameState.DIFFICULTIES.size() - 1)
-	GameState.game_mode = mode if mode in ["casual", "infinite"] else "casual"
+func _c_start_game(diff: int, rid: int = 0, resume: bool = false, late: bool = false, mode: String = "casual", pvp_cfg: Dictionary = {}) -> void:
+	GameState.game_mode = mode if mode in ["casual", "infinite", "horror", "overdrive", "pvp"] else "casual"
+	if GameState.is_pvp():
+		_apply_match_config(pvp_cfg)
+		var me: int = my_id()
+		if players.has(me) and players[me] is Dictionary:
+			my_team = int((players[me] as Dictionary).get("team", my_team))
+		GameState.pvp_selected_team = clampi(my_team, 0, maxi(0, GameState.pvp_team_count() - 1))
+	if GameState.is_overdrive():
+		GameState.overdrive_difficulty = clampi(diff, 0, GameState.OVERDRIVE_DIFFICULTIES.size() - 1)
+	else:
+		GameState.difficulty = clampi(diff, 0, GameState.DIFFICULTIES.size() - 1)
 	in_game = true
 	GameState.reset_run()
 	GameState.run_id = rid
-	GameState.pending_resume = resume
+	GameState.pending_resume = resume and not GameState.is_pvp()
 	GameState.late_join = late
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/game.tscn")

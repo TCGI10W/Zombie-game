@@ -11,6 +11,7 @@ var zone_id: String = "courtyard"
 var boards: int = MAX_BOARDS
 var interact_radius: float = 2.7
 var _board_nodes: Array[MeshInstance3D] = []
+var _board_bodies: Array[StaticBody3D] = []
 var _board_rest: Array[Transform3D] = []
 var _board_tweens: Dictionary = {}
 var _repair_t: float = 0.0
@@ -43,8 +44,20 @@ func _ready() -> void:
 		var tilt := deg_to_rad(randf_range(-9.0, 9.0))
 		var xf := Transform3D(Basis(Vector3.FORWARD, tilt), Vector3(randf_range(-0.05, 0.05), y, 0.36 + float(i % 2) * 0.03))
 		b.transform = xf
+		var b_sb := StaticBody3D.new()
+		b_sb.collision_layer = HitboxRig.BALLISTIC_WORLD_LAYER
+		b_sb.collision_mask = 0
+		b_sb.set_meta("surface", "wood")
+		b_sb.set_meta("penetrable", true)
+		var b_cs := CollisionShape3D.new()
+		var b_bs := BoxShape3D.new()
+		b_bs.size = bm.size
+		b_cs.shape = b_bs
+		b_sb.add_child(b_cs)
+		b.add_child(b_sb)
 		add_child(b)
 		_board_nodes.append(b)
+		_board_bodies.append(b_sb)
 		_board_rest.append(xf)
 
 
@@ -91,6 +104,8 @@ func _do_tear() -> void:
 		return
 	boards -= 1
 	var b := _board_nodes[boards]
+	if boards < _board_bodies.size() and is_instance_valid(_board_bodies[boards]):
+		_board_bodies[boards].collision_layer = 0
 	_kill_board_tween(boards)
 	var out_dir := global_basis.z
 	var tw := b.create_tween()
@@ -124,6 +139,8 @@ func _do_repair() -> void:
 	_kill_board_tween(boards)
 	b.transform = _board_rest[boards]
 	b.visible = true
+	if boards < _board_bodies.size() and is_instance_valid(_board_bodies[boards]):
+		_board_bodies[boards].collision_layer = HitboxRig.BALLISTIC_WORLD_LAYER
 	b.scale = Vector3(1.2, 1.2, 1.2)
 	_board_tweens[boards] = b.create_tween().tween_property(b, "scale", Vector3.ONE, 0.12)
 	boards += 1
@@ -136,6 +153,8 @@ func repair_all() -> void:
 		_kill_board_tween(boards)
 		b.transform = _board_rest[boards]
 		b.visible = true
+		if boards < _board_bodies.size() and is_instance_valid(_board_bodies[boards]):
+			_board_bodies[boards].collision_layer = HitboxRig.BALLISTIC_WORLD_LAYER
 		b.scale = Vector3(1.15, 1.15, 1.15)
 		_board_tweens[boards] = b.create_tween().tween_property(b, "scale", Vector3.ONE, 0.2)
 		boards += 1

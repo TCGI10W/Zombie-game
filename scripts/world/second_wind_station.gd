@@ -15,7 +15,9 @@ var _t: float = 0.0
 func _ready() -> void:
 	add_to_group("wall_stations")
 	if ResourceLoader.exists("res://assets/models/prop_med_station.glb"):
-		add_child((load("res://assets/models/prop_med_station.glb") as PackedScene).instantiate())
+		var ms := (load("res://assets/models/prop_med_station.glb") as PackedScene).instantiate() as Node3D
+		add_child(ms)
+		HitboxRig.attach_ballistic_trimesh(ms, "metal")
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
 	var cs := CollisionShape3D.new()
@@ -47,7 +49,7 @@ func _ready() -> void:
 	_label.pixel_size = 0.0045
 	_label.modulate = Color(0.55, 1.0, 0.7)
 	_label.position = Vector3(0, 2.55, -0.2)
-	_label.rotation.y = PI
+	_label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	add_child(_label)
 
 

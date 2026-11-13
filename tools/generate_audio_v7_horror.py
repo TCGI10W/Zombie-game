@@ -1,44 +1,28 @@
-"""Horror overhaul audio pack (CoD 5/7 + Bodycam v0.9).
+"""Horror overhaul audio pack (CoD 5/7 + Bodycam v0.9 — Pure Foley & Horror SFX, zero music).
 
-Generates new horror & tactical WAVs and upgrades stings in assets/audio/:
-  New clips:
-    - breath_panic.wav
-    - whisper_eerie.wav
-    - metal_scrape.wav
-    - fluorescent_buzz.wav
-    - flashlight_click.wav
-    - headshot_crunch.wav
-    - round_end_sting.wav
-    - boss_blackout.wav
-    - gun_suppressed.wav
-  Upgraded stings:
-    - round_sting.wav
-    - hound_round_sting.wav
+Generates/upgrades physical & horror SFX WAVs in assets/audio/:
+  - breath_panic.wav
+  - whisper_eerie.wav
+  - metal_scrape.wav
+  - fluorescent_buzz.wav
+  - flashlight_click.wav
+  - headshot_crunch.wav
+  - boss_blackout.wav
+  - gun_suppressed.wav
+  - crate_open.wav
+  - crate_reveal.wav
+  - level_up.wav
+  - powerup_spawn.wav
+  - second_wind.wav
 
 Run with: python tools/generate_audio_v7_horror.py
 """
 import numpy as np
 
-from generate_audio import SR, save_wav, phase_sin, pink_noise, fft_bandpass, convolve_bunker_reverb
+from generate_audio import SR, save_wav, phase_sin, pink_noise, fft_bandpass, convolve_bunker_reverb, modal_ring
 from generate_audio_v6 import fft_band, env
 
 rng = np.random.default_rng(7077)
-
-
-def _piano_note(freq_hz: float, dur: float, detune_cents: float = 0.0, hammer: float = 0.35) -> np.ndarray:
-    """Detuned haunting felt-piano note with wooden hammer thud and tape wow."""
-    n = int(dur * SR)
-    t = np.arange(n, dtype=np.float64) / SR
-    wow = 1.0 + 0.0028 * np.sin(2.0 * np.pi * 0.42 * t + rng.uniform(0, 6.28))
-    f0 = freq_hz * (2.0 ** (detune_cents / 1200.0)) * wow
-    sig = np.zeros(n, dtype=np.float64)
-    partials = [(1.0, 1.0, 0.85), (2.001, 0.42, 1.4), (3.005, 0.16, 2.2), (4.015, 0.06, 3.3), (0.5, 0.18, 0.7)]
-    for mult, amp, decay in partials:
-        sig += amp * phase_sin(f0 * mult, rng.uniform(0, 6.28)) * np.exp(-t * decay)
-    # Soft felt hammer thump
-    thud = fft_bandpass(pink_noise(n, 1.2), 70.0, 420.0) * env(n, 0.004, 0.035) * hammer
-    attack = np.clip(t / 0.012, 0.0, 1.0)
-    return (sig * attack + thud) * np.exp(-t * 0.45)
 
 
 def make_breath_panic() -> np.ndarray:
@@ -151,71 +135,108 @@ def make_headshot_crunch() -> np.ndarray:
     return convolve_bunker_reverb(thud + crack + wet, rt60=0.42, wet=0.22, predelay_ms=8.0)
 
 
-def make_round_end_sting() -> np.ndarray:
-    """CoD 5 Nacht/Verruckt mournful detuned piano & hollow sub drone."""
-    dur = 5.2
+def make_crate_open() -> np.ndarray:
+    """Heavy rusty iron padlock clack + creaking wooden lid hinge + metallic weapon-rack rattle."""
+    dur = 1.6
     n = int(dur * SR)
     out = np.zeros(n, dtype=np.float64)
-    # Slow haunted descending minor phrase: A3 -> F3 -> E3 -> D3 over low D2 pedal
-    notes = [
-        (0.05, 73.42, 4.6, -9.0, 0.65),
-        (0.08, 220.00, 2.8, -6.0, 0.75),
-        (0.95, 174.61, 2.6, 8.0, 0.70),
-        (1.85, 164.81, 2.5, -11.0, 0.65),
-        (2.75, 146.83, 2.4, 5.0, 0.85),
-    ]
-    for start_s, hz, ndur, cents, amp in notes:
-        i0 = int(start_s * SR)
-        sig = _piano_note(hz, ndur, cents, hammer=0.28) * amp
-        k = min(len(sig), n - i0)
-        out[i0:i0 + k] += sig[:k]
-    # Hollow eerie sub-drone & breathy ghost choir
-    t = np.arange(n, dtype=np.float64) / SR
-    drone = phase_sin(np.full(n, 55.0)) * env(n, 0.6, 2.4) * 0.35
-    ghost = fft_bandpass(pink_noise(n, 0.9), 420.0, 1150.0) * env(n, 1.1, 2.1) * 0.22
-    return convolve_bunker_reverb(out + drone + ghost, rt60=1.8, wet=0.46, predelay_ms=26.0)
+    # 0.00s: heavy iron hasp / padlock snap + wood knock
+    k0 = min(int(0.18 * SR), n)
+    t0 = np.arange(k0, dtype=np.float64) / SR
+    hasp = modal_ring(k0, [1420.0, 2680.0, 4150.0], [55.0, 75.0, 95.0], [0.55, 0.35, 0.2])
+    thud = phase_sin(75.0 + 90.0 * np.exp(-t0 * 40.0)) * np.exp(-t0 * 24.0) * 0.8
+    out[:k0] += hasp + thud
+    # 0.16s..1.05s: creaking stiff wooden lid hinge
+    c_start = int(0.16 * SR)
+    c_len = int(0.88 * SR)
+    tc = np.arange(c_len, dtype=np.float64) / SR
+    stutter = 0.55 + 0.45 * np.sin(2.0 * np.pi * 11.5 * tc)
+    creak_f = 290.0 + 75.0 * np.sin(2.0 * np.pi * 2.4 * tc)
+    creak = (phase_sin(creak_f) * 0.55 + phase_sin(creak_f * 2.02) * 0.25) * stutter * np.hanning(c_len) * 0.48
+    wood_rub = fft_bandpass(pink_noise(c_len, 1.1), 220.0, 1450.0) * np.hanning(c_len) * 0.35
+    out[c_start:c_start + c_len] += creak + wood_rub
+    # 0.95s..1.48s: internal iron weapon-rack latches clattering
+    for dt_s, f_base in [(0.96, 980.0), (1.12, 1340.0), (1.27, 1780.0)]:
+        i0 = int(dt_s * SR)
+        k = min(int(0.16 * SR), n - i0)
+        out[i0:i0 + k] += modal_ring(k, [f_base, f_base * 1.68], [45.0, 68.0], [0.42, 0.28])
+    return convolve_bunker_reverb(out, rt60=0.62, wet=0.26, predelay_ms=12.0)
 
 
-def make_round_sting() -> np.ndarray:
-    """CoD 5/7 haunted round-start piano + reversed whisper swell."""
-    dur = 5.8
+def make_crate_reveal() -> np.ndarray:
+    """Crisp steel gun-receiver bolt lock click + solid oak crate thud."""
+    dur = 0.55
     n = int(dur * SR)
+    t = np.arange(n, dtype=np.float64) / SR
     out = np.zeros(n, dtype=np.float64)
-    t = np.arange(n, dtype=np.float64) / SR
-    # Classic tense minor piano + dissonant minor-second shadow: D2, D3, F3, C#4, Bb3
-    notes = [
-        (0.04, 73.42, 5.4, -7.0, 0.85),
-        (0.18, 146.83, 3.6, 6.0, 0.72),
-        (0.92, 174.61, 3.2, -10.0, 0.70),
-        (1.68, 277.18, 2.6, 12.0, 0.58),
-        (2.55, 233.08, 3.0, -8.0, 0.74),
-    ]
-    for start_s, hz, ndur, cents, amp in notes:
-        i0 = int(start_s * SR)
-        sig = _piano_note(hz, ndur, cents, hammer=0.36) * amp
-        k = min(len(sig), n - i0)
-        out[i0:i0 + k] += sig[:k]
-    # Low ominous scrape & choir dread underneath
-    choir = fft_bandpass(pink_noise(n, 0.7), 290.0, 920.0) * env(n, 0.9, 2.4) * 0.30
-    sub = phase_sin(48.0 * (1.0 - 0.18 * t / dur)) * env(n, 0.35, 2.8) * 0.48
-    return convolve_bunker_reverb(out + choir + sub, rt60=1.9, wet=0.45, predelay_ms=24.0)
+    # 0.00s: heavy oak wood seat thud
+    out += phase_sin(110.0 * np.exp(-t * 32.0) + 46.0) * np.exp(-t * 18.0) * 0.85
+    out += modal_ring(n, [145.0, 295.0], [28.0, 40.0], [0.5, 0.3])
+    # 0.07s: double steel bolt lock snap
+    for s, f1, f2 in [(0.07, 1850.0, 3420.0), (0.14, 2450.0, 4880.0)]:
+        i0 = int(s * SR)
+        k = min(int(0.14 * SR), n - i0)
+        out[i0:i0 + k] += modal_ring(k, [f1, f2], [65.0, 90.0], [0.55, 0.38])
+        out[i0:i0 + k] += fft_band(rng.standard_normal(k), 1800, 6800) * env(k, 0.0003, 0.009) * 0.65
+    return convolve_bunker_reverb(out, rt60=0.45, wet=0.22, predelay_ms=8.0)
 
 
-def make_hound_round_sting() -> np.ndarray:
-    """Demonic Hellhound round dread horn + thunder crack."""
-    dur = 5.5
+def make_level_up() -> np.ndarray:
+    """Heavy mechanical gear latch click + pressurized forge steam hiss."""
+    dur = 0.65
     n = int(dur * SR)
     t = np.arange(n, dtype=np.float64) / SR
-    # Dissonant tritone sub-brass: 58 Hz + 82 Hz + gritty saw harmonics
-    drop = 1.0 - 0.12 * np.clip(t / dur, 0.0, 1.0)
-    horn = np.zeros(n, dtype=np.float64)
-    for f0 in [58.27, 82.41]:
-        for k in range(1, 7):
-            horn += (0.7 / k) * phase_sin(f0 * k * drop + rng.uniform(-0.2, 0.2), rng.uniform(0, 6.28))
-    horn *= env(n, 0.35, 2.2) * 0.45
-    rumble = fft_bandpass(pink_noise(n, 1.5), 35.0, 240.0) * env(n, 0.08, 1.6) * 0.9
-    growl = fft_bandpass(pink_noise(n, 0.8), 420.0, 1600.0) * env(n, 0.4, 1.1) * 0.35
-    return convolve_bunker_reverb(horn + rumble + growl, rt60=1.8, wet=0.42, predelay_ms=20.0)
+    out = np.zeros(n, dtype=np.float64)
+    # Mechanical ratchet latch clicks
+    for s, f0 in [(0.01, 1180.0), (0.09, 1520.0), (0.18, 2100.0)]:
+        i0 = int(s * SR)
+        k = min(int(0.12 * SR), n - i0)
+        out[i0:i0 + k] += modal_ring(k, [f0, f0 * 1.72], [58.0, 82.0], [0.55, 0.35])
+    # Lock-in anvil clunk
+    i_lock = int(0.18 * SR)
+    k_lock = n - i_lock
+    tl = np.arange(k_lock, dtype=np.float64) / SR
+    out[i_lock:] += phase_sin(130.0 * np.exp(-tl * 25.0) + 52.0) * np.exp(-tl * 16.0) * 0.9
+    # Pressurized pneumatic steam hiss
+    hiss_env = np.clip((t - 0.16) / 0.04, 0.0, 1.0) * np.exp(-np.maximum(0.0, t - 0.18) * 6.5) * (t >= 0.16)
+    out += fft_bandpass(pink_noise(n, 0.9), 1400.0, 7200.0) * hiss_env * 0.68
+    return convolve_bunker_reverb(out, rt60=0.48, wet=0.24, predelay_ms=10.0)
+
+
+def make_powerup_spawn() -> np.ndarray:
+    """Metallic supply-canister floor drop thud + brief electrical arc crackle."""
+    dur = 0.55
+    n = int(dur * SR)
+    t = np.arange(n, dtype=np.float64) / SR
+    out = np.zeros(n, dtype=np.float64)
+    # Canister impact on stone
+    out += phase_sin(145.0 * np.exp(-t * 30.0) + 50.0) * np.exp(-t * 15.0) * 0.95
+    out += modal_ring(n, [480.0, 1120.0, 2340.0], [32.0, 52.0, 80.0], [0.48, 0.34, 0.22])
+    # Brief spark crackle bursts
+    for s in [0.04, 0.11, 0.21]:
+        i0 = int(s * SR)
+        k = min(int(0.09 * SR), n - i0)
+        out[i0:i0 + k] += fft_band(rng.standard_normal(k), 1900, 7600) * env(k, 0.0004, 0.016) * 0.62
+    return convolve_bunker_reverb(out, rt60=0.50, wet=0.25, predelay_ms=9.0)
+
+
+def make_second_wind() -> np.ndarray:
+    """Sharp ragged adrenaline gasp inhale + double low heartbeat thump."""
+    dur = 1.2
+    n = int(dur * SR)
+    t = np.arange(n, dtype=np.float64) / SR
+    # Double strong pulse heartbeat (0.04s and 0.28s)
+    beat = np.zeros(n, dtype=np.float64)
+    for bp, amp in [(0.04, 1.0), (0.28, 0.72), (0.68, 0.85), (0.90, 0.60)]:
+        i0 = int(bp * SR)
+        k = min(int(0.18 * SR), n - i0)
+        tk = np.arange(k, dtype=np.float64) / SR
+        beat[i0:i0 + k] += phase_sin(95.0 * np.exp(-tk * 24.0) + 38.0) * np.exp(-tk * 17.0) * amp
+    # Urgent chest gasp inhale
+    gasp_env = np.exp(-((t - 0.36) ** 2) / (2.0 * 0.14 ** 2))
+    gasp = fft_bandpass(pink_noise(n, 0.8), 320.0, 2300.0) * gasp_env * 0.85
+    throat = fft_bandpass(pink_noise(n, 1.0), 140.0, 520.0) * gasp_env * 0.55
+    return convolve_bunker_reverb(beat + gasp + throat, rt60=0.40, wet=0.20, predelay_ms=6.0)
 
 
 def make_boss_blackout() -> np.ndarray:
@@ -264,11 +285,13 @@ def main():
         "fluorescent_buzz": make_fluorescent_buzz(),
         "flashlight_click": make_flashlight_click(),
         "headshot_crunch": make_headshot_crunch(),
-        "round_end_sting": make_round_end_sting(),
-        "round_sting": make_round_sting(),
-        "hound_round_sting": make_hound_round_sting(),
         "boss_blackout": make_boss_blackout(),
         "gun_suppressed": make_gun_suppressed(),
+        "crate_open": make_crate_open(),
+        "crate_reveal": make_crate_reveal(),
+        "level_up": make_level_up(),
+        "powerup_spawn": make_powerup_spawn(),
+        "second_wind": make_second_wind(),
     }
     for name, sig in clips.items():
         save_wav(name, sig)

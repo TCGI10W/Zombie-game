@@ -36,9 +36,11 @@ static var active_count: int = 0
 static var _phys_mat: PhysicsMaterial
 
 var bodies: Dictionary = {}
+var persist_corpse: bool = false
 var _t: float = 0.0
 var _frozen: bool = false
 var _shock: float = 0.0
+var _consumed: bool = false
 
 
 static var _spawn_frame: int = -1
@@ -238,11 +240,51 @@ func _physics_process(delta: float) -> void:
 		_frozen = true
 		for nm in bodies:
 			var b: RigidBody3D = bodies[nm]
+			if not is_instance_valid(b):
+				continue
 			b.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
 			b.freeze = true
 			b.collision_layer = 0
-			b.create_tween().tween_property(b, "global_position:y", b.global_position.y - 1.1, SINK_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		create_tween().tween_callback(queue_free).set_delay(SINK_TIME + 0.1)
+			if not persist_corpse:
+				b.create_tween().tween_property(b, "global_position:y", b.global_position.y - 1.1, SINK_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		if not persist_corpse:
+			create_tween().tween_callback(queue_free).set_delay(SINK_TIME + 0.1)
+
+
+func corpse_center() -> Vector3:
+	for k in ["Spine", "Hips", "Head"]:
+		if bodies.has(k) and is_instance_valid(bodies[k]):
+			return (bodies[k] as RigidBody3D).global_position
+	return global_position + Vector3(0, 0.25, 0)
+
+
+func twitch_corpse(intensity: float = 1.0) -> void:
+	if _consumed:
+		return
+	for nm in bodies:
+		var b: RigidBody3D = bodies[nm]
+		if not is_instance_valid(b) or b.freeze:
+			continue
+		if randf() < 0.45:
+			b.apply_central_impulse(Vector3(randf_range(-0.6, 0.6), randf_range(0.35, 1.1), randf_range(-0.6, 0.6)) * b.mass * intensity * 0.45)
+
+
+func consume_and_free(dur: float = 0.35) -> void:
+	if _consumed:
+		return
+	_consumed = true
+	_frozen = true
+	var d := maxf(dur, 0.05)
+	for nm in bodies:
+		var b: RigidBody3D = bodies[nm]
+		if not is_instance_valid(b):
+			continue
+		b.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+		b.freeze = true
+		b.collision_layer = 0
+		var tw := b.create_tween()
+		tw.tween_property(b, "global_position:y", b.global_position.y - 0.85, d).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	create_tween().tween_callback(queue_free).set_delay(d + 0.05)
 
 
 # Basis whose Y axis points along `dir` (for capsules).

@@ -142,6 +142,8 @@ var _yaw_rate: float = 0.0
 const RagdollScript := preload("res://scripts/enemies/ragdoll.gd")
 
 # Hit feedback & spawn animation
+var _hurtboxes: Array[Area3D] = []
+var _leg_cripple: float = 0.0
 var _meshes: Array[MeshInstance3D] = []
 var rise_timer: float = 0.0
 
@@ -158,8 +160,29 @@ var _net_attacker: int = 1
 var dmg_by: Dictionary = {} # host, co-op: peer id -> damage dealt (assists)
 var _retarget_t: float = 0.0
 var _ng_cache: Node = null
+var _nav_repath_t: float = 0.0
+var _nav_last_dest: Vector3 = Vector3.INF
+var _stuck_check_t: float = 0.0
+var _stuck_last_pos: Vector3 = Vector3.ZERO
+var _jump_cd: float = 0.0
+var _bypass_t: float = 0.0
+var _bypass_dir: Vector3 = Vector3.ZERO
+var _steer_side: float = 1.0 if randf() < 0.5 else -1.0
 static var _flash_mat: StandardMaterial3D
 static var _blood_mat: StandardMaterial3D
+
+enum { SENSORY_WANDER, SENSORY_INVESTIGATE, SENSORY_HUNT, SENSORY_SEARCH }
+var is_reborn: bool = false
+var sensory_state: int = SENSORY_WANDER
+var _sensory_pos: Vector3 = Vector3.ZERO
+var _sensory_timer: float = 0.0
+var _los_lost_t: float = 0.0
+var _los_check_t: float = 0.0
+var _cached_los: bool = false
+var _wander_goal: Vector3 = Vector3.ZERO
+var _ragdoll_ref: Node3D = null
+var _corpse_persisting: bool = false
+var _last_eye_state: int = -1
 
 
 func setup_regular(round_num: int, variant: String = "walker") -> void:
@@ -340,6 +363,10 @@ func _build_body(model_path: String, accent_color: Color) -> void:
 	_build_status_vfx(cap.height, accent_color)
 	_attach_pinprick_eyes(accent_color if is_boss else Color(0.85, 0.72, 0.32))
 	_build_3d_audio(cap.height)
+	if is_boss:
+		_hurtboxes = HitboxRig.attach_boss(self, visual_root, boss_type)
+	elif rig != null and "nodes" in rig:
+		_hurtboxes = HitboxRig.attach_humanoid(self, rig.nodes, is_crawler)
 	anim_phase = randf() * TAU
 	_last_step_half = int(floor(anim_phase / PI))
 	roar_timer = randf_range(0.8, 2.2) if is_boss else randf_range(2.2, 7.5)
@@ -485,6 +512,8 @@ func _play_3d_footstep(step_index: int) -> void:
 		var cam := get_viewport().get_camera_3d()
 		if cam:
 			var d := cam.global_position.distance_to(global_position)
+			if is_reborn and d > 4.2:
+				return
 			if (d > 10.0 and step_index % 2 == 1) or (d > 16.0 and step_index % 4 != 0):
 				return
 	var clip := "boss_step" if is_boss else ("zombie_step_1" if (step_index % 2 == 0) else "zombie_step_2")
@@ -606,6 +635,7 @@ func _physics_process(delta: float) -> void:
 	if is_boss and Net.is_online():
 		_net_sync_fx()
 	_flesh_sfx_cd = maxf(0.0, _flesh_sfx_cd - delta)
+	_leg_cripple = maxf(0.0, _leg_cripple - delta * 0.08)
 	_yaw_rate = lerpf(_yaw_rate, wrapf(rotation.y - _prev_yaw, -PI, PI) / maxf(delta, 0.001), clampf(10.0 * delta, 0.0, 1.0))
 	_prev_yaw = rotation.y
 	if pending_hit_t > 0.0:
@@ -704,7 +734,50 @@ func _physics_process(delta: float) -> void:
 	else:
 		_process_regular_zombie_ai(delta, speed_mult)
 
+	_nav_repath_t = maxf(0.0, _nav_repath_t - delta)
+	_jump_cd = maxf(0.0, _jump_cd - delta)
+	if not (entry_window != null and entry_stage < 3) and _sleeper_awake:
+		_apply_anti_stuck(delta)
+	if is_on_floor() and velocity.y <= 0.5:
+		StepHelper.try_step_up(self, Vector3(velocity.x, 0.0, velocity.z), delta, 0.34)
+
 	move_and_slide()
+
+
+func _apply_anti_stuck(delta: float) -> void:
+	var horiz_want := Vector2(velocity.x, velocity.z).length()
+	if horiz_want < 0.75:
+		_stuck_check_t = 0.0
+		_stuck_last_pos = global_position
+		_bypass_t = 0.0
+		return
+	var want_dir := Vector3(velocity.x, 0.0, velocity.z).normalized()
+	if _bypass_t > 0.0:
+		_bypass_t -= delta
+		var b_vel := _bypass_dir * horiz_want
+		velocity.x = lerpf(velocity.x, b_vel.x, clampf(10.0 * delta, 0.0, 1.0))
+		velocity.z = lerpf(velocity.z, b_vel.z, clampf(10.0 * delta, 0.0, 1.0))
+	if is_on_floor() and is_on_wall() and _jump_cd <= 0.0 and not is_crawler and StepHelper.probe_jumpable_obstacle(self, want_dir, 1.25):
+		velocity.y = 6.4
+		velocity.x = want_dir.x * maxf(horiz_want, 3.6)
+		velocity.z = want_dir.z * maxf(horiz_want, 3.6)
+		_jump_cd = 0.9
+		_stuck_check_t = 0.0
+		_stuck_last_pos = global_position
+		return
+	_stuck_check_t += delta
+	if _stuck_check_t >= 0.55:
+		_stuck_check_t = 0.0
+		var moved := Vector2(global_position.x - _stuck_last_pos.x, global_position.z - _stuck_last_pos.z).length()
+		_stuck_last_pos = global_position
+		if moved < 0.20:
+			if is_on_floor() and _jump_cd <= 0.0 and not is_crawler and StepHelper.probe_jumpable_obstacle(self, want_dir, 1.25):
+				velocity.y = 6.5
+				_jump_cd = 0.9
+			else:
+				_bypass_dir = StepHelper.pick_bypass_dir(self, want_dir)
+				_bypass_t = 0.60
+				_nav_repath_t = 0.0
 
 
 func set_entry_window(w: Node3D) -> void:
@@ -730,6 +803,8 @@ func _process_window_entry(delta: float, speed_mult: float) -> void:
 				tear_timer = 0.9
 			else:
 				var dir := to_t.normalized()
+				if is_on_wall():
+					dir = StepHelper.pick_bypass_dir(self, dir)
 				velocity.x = lerp(velocity.x, dir.x * spd, 8.0 * delta)
 				velocity.z = lerp(velocity.z, dir.z * spd, 8.0 * delta)
 				_face_direction(dir, delta * 8.0)
@@ -826,6 +901,11 @@ func _process_regular_zombie_ai(delta: float, speed_mult: float) -> void:
 	if is_spitter:
 		_process_spitter(delta, speed_mult)
 		return
+	if GameState.is_horror_mode() and not is_boss:
+		_update_sensory_state(delta)
+		if sensory_state != SENSORY_HUNT:
+			_process_sensory_move(delta, speed_mult)
+			return
 	var to_p := target_player.global_position - global_position
 	var flat_dist := Vector2(to_p.x, to_p.z).length()
 
@@ -935,7 +1015,10 @@ func _boss_gun_zombie(delta: float, dist: float, dir_to_p: Vector3, speed_mult: 
 			if dist > 13.5:
 				desired_vel = _get_nav_dir(target_player.global_position) * base_speed * speed_mult
 			elif dist < 6.5:
-				desired_vel = -dir_to_p * base_speed * 0.75 * speed_mult
+				var back_dir := -dir_to_p
+				if StepHelper.is_blocked_ahead(self, back_dir, 1.15):
+					back_dir = StepHelper.pick_bypass_dir(self, back_dir)
+				desired_vel = back_dir * base_speed * 0.75 * speed_mult
 			else:
 				var right := Vector3(-dir_to_p.z, 0, dir_to_p.x) * strafe_dir
 				desired_vel = right * base_speed * 0.72 * speed_mult
@@ -1097,7 +1180,10 @@ func _boss_necromancer(delta: float, dist: float, dir_to_p: Vector3, speed_mult:
 	if dist > 14.5:
 		desired = _get_nav_dir(target_player.global_position) * base_speed * speed_mult
 	elif dist < 7.5:
-		desired = -dir_to_p * base_speed * 0.7 * speed_mult
+		var back_dir := -dir_to_p
+		if StepHelper.is_blocked_ahead(self, back_dir, 1.15):
+			back_dir = StepHelper.pick_bypass_dir(self, back_dir)
+		desired = back_dir * base_speed * 0.7 * speed_mult
 	velocity.x = lerp(velocity.x, desired.x, 6.0 * delta)
 	velocity.z = lerp(velocity.z, desired.z, 6.0 * delta)
 	_animate_walk(delta, desired.length())
@@ -1188,7 +1274,11 @@ func _boss_phantom(delta: float, dist: float, dir_to_p: Vector3, speed_mult: flo
 		attack_cooldown = 2.4 / rate_mult
 		_spawn_shockwave_ring(global_position, 2.0, Color(0.35, 0.75, 1.0))
 		var blink_to := global_position.lerp(target_player.global_position, 0.55)
-		global_position = NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, blink_to)
+		var snapped := NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, blink_to)
+		var arena_ref := get_tree().get_first_node_in_group("arena")
+		if arena_ref and arena_ref.has_method("find_clear_ground_point"):
+			snapped = arena_ref.find_clear_ground_point(snapped, "", 0.50)
+		global_position = snapped
 		_spawn_shockwave_ring(global_position, 2.0, Color(0.35, 0.75, 1.0))
 		GameState.play_sfx("pain_drug", -1.0, 1.45)
 
@@ -1211,17 +1301,28 @@ func _boss_phantom(delta: float, dist: float, dir_to_p: Vector3, speed_mult: flo
 
 # --- NAVIGATION & PROCEDURAL ANIMATION ---
 func _get_nav_dir(dest: Vector3) -> Vector3:
+	var raw_dir: Vector3 = Vector3.FORWARD
+	var got_nav: bool = false
 	if nav_agent:
-		nav_agent.target_position = dest
+		if _nav_repath_t <= 0.0 or dest.distance_squared_to(_nav_last_dest) > 0.64:
+			nav_agent.target_position = dest
+			_nav_last_dest = dest
+			_nav_repath_t = 0.18 + randf() * 0.08
 		if not nav_agent.is_navigation_finished():
 			var next_pt := nav_agent.get_next_path_position()
 			var d := next_pt - global_position
 			d.y = 0.0
 			if d.length_squared() > 0.001:
-				return d.normalized()
-	var fallback := dest - global_position
-	fallback.y = 0.0
-	return fallback.normalized() if fallback.length_squared() > 0.001 else Vector3.FORWARD
+				raw_dir = d.normalized()
+				got_nav = true
+	if not got_nav:
+		var fallback := dest - global_position
+		fallback.y = 0.0
+		raw_dir = fallback.normalized() if fallback.length_squared() > 0.001 else Vector3.FORWARD
+	var probe_d: float = 2.05 if is_boss else 1.75
+	var st: Dictionary = StepHelper.steer_around_obstacles(self, raw_dir, probe_d, _steer_side)
+	_steer_side = float(st["side"])
+	return st["dir"] as Vector3
 
 
 func _face_direction(dir: Vector3, weight: float) -> void:
@@ -1232,7 +1333,8 @@ func _face_direction(dir: Vector3, weight: float) -> void:
 
 
 func _stagger_mult() -> float:
-	return 1.0 - 0.55 * rig.stagger if rig else 1.0
+	var s: float = (1.0 - 0.55 * float(rig.stagger)) if rig else 1.0
+	return s * (1.0 - 0.42 * _leg_cripple)
 
 
 func _animate_walk(delta: float, spd: float) -> void:
@@ -1246,7 +1348,20 @@ func _animate_walk(delta: float, spd: float) -> void:
 		var ground := Vector2(velocity.x, velocity.z).length() / maxf(0.1, model_scale)
 		var local_vel: Vector3 = (global_basis.inverse() * velocity) / maxf(0.1, model_scale)
 		var anim_speed: float = ground if mode != "crawl" else spd
-		if rig.update(delta, mode, anim_speed, {"vel": local_vel, "yaw_rate": _yaw_rate}):
+		var look_local := Vector3.ZERO
+		var reach_w: float = 0.0
+		if is_instance_valid(target_player) and (not GameState.is_horror_mode() or sensory_state == SENSORY_HUNT):
+			look_local = to_local(target_player.global_position + Vector3(0.0, 1.45, 0.0))
+			var dist_p: float = global_position.distance_to(target_player.global_position)
+			reach_w = clampf((3.9 - dist_p) / 2.2, 0.0, 1.0)
+		var extra: Dictionary = {
+			"vel": local_vel,
+			"yaw_rate": _yaw_rate,
+			"look_local": look_local,
+			"reach_w": reach_w,
+			"airborne": not is_on_floor(),
+		}
+		if rig.update(delta, mode, anim_speed, extra):
 			_step_count += 1
 			if not is_crawler:
 				_play_3d_footstep(_step_count)
@@ -1317,7 +1432,7 @@ func _animate_stunned(delta: float) -> void:
 
 
 # --- DAMAGE, HEADSHOTS, STUN & PAIN DRUG ---
-func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armor: bool = false, kind: String = "bullet") -> Dictionary:
+func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armor: bool = false, kind: String = "bullet", hit_zone: String = "") -> Dictionary:
 	if is_dead:
 		return {"dealt": 0.0, "headshot": false, "killed": false}
 	if not _sleeper_awake:
@@ -1327,19 +1442,26 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 	last_hit_point = hit_pos if hit_pos != Vector3.ZERO else global_position + Vector3(0, 1.1 * model_scale, 0)
 
 	var is_headshot := false
-	if hit_pos != Vector3.ZERO and hit_pos.y >= head_y() and not is_crawler:
-		is_headshot = true
+	if hit_zone != "":
+		is_headshot = (hit_zone in ["head", "weakpoint"]) and not is_crawler
+		if hit_zone == "weakpoint":
+			ignore_armor = true
+	else:
+		if hit_pos != Vector3.ZERO and hit_pos.y >= head_y() and not is_crawler:
+			is_headshot = true
 
 	var dmg := raw_amount
-	# Panzer chest core weakpoint bonus
-	if boss_type == "juggernaut" and hit_pos != Vector3.ZERO:
+	# Panzer chest core weakpoint bonus (legacy position fallback when hit_zone unset)
+	if hit_zone == "" and boss_type == "juggernaut" and hit_pos != Vector3.ZERO:
 		var core_pos := global_position + Vector3(0, 1.55 * model_scale, 0) - global_transform.basis.z * 0.35
 		if hit_pos.distance_to(core_pos) < 0.52:
 			is_headshot = true
 			ignore_armor = true
 
-	# Riot shield: frontal body shots barely scratch it
-	if is_shielded and not is_headshot and (kind == "bullet" or kind == "melee"):
+	# Riot shield: direct shield hurtbox gets chip without blood, fallback frontal cone handles AoE/legacy
+	if hit_zone == "shield" or kind == "shield":
+		is_headshot = false
+	elif is_shielded and not is_headshot and (kind == "bullet" or kind == "melee"):
 		var to_s := _shooter_pos() - global_position
 		to_s.y = 0.0
 		if to_s.length() > 0.1 and (-global_basis.z).dot(to_s.normalized()) > 0.45:
@@ -1347,6 +1469,11 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 			if hit_pos != Vector3.ZERO:
 				FX.impact(hit_pos, to_s.normalized())
 				GameState.play_sfx("ricochet", -8.0, randf_range(0.9, 1.15))
+
+	if hit_zone.begins_with("leg_") and not is_boss:
+		_leg_cripple = minf(1.0, _leg_cripple + 0.35)
+		if rig != null:
+			rig.stagger = minf(1.0, rig.stagger + 0.32)
 
 	# Pain Drug strips Boss Endurance AND grants +60% bonus vulnerability!
 	if pain_drug_timer > 0.0:
@@ -1372,7 +1499,7 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 		dmg = maxf(dmg, hp)
 
 	if net_puppet:
-		return _puppet_damage(dmg, raw_amount, hit_pos, ignore_armor, kind, is_headshot)
+		return _puppet_damage(dmg, raw_amount, hit_pos, ignore_armor, kind, is_headshot, hit_zone)
 
 	if Net.is_online():
 		dmg_by[_net_attacker] = float(dmg_by.get(_net_attacker, 0.0)) + minf(dmg, hp)
@@ -1384,7 +1511,14 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 		_start_dodge()
 	if is_boss:
 		boss_damaged.emit(self)
-	_hit_feedback(hit_pos, dmg, is_headshot, kind)
+	if GameState.is_horror_mode() and not is_boss and hp > 0.0:
+		if not _sleeper_awake:
+			_wake_sleeper()
+		sensory_state = SENSORY_HUNT
+		_los_lost_t = 0.0
+		if is_instance_valid(target_player):
+			_sensory_pos = target_player.global_position
+	_hit_feedback(hit_pos, dmg, is_headshot, kind, hit_zone)
 	if not is_boss and dmg >= 48.0 and kind != "electric":
 		velocity += -last_hit_from * clampf(dmg / 52.0, 1.3, 5.2)
 	if Net.is_online() and net_id > 0:
@@ -1400,16 +1534,16 @@ func take_damage(raw_amount: float, hit_pos: Vector3 = Vector3.ZERO, ignore_armo
 
 
 # Flash, blood, flesh sound and the rig's flinch for a hit (no HP change).
-func _hit_feedback(hit_pos: Vector3, dmg: float, is_headshot: bool, kind: String) -> void:
+func _hit_feedback(hit_pos: Vector3, dmg: float, is_headshot: bool, kind: String, hit_zone: String = "") -> void:
 	if net_puppet or not Net.is_online() or _net_attacker == Net.my_id():
 		FX.damage_number(self, hit_pos if hit_pos != Vector3.ZERO else global_position + Vector3(0, 1.6 * model_scale, 0), minf(dmg, _pre_hit_hp), is_headshot, hp <= 0.0)
 	_set_flash(true)
 	hit_flash_timer = 0.07
-	if hit_pos != Vector3.ZERO:
+	if hit_pos != Vector3.ZERO and hit_zone != "shield" and kind != "shield":
 		_spawn_blood(hit_pos, is_headshot)
 		if randf() < 0.3:
 			FX.blood_decal(Vector3(hit_pos.x + randf_range(-0.4, 0.4), global_position.y + 0.02, hit_pos.z + randf_range(-0.4, 0.4)), Vector3.UP, 0.55)
-	if _flesh_sfx_cd <= 0.0 and kind != "explosive":
+	if _flesh_sfx_cd <= 0.0 and kind != "explosive" and kind != "shield":
 		_flesh_sfx_cd = 0.07
 		GameState.play_sfx("flesh_hit", -9.0, randf_range(0.85, 1.15))
 
@@ -1424,7 +1558,7 @@ func _hit_feedback(hit_pos: Vector3, dmg: float, is_headshot: bool, kind: String
 	last_damage_amount = dmg
 	if rig and hp > dmg:
 		var local_from := global_basis.inverse() * last_hit_from
-		var region := _hit_region(hit_pos) if hit_pos != Vector3.ZERO and kind != "explosive" else "torso"
+		var region := hit_zone if hit_zone in ["head", "arm_l", "arm_r", "leg_l", "leg_r", "torso"] else (_hit_region(hit_pos) if hit_pos != Vector3.ZERO and kind != "explosive" else "torso")
 		rig.hit(clampf(dmg / 60.0 * 1.35, 0.4, 2.7), local_from, region)
 
 
@@ -1476,6 +1610,7 @@ func apply_pain_drug(duration: float) -> void:
 
 func _die(was_headshot: bool) -> void:
 	is_dead = true
+	HitboxRig.release_and_free(_hurtboxes)
 	collision_layer = 0
 	collision_mask = 0
 	if laser_beam:
@@ -1516,6 +1651,11 @@ func _die(was_headshot: bool) -> void:
 		tw.set_parallel(true)
 		tw.tween_property(visual_root, "rotation:x", deg_to_rad(-82.0), 0.34).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		tw.tween_property(visual_root, "position:y", 0.16, 0.34)
+		var crow_mgr := get_tree().get_first_node_in_group("crow_manager") if GameState.is_horror_mode() else null
+		if crow_mgr and crow_mgr.has_method("register_corpse") and not is_boss and not is_bloater and not is_reborn:
+			_corpse_persisting = true
+			crow_mgr.register_corpse(self, was_headshot, null)
+			return
 		tw.chain().tween_interval(1.0)
 		tw.tween_property(visual_root, "position:y", -1.4, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		tw.tween_callback(queue_free)
@@ -1525,6 +1665,13 @@ func _die(was_headshot: bool) -> void:
 
 func _rig_death(was_headshot: bool) -> void:
 	var center := global_position + Vector3(0, 1.1 * model_scale, 0)
+	if is_reborn:
+		visual_root.visible = false
+		FX.gore_burst(center, 8, 4.2)
+		FX.splat(Vector3(global_position.x, global_position.y + 0.02, global_position.z), 1.4, Color(0.18, 0.03, 0.03, 0.88))
+		GameState.play_sfx("gore_splat", -3.0, randf_range(0.85, 1.05))
+		create_tween().tween_callback(queue_free).set_delay(0.8)
+		return
 	# Bloaters burst into a toxic cloud
 	if is_bloater:
 		visual_root.visible = false
@@ -1571,7 +1718,7 @@ func _rig_death(was_headshot: bool) -> void:
 					m.material_overlay = MaterialLib.get_emissive(Color(0.05, 0.04, 0.03), 0.0, 0.6)
 		)
 
-	if _try_ragdoll():
+	if _try_ragdoll(was_headshot):
 		return
 
 	var kind := "crumple"
@@ -1604,6 +1751,11 @@ func _rig_death(was_headshot: bool) -> void:
 			tw.tween_property(visual_root, "position:y", 0.14, fall_time)
 			tw.tween_property(visual_root, "rotation:y", randf_range(-0.4, 0.4), fall_time)
 	rig.set_dead_pose(kind)
+	var crow_mgr := get_tree().get_first_node_in_group("crow_manager") if GameState.is_horror_mode() else null
+	if crow_mgr and crow_mgr.has_method("register_corpse") and not is_boss and not is_bloater and not is_reborn:
+		_corpse_persisting = true
+		crow_mgr.register_corpse(self, was_headshot, null)
+		return
 	tw.chain().tween_interval(2.6)
 	tw.chain().tween_property(visual_root, "position:y", -1.2, 1.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.chain().tween_callback(queue_free)
@@ -1612,7 +1764,7 @@ func _rig_death(was_headshot: bool) -> void:
 # Hands the body to physics: the killing shot knocks it over, explosions
 # throw it, electricity makes it spasm. Falls back to the scripted death when
 # too many ragdolls are already active.
-func _try_ragdoll() -> bool:
+func _try_ragdoll(was_headshot: bool = false) -> bool:
 	if rig == null or not RagdollScript.can_spawn():
 		return false
 	var rd = RagdollScript.new()
@@ -1634,6 +1786,13 @@ func _try_ragdoll() -> bool:
 		rd.queue_free()
 		return false
 	ragdolled = true
+	_ragdoll_ref = rd
+	var crow_mgr := get_tree().get_first_node_in_group("crow_manager") if GameState.is_horror_mode() else null
+	if crow_mgr and crow_mgr.has_method("register_corpse") and not is_boss and not is_bloater and not is_reborn and last_damage_kind != "explosive":
+		rd.set("persist_corpse", true)
+		_corpse_persisting = true
+		crow_mgr.register_corpse(self, was_headshot, rd)
+		return true
 	# The skinned mesh stays under this node while the ragdoll drives its
 	# proxies, so stay alive until the ragdoll has tumbled and sunk (3.4+1.4s).
 	create_tween().tween_callback(queue_free).set_delay(5.1)
@@ -1798,12 +1957,19 @@ func net_push(t: float, pos: Vector3, yaw: float, spd: float, anim: int, hp_frac
 
 
 # Client: our shot hit this zombie. Feel it now, tell the host.
-func _puppet_damage(dmg: float, raw_amount: float, hit_pos: Vector3, ignore_armor: bool, kind: String, is_headshot: bool) -> Dictionary:
+func _puppet_damage(dmg: float, raw_amount: float, hit_pos: Vector3, ignore_armor: bool, kind: String, is_headshot: bool, hit_zone: String = "") -> Dictionary:
 	hp = maxf(0.0, hp - dmg)
 	_net_hit_t = Net.local_time()
 	if is_boss:
 		boss_damaged.emit(self)
-	_hit_feedback(hit_pos, dmg, is_headshot, kind)
+	if GameState.is_horror_mode() and not is_boss and hp > 0.0:
+		if not _sleeper_awake:
+			_wake_sleeper()
+		sensory_state = SENSORY_HUNT
+		_los_lost_t = 0.0
+		if is_instance_valid(target_player):
+			_sensory_pos = target_player.global_position
+	_hit_feedback(hit_pos, dmg, is_headshot, kind, hit_zone)
 	var killed := hp <= 0.0
 	var ng := _net_game()
 	if ng:
@@ -1834,6 +2000,7 @@ func net_remote_die(was_headshot: bool, point: Vector3, from_dir: Vector3, dmg: 
 
 func _puppet_process(delta: float) -> void:
 	_flesh_sfx_cd = maxf(0.0, _flesh_sfx_cd - delta)
+	_leg_cripple = maxf(0.0, _leg_cripple - delta * 0.08)
 	if hit_flash_timer > 0.0:
 		hit_flash_timer -= delta
 		if hit_flash_timer <= 0.0:
@@ -1955,6 +2122,10 @@ func _add_riot_shield() -> void:
 	visor.material_override = MaterialLib.get_emissive(Color(0.25, 0.45, 0.6), 0.6, 0.6)
 	shield.add_child(visor)
 	visor.position = Vector3(0, 0.3, -0.03)
+	_shield_mesh = shield
+	var shb := HitboxRig.attach_shield(self, shield)
+	if shb:
+		_hurtboxes.append(shb)
 
 
 func _tint_spitter() -> void:
@@ -1972,6 +2143,8 @@ func _process_spitter(delta: float, speed_mult: float) -> void:
 		move = _get_nav_dir(target_player.global_position)
 	elif flat < 6.0:
 		move = Vector3(-to_p.x, 0.0, -to_p.z).normalized()
+		if StepHelper.is_blocked_ahead(self, move, 1.1):
+			move = StepHelper.pick_bypass_dir(self, move)
 	var spd := base_speed * speed_mult * 0.8 * _stagger_mult()
 	velocity.x = lerp(velocity.x, move.x * spd, 6.0 * delta)
 	velocity.z = lerp(velocity.z, move.z * spd, 6.0 * delta)
@@ -2410,3 +2583,231 @@ static func is_airborne(p: Node3D) -> bool:
 	if p is CharacterBody3D:
 		return not (p as CharacterBody3D).is_on_floor() or float(p.get("air_grace") if p.get("air_grace") != null else 0.0) > 0.0
 	return p.global_position.y > 0.6 # teammates' avatars: judge by height
+
+
+# ---------------------------------------------------------------------------
+# HORROR MODE SENSORY AI (LINE-OF-SIGHT + ACOUSTIC MEMORY) & REBORN MUTATION
+# ---------------------------------------------------------------------------
+static func broadcast_sound(tree: SceneTree, pos: Vector3, radius: float, urgent: bool = false, kind: String = "noise") -> void:
+	if tree == null or not GameState.is_horror_mode():
+		return
+	for n in tree.get_nodes_in_group("enemies"):
+		if n is ZombieEnemy and is_instance_valid(n):
+			(n as ZombieEnemy).hear_sound(pos, radius, urgent, kind)
+	var crow_mgr := tree.get_first_node_in_group("crow_manager")
+	if crow_mgr and crow_mgr.has_method("on_world_sound"):
+		crow_mgr.on_world_sound(pos, radius, urgent, kind)
+
+
+func hear_sound(pos: Vector3, radius: float, urgent: bool = false, _kind: String = "noise") -> void:
+	if is_dead or is_boss or not GameState.is_horror_mode():
+		return
+	var d := global_position.distance_to(pos)
+	if d > radius:
+		return
+	# Check if wall muffles sound (0.62x effective radius through geometry)
+	var space := get_world_3d().direct_space_state if is_inside_tree() else null
+	if space:
+		var q := PhysicsRayQueryParameters3D.create(
+			global_position + Vector3(0, 1.4, 0),
+			pos + Vector3(0, 0.9, 0),
+			1 | HitboxRig.BALLISTIC_WORLD_LAYER,
+			[get_rid()]
+		)
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty() and d > radius * 0.62:
+			return
+	if not _sleeper_awake:
+		if urgent or d < radius * 0.6:
+			_wake_sleeper()
+		else:
+			return
+	if _kind == "decoy":
+		if sensory_state != SENSORY_HUNT or not _cached_los:
+			_sensory_pos = pos
+			sensory_state = SENSORY_SEARCH
+			_sensory_timer = 7.5
+	elif urgent or _kind in ["gunshot", "explosion", "crow", "player"]:
+		_sensory_pos = pos
+		if _has_sensory_los():
+			sensory_state = SENSORY_HUNT
+			_los_lost_t = 0.0
+		elif sensory_state != SENSORY_HUNT:
+			sensory_state = SENSORY_SEARCH
+			_sensory_timer = 7.0
+	elif sensory_state != SENSORY_HUNT:
+		_sensory_pos = pos
+		sensory_state = SENSORY_INVESTIGATE
+		_sensory_timer = 6.5
+	_update_eye_sensory_color()
+
+
+func _update_sensory_state(delta: float) -> void:
+	_los_check_t -= delta
+	if _los_check_t <= 0.0:
+		_los_check_t = 0.18
+		_cached_los = _has_sensory_los()
+	if sensory_state == SENSORY_HUNT:
+		if _cached_los and is_instance_valid(target_player):
+			_los_lost_t = 0.0
+			_sensory_pos = target_player.global_position
+		else:
+			_los_lost_t += delta
+			if _los_lost_t >= 1.2:
+				sensory_state = SENSORY_SEARCH
+				_sensory_timer = 6.0
+	else:
+		if _cached_los and is_instance_valid(target_player):
+			sensory_state = SENSORY_HUNT
+			_los_lost_t = 0.0
+			_sensory_pos = target_player.global_position
+			_play_3d_roar("zombie_attack_roar", 1.05)
+		elif sensory_state in [SENSORY_SEARCH, SENSORY_INVESTIGATE]:
+			_sensory_timer -= delta
+			var d_goal := Vector2(_sensory_pos.x - global_position.x, _sensory_pos.z - global_position.z).length()
+			if _sensory_timer <= 0.0 or d_goal < 1.35:
+				sensory_state = SENSORY_WANDER
+				_wander_goal = Vector3.ZERO
+	_update_eye_sensory_color()
+
+
+func _has_sensory_los() -> bool:
+	if not is_instance_valid(target_player) or not is_inside_tree():
+		return false
+	var eye_p := global_position + Vector3(0, 1.45 * model_scale, 0)
+	var tgt_p := target_player.global_position + Vector3(0, 1.35, 0)
+	var to_t := tgt_p - eye_p
+	var dist := to_t.length()
+	var sight_r := _sensory_sight_range()
+	if dist > sight_r:
+		return false
+	var flat_to := Vector3(to_t.x, 0.0, to_t.z)
+	if dist > 2.8 and flat_to.length_squared() > 0.001:
+		var fwd := -global_basis.z
+		fwd.y = 0.0
+		var min_dot := 0.22
+		if target_player is PlayerController:
+			var pc := target_player as PlayerController
+			var fl_on := pc.flashlight_on and pc.flash_battery > 0.02 and pc.flash_jam <= 0.0
+			if fl_on or pc.sensor_flash > 0.25:
+				min_dot = -0.15
+		if fwd.normalized().dot(flat_to.normalized()) < min_dot:
+			return false
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(eye_p, tgt_p, 1 | HitboxRig.BALLISTIC_WORLD_LAYER, [get_rid()])
+	return space.intersect_ray(q).is_empty()
+
+
+func _sensory_sight_range() -> float:
+	var pc := target_player as PlayerController if target_player is PlayerController else null
+	if pc:
+		var fl_on := pc.flashlight_on and pc.flash_battery > 0.02 and pc.flash_jam <= 0.0
+		if fl_on or pc.sensor_flash > 0.25:
+			return 23.0
+		if pc.is_crouching:
+			return 7.8
+	return 11.5
+
+
+func _process_sensory_move(delta: float, speed_mult: float) -> void:
+	var goal := _sensory_pos
+	var mul := 0.88
+	if sensory_state == SENSORY_WANDER:
+		mul = 0.58
+		_sensory_timer -= delta
+		if _wander_goal == Vector3.ZERO or _sensory_timer <= 0.0 or Vector2(_wander_goal.x - global_position.x, _wander_goal.z - global_position.z).length() < 1.4:
+			_wander_goal = _pick_wander_goal()
+			_sensory_timer = randf_range(4.2, 7.5)
+		goal = _wander_goal
+	elif sensory_state == SENSORY_SEARCH:
+		mul = 1.0
+	var move_dir := (_get_nav_dir(goal) + _separation_push() * 0.65).normalized()
+	var spd: float = base_speed * speed_mult * _stagger_mult() * mul
+	velocity.x = lerpf(velocity.x, move_dir.x * spd, 8.0 * delta)
+	velocity.z = lerpf(velocity.z, move_dir.z * spd, 8.0 * delta)
+	_face_direction(move_dir, delta * 6.5)
+	_animate_walk(delta, spd)
+
+
+func _pick_wander_goal() -> Vector3:
+	for _i in range(6):
+		var a := randf() * TAU
+		var r := randf_range(6.0, 15.0)
+		var cand := global_position + Vector3(cos(a) * r, 0.0, sin(a) * r)
+		if absf(cand.x) < 28.0 and absf(cand.z) < 26.0:
+			return cand
+	return global_position + Vector3(randf_range(-5.0, 5.0), 0.0, randf_range(-5.0, 5.0))
+
+
+func _update_eye_sensory_color() -> void:
+	if is_reborn or _last_eye_state == sensory_state:
+		return
+	_last_eye_state = sensory_state
+	var col := Color(0.95, 0.16, 0.12)
+	var eng := 2.6
+	match sensory_state:
+		SENSORY_WANDER:
+			col = Color(0.62, 0.72, 0.78)
+			eng = 0.55
+		SENSORY_INVESTIGATE:
+			col = Color(1.0, 0.68, 0.18)
+			eng = 1.6
+		SENSORY_SEARCH:
+			col = Color(1.0, 0.36, 0.12)
+			eng = 2.1
+		SENSORY_HUNT:
+			col = Color(1.0, 0.14, 0.12)
+			eng = 3.0
+	for m in _meshes:
+		if not is_instance_valid(m):
+			continue
+		var mat := (m.material_override if m.material_override else (m.get_active_material(0) if m.mesh and m.mesh.get_surface_count() > 0 else null)) as StandardMaterial3D
+		if mat != null and mat.emission_enabled and (m.name.to_lower().contains("eye") or mat.resource_name == "zombie_eye"):
+			var dup := mat.duplicate() as StandardMaterial3D
+			dup.albedo_color = col
+			dup.emission = col
+			dup.emission_energy_multiplier = eng
+			dup.resource_name = "zombie_eye"
+			m.material_override = dup
+
+
+func make_crimson_reborn() -> void:
+	is_reborn = true
+	display_name = "CRIMSON REBORN"
+	max_hp *= 0.65
+	hp = max_hp
+	base_speed *= 1.35
+	is_sprinter = true
+	sensory_state = SENSORY_HUNT
+	_sleeper_awake = true
+	var crimson := StandardMaterial3D.new()
+	crimson.albedo_color = Color(0.55, 0.08, 0.08)
+	crimson.emission_enabled = true
+	crimson.emission = Color(0.85, 0.10, 0.08)
+	crimson.emission_energy_multiplier = 1.35
+	crimson.roughness = 0.55
+	for m in _meshes:
+		if is_instance_valid(m):
+			m.material_overlay = crimson
+
+
+func start_mutation_telegraph(_was_headshot: bool = false) -> void:
+	var pulse := MaterialLib.get_emissive(Color(0.95, 0.15, 0.10), 1.8, 0.55)
+	for m in _meshes:
+		if is_instance_valid(m):
+			m.material_overlay = pulse
+	if is_instance_valid(_ragdoll_ref) and _ragdoll_ref.has_method("twitch_corpse"):
+		_ragdoll_ref.twitch_corpse(1.25)
+
+
+func despawn_corpse(dur: float = 0.35) -> void:
+	_corpse_persisting = false
+	if is_instance_valid(_ragdoll_ref) and _ragdoll_ref.has_method("consume_and_free"):
+		_ragdoll_ref.consume_and_free(dur)
+		create_tween().tween_callback(queue_free).set_delay(dur + 0.08)
+	elif is_instance_valid(visual_root):
+		var tw := create_tween()
+		tw.tween_property(visual_root, "position:y", visual_root.position.y - 0.9, maxf(dur, 0.05)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_callback(queue_free)
+	else:
+		queue_free()

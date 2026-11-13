@@ -55,7 +55,9 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("wall_stations")
 	if ResourceLoader.exists("res://assets/models/prop_lockers.glb"):
-		add_child((load("res://assets/models/prop_lockers.glb") as PackedScene).instantiate())
+		var lk := (load("res://assets/models/prop_lockers.glb") as PackedScene).instantiate() as Node3D
+		add_child(lk)
+		HitboxRig.attach_ballistic_trimesh(lk, "metal")
 	var body := StaticBody3D.new()
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
@@ -117,7 +119,10 @@ func price(id: String) -> int:
 	if id == "ammoup" and is_instance_valid(_player):
 		var l2 := int(_player.reserve_lv)
 		return 1500 + 1500 * l2 + 300 * l2 * l2
-	return int(it["base"]) + int(it["step"]) * int(_bought.get(id, 0))
+	var p := int(it["base"]) + int(it["step"]) * int(_bought.get(id, 0))
+	if GameState.is_overdrive() and id in ["sentry", "airstrike", "plate"]:
+		p = maxi(100, int(roundi(float(p) * 0.5 / 50.0) * 50))
+	return p
 
 
 # Live text for the level-up items: what the current gun goes from -> to.

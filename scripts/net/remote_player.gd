@@ -9,11 +9,13 @@ extends CharacterBody3D
 const ZombieRigScript := preload("res://scripts/enemies/zombie_rig.gd")
 const MODEL := "res://assets/models/player_survivor.glb"
 const REVIVE_TIME := 3.0
-const GUN_LENGTH := {"pistol": 0.24, "revolver": 0.3, "smg": 0.5, "rifle": 0.86, "shotgun": 0.9, "lmg": 1.0, "sniper": 1.1, "volt": 0.62}
+const GUN_LENGTH := {"pistol": 0.24, "revolver": 0.3, "smg": 0.5, "rifle": 0.86, "shotgun": 0.9, "lmg": 1.0, "sniper": 1.1, "volt": 0.62, "knife": 0.16}
 
 var peer_id: int = 0
 var display_name: String = ""
 var color: Color = Color.WHITE
+var team_id: int = 0
+var gg_tier: int = 0
 var buffer := NetBuffer.new()
 
 # Mirrored state (from the teammate's own machine)
@@ -39,8 +41,11 @@ var _gift_hold_t: float = 0.0
 var _last_gift_tap: float = -10.0
 
 var rig = null
+var _hurtboxes: Array[Area3D] = []
+var _hb_enabled: bool = true
 var model: Node3D
 var gun: Node3D
+var _gun_vis: Node3D
 var muzzle: Node3D
 var flash_light: OmniLight3D
 var nameplate: Label3D
@@ -49,13 +54,28 @@ var _yaw_rate: float = 0.0
 var _prev_yaw: float = 0.0
 var _flash_t: float = 0.0
 var _last_sfx_t: float = 0.0
+var _team_badge: MeshInstance3D
 
 
-func setup(p_id: int, p_name: String, p_color: Color) -> void:
+func setup(p_id: int, p_name: String, p_color: Color, p_team: int = 0) -> void:
 	peer_id = p_id
 	display_name = p_name
 	color = p_color
+	team_id = p_team
 	name = "Remote%d" % p_id
+
+
+func set_team_id(tid: int) -> void:
+	team_id = tid
+	color = GameState.pvp_team_color(tid)
+	if nameplate:
+		nameplate.modulate = color
+	if _team_badge:
+		_team_badge.material_override = MaterialLib.get_emissive(color, 1.8)
+
+
+func head_y() -> float:
+	return 1.38 if crouching else 1.62
 
 
 const GIFT_POINTS := 500
@@ -65,7 +85,10 @@ const GIFT_ALL_TIME := 3.0
 
 func _ready() -> void:
 	add_to_group("net_players")
-	add_to_group("wall_stations") # revive when down, give points when standing
+	if GameState.is_pvp():
+		add_to_group("pvp_combatants")
+	else:
+		add_to_group("wall_stations") # revive when down, give points when standing
 	collision_layer = 2
 	collision_mask = 0
 	var cs := CollisionShape3D.new()
@@ -91,6 +114,7 @@ func _ready() -> void:
 			rig.head_tilt = 0.0
 			rig.stride_mult = 1.0
 			rig.gait_mult = 1.0
+			_hurtboxes = HitboxRig.attach_humanoid(self, rig.nodes, false)
 		else:
 			rig = null
 	_build_gun()
@@ -113,33 +137,28 @@ func _ready() -> void:
 	fire_audio.position.y = 1.4
 	add_child(fire_audio)
 
-	# A coloured lamp on the shoulder so squadmates are easy to tell apart
-	var tag := OmniLight3D.new()
-	tag.light_color = color
-	tag.light_energy = 0.35
-	tag.omni_range = 1.6
-	tag.position = Vector3(0, 1.6, 0.1)
-	add_child(tag)
+	if not GameState.is_pvp():
+		# A coloured lamp on the shoulder so squadmates are easy to tell apart
+		var tag := OmniLight3D.new()
+		tag.light_color = color
+		tag.light_energy = 0.35
+		tag.omni_range = 1.6
+		tag.position = Vector3(0, 1.6, 0.1)
+		add_child(tag)
+	else:
+		_team_badge = MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.32, 0.06, 0.24)
+		_team_badge.mesh = bm
+		_team_badge.position = Vector3(0.0, 1.44, 0.0)
+		_team_badge.material_override = MaterialLib.get_emissive(color, 1.8)
+		model.add_child(_team_badge)
 
 
 func _build_gun() -> void:
 	gun = Node3D.new()
-	var mat := MaterialLib.get_pbr("gunmetal", 3.0, Color(0.16, 0.17, 0.19), 0.8, 0.5, false)
-	var body := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.06, 0.12, 0.5)
-	body.mesh = bm
-	body.material_override = mat
-	gun.add_child(body)
-	var barrel := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.016
-	cm.bottom_radius = 0.016
-	cm.height = 0.5
-	barrel.mesh = cm
-	barrel.material_override = mat
-	barrel.rotation.x = PI * 0.5
-	gun.add_child(barrel)
+	_gun_vis = Node3D.new()
+	gun.add_child(_gun_vis)
 	muzzle = Node3D.new()
 	gun.add_child(muzzle)
 	flash_light = OmniLight3D.new()
@@ -149,19 +168,15 @@ func _build_gun() -> void:
 	muzzle.add_child(flash_light)
 	# On the body root (the rig's joints carry import rotations); aimed in _process
 	add_child(gun)
-	gun.position = Vector3(0.12, 1.36, -0.34)
+	gun.position = Vector3(0.06, 1.24, -0.24)
 	_set_gun_shape("pistol")
 
 
 func _set_gun_shape(w_id: String) -> void:
-	var length: float = GUN_LENGTH.get(w_id, 0.7)
-	var body := gun.get_child(0) as MeshInstance3D
-	var barrel := gun.get_child(1) as MeshInstance3D
-	(body.mesh as BoxMesh).size = Vector3(0.06, 0.12 if length > 0.4 else 0.1, length * 0.62)
-	body.position.z = length * 0.1
-	(barrel.mesh as CylinderMesh).height = length * 0.45
-	barrel.position.z = -length * 0.38
-	muzzle.position = Vector3(0, 0.0, -length * 0.62)
+	if _gun_vis == null:
+		return
+	var mpos: Vector3 = WeaponRigBuilder.build_world_gun(_gun_vis, w_id)
+	muzzle.position = mpos
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +261,7 @@ func is_valid_target() -> bool:
 
 
 func take_damage(amount: float, from_pos: Vector3 = Vector3.ZERO) -> void:
-	if not is_valid_target():
+	if GameState.is_pvp() or not is_valid_target():
 		return
 	var ng := get_tree().get_first_node_in_group("net_game")
 	if ng:
@@ -267,6 +282,8 @@ func apply_stun(_d: float) -> void:
 #   standing mate   : double-tap [E] shares 500, hold [E] 3s sends everything
 # ---------------------------------------------------------------------------
 func get_prompt(p: Node3D) -> String:
+	if GameState.is_pvp():
+		return ""
 	if is_dead or extracted or p.is_downed or p.is_dead:
 		return ""
 	if is_downed:
@@ -277,7 +294,7 @@ func get_prompt(p: Node3D) -> String:
 
 
 func try_purchase(p: Node3D) -> void:
-	if is_downed or is_dead or extracted:
+	if GameState.is_pvp() or is_downed or is_dead or extracted:
 		return
 	var now := Time.get_ticks_msec() / 1000.0
 	if now - _last_gift_tap > GIFT_TAP_WINDOW:
@@ -288,6 +305,8 @@ func try_purchase(p: Node3D) -> void:
 
 
 func interact_hold(p: Node3D, delta: float) -> void:
+	if GameState.is_pvp():
+		return
 	if is_downed:
 		_revive_hold_t = 0.15
 		revive_progress += delta / REVIVE_TIME
@@ -365,6 +384,9 @@ func _process(delta: float) -> void:
 			gift_progress = 0.0
 	# Dead teammates vanish; the one we're watching through is hidden too
 	visible = not extracted and not is_dead and not spectated
+	if _hb_enabled == is_dead:
+		_hb_enabled = not is_dead
+		HitboxRig.set_enabled(_hurtboxes, _hb_enabled)
 	if not buffer.has_data():
 		return
 	var s: Array = buffer.sample(Net.host_time() - maxf(0.0, _arrival_lag) - 0.08)
@@ -383,6 +405,7 @@ func _process(delta: float) -> void:
 		tag += "  ▼ %ds" % int(ceil(bleed_left)) if not self_reviving else "  ▼"
 	nameplate.text = tag
 	nameplate.modulate = Color(1.0, 0.3, 0.25) if is_downed else color
+	nameplate.visible = not GameState.is_pvp() or team_id == Net.my_team
 
 	if _flash_t > 0.0:
 		_flash_t -= delta
@@ -405,14 +428,14 @@ func _process(delta: float) -> void:
 	var local_vel: Vector3 = global_basis.inverse() * vel
 	rig.update(delta, mode, ground, {"vel": local_vel, "yaw_rate": _yaw_rate})
 	model.position.y = -0.25 if crouching and not is_downed else 0.0
-	gun.position.y = 1.36 + model.position.y
+	gun.position.y = 1.24 + model.position.y
 	gun.rotation.x = clampf(pitch, -1.2, 1.2) * 0.8
 	gun.visible = not is_dead and not is_downed
 	if not is_dead and not is_downed:
 		_pose_aim()
 
 
-# Rifle-ready arms and the chest/head following the aim pitch.
+# Lock arm sleeves to zero to avoid pulling skin through ShirtMesh, while aiming chest/head.
 func _pose_aim() -> void:
 	var n: Dictionary = rig.nodes
 	var p := clampf(pitch, -1.2, 1.2)
@@ -420,14 +443,9 @@ func _pose_aim() -> void:
 		n["Chest"].rotation.x = p * 0.45
 	if n.has("Head"):
 		n["Head"].rotation.x = p * 0.45
-	if n.has("UpperArmR"):
-		n["UpperArmR"].rotation = Vector3(1.15, 0.0, -0.18)
-	if n.has("ForearmR"):
-		n["ForearmR"].rotation = Vector3(0.75, 0.0, 0.0)
-	if n.has("UpperArmL"):
-		n["UpperArmL"].rotation = Vector3(1.3, 0.0, 0.55)
-	if n.has("ForearmL"):
-		n["ForearmL"].rotation = Vector3(0.45, 0.0, 0.0)
+	for arm_name in ["UpperArmR", "ForearmR", "HandR", "UpperArmL", "ForearmL", "HandL"]:
+		if n.has(arm_name):
+			n[arm_name].rotation = Vector3.ZERO
 
 
 # A teammate's flashlight: a beam from their head, where they look

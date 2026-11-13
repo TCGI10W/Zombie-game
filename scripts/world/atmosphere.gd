@@ -33,6 +33,10 @@ func setup(p_arena: Node, p_weather: Node) -> void:
 	arena = p_arena
 	weather = p_weather
 	_env = arena.world_env
+	if GameState.is_overdrive() or GameState.is_pvp():
+		if _env:
+			_env.fog_enabled = false
+		return
 	_rng.seed = GameState.run_id if GameState.run_id != 0 else randi()
 	_state = _rng.randi_range(0, 1)
 	_target = STATES[_state]
@@ -47,6 +51,8 @@ func setup(p_arena: Node, p_weather: Node) -> void:
 
 # ---------------------------------------------------------------------------
 func _process(delta: float) -> void:
+	if GameState.is_overdrive() or GameState.is_pvp() or _rain == null:
+		return
 	_time += delta
 	var cam := get_viewport().get_camera_3d()
 	# Weather cycle: drift one step up or down every minute or two
@@ -85,9 +91,9 @@ func _process(delta: float) -> void:
 			_bolt_t = _rng.randf_range(7.0, 16.0)
 			weather.flash_sky(_rng.randf_range(0.5, 1.0))
 
-	# Swinging lamps: wind pushes them harder; unpowered indoor bulbs stay dark
+	# Swinging lamps: wind pushes them harder; unpowered indoor bulbs stay dark in HORROR mode
 	var amp := deg_to_rad(2.5 + 8.0 * intensity)
-	var pwr_on: bool = arena != null and arena.get("power_on") == true
+	var pwr_on: bool = (arena != null and arena.has_method("lamps_powered") and arena.lamps_powered()) or (arena != null and arena.get("power_on") == true) or not GameState.is_horror_mode()
 	for s in _swingers:
 		var piv: Node3D = s["pivot"]
 		var ph: float = s["phase"]
@@ -105,7 +111,8 @@ func _process(delta: float) -> void:
 	_event_t -= delta
 	if _event_t <= 0.0 and cam:
 		_event_t = _rng.randf_range(7.0, 16.0)
-		_ambient_event(cam.global_position)
+		if GameState.is_horror_mode():
+			_ambient_event(cam.global_position)
 
 
 func _wind_dir() -> Vector3:
@@ -355,7 +362,6 @@ func _build_ambience() -> void:
 	_rain_in = _loop2d("rain_indoor_loop")
 	_wind = _loop2d("wind_loop")
 	_roof = _loop3d("roof_rain_loop", Vector3(36, 6.5, 6), -80.0, 14.0, 40.0)
-	_loop3d("drone_loop", Vector3(1, 4.0, -38), -9.0, 8.0, 34.0)
 	_loop3d("hum_loop", Vector3(-28, 3.5, -3), -16.0, 4.0, 18.0)
 	_loop3d("hum_loop", Vector3(-38, 3.5, -21), -18.0, 4.0, 16.0)
 

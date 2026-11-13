@@ -1,6 +1,6 @@
 extends StaticBody3D
 # A glowing skull hidden somewhere on the map. Shoot all three to unlock the
-# secret song (handled by the arena).
+# secret cache reward (handled by the arena).
 
 var _found: bool = false
 var _light: OmniLight3D
@@ -9,8 +9,9 @@ var _t: float = 0.0
 
 
 func _ready() -> void:
-	collision_layer = 1
+	collision_layer = 1 | HitboxRig.BALLISTIC_WORLD_LAYER
 	collision_mask = 0
+	set_meta("surface", "stone")
 	var cs := CollisionShape3D.new()
 	var sp := SphereShape3D.new()
 	sp.radius = 0.2

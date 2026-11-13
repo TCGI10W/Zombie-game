@@ -32,6 +32,7 @@ func _ready() -> void:
 	if ResourceLoader.exists("res://assets/models/prop_mystery_crate.glb"):
 		var m: Node3D = (load("res://assets/models/prop_mystery_crate.glb") as PackedScene).instantiate()
 		add_child(m)
+		HitboxRig.attach_ballistic_trimesh(m, "wood")
 		_lid = m.find_child("LidPivot", true, false)
 
 	var body := StaticBody3D.new()
@@ -69,7 +70,7 @@ func _ready() -> void:
 	lbl.pixel_size = 0.0046
 	lbl.modulate = Color(0.88, 0.74, 0.44)
 	lbl.position = Vector3(0, 0.95, -0.5)
-	lbl.rotation.y = PI
+	lbl.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	add_child(lbl)
 	_price_lbl = lbl
 

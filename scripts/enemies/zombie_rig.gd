@@ -113,20 +113,22 @@ func hit(strength: float, from_dir_local: Vector3, region: String = "torso") -> 
 	var side := from_dir_local.x
 	match region:
 		"head":
-			head_hit_vel += Vector3(6.5 * s, -side * 4.0 * s, randf_range(-2.5, 2.5) * s)
-			flinch_vel += Vector3(1.2 * s, 0.0, side * 0.8 * s)
+			head_hit_vel += Vector3(7.2 * s, -side * 4.5 * s, randf_range(-2.8, 2.8) * s)
+			flinch_vel += Vector3(1.5 * s, 0.0, side * 1.1 * s)
+			arm_hit_vel += Vector2(randf_range(-2.2, 1.5) * s, randf_range(-2.2, 1.5) * s)
 		"arm_l":
-			arm_hit_vel.x -= 7.0 * s
-			flinch_vel += Vector3(0.8 * s, 1.4 * s, -0.8 * s)
+			arm_hit_vel.x -= 8.0 * s
+			flinch_vel += Vector3(1.0 * s, 1.6 * s, -1.0 * s)
 		"arm_r":
-			arm_hit_vel.y -= 7.0 * s
-			flinch_vel += Vector3(0.8 * s, -1.4 * s, 0.8 * s)
+			arm_hit_vel.y -= 8.0 * s
+			flinch_vel += Vector3(1.0 * s, -1.6 * s, 1.0 * s)
 		"leg_l", "leg_r":
-			stagger = minf(1.0, stagger + 0.35 * s)
+			stagger = minf(1.0, stagger + 0.42 * s)
 			stagger_left = region == "leg_l"
-			flinch_vel += Vector3(-1.6 * s, 0.0, (1.5 if stagger_left else -1.5) * s)
+			flinch_vel += Vector3(-1.9 * s, 0.0, (1.8 if stagger_left else -1.8) * s)
 		_:
-			flinch_vel += Vector3(2.6 * s, -side * 2.0 * s, side * 2.2 * s + randf_range(-0.6, 0.6))
+			flinch_vel += Vector3(3.1 * s, -side * 2.4 * s, side * 2.5 * s + randf_range(-0.7, 0.7))
+			arm_hit_vel += Vector2(-side * 2.6 * s, side * 2.6 * s)
 
 
 func start_attack(length: float = 0.75) -> void:
@@ -207,6 +209,30 @@ func update(delta: float, mode: String, speed: float, extra: Dictionary = {}) ->
 			_pose_attack(tgt, attack_t, mode == "crawl")
 
 	if mode != "dead":
+		var look_local: Vector3 = extra.get("look_local", Vector3.ZERO)
+		var reach_w: float = clampf(float(extra.get("reach_w", 0.0)), 0.0, 1.0)
+		var airborne: bool = bool(extra.get("airborne", false))
+		if (mode == "idle" or mode == "walk" or mode == "run") and look_local.length_squared() > 0.05:
+			var flat_l: float = maxf(0.4, Vector2(look_local.x, look_local.z).length())
+			var yaw_l: float = clampf(atan2(-look_local.x, -look_local.z), -0.68, 0.68)
+			var pitch_l: float = clampf(atan2(look_local.y - 1.45, flat_l), -0.42, 0.42)
+			tgt["Chest"] = tgt.get("Chest", Vector3.ZERO) + Vector3(pitch_l * 0.18, yaw_l * 0.28, 0.0)
+			tgt["Head"] = tgt.get("Head", Vector3.ZERO) + Vector3(pitch_l * 0.72, yaw_l * 0.72, 0.0)
+		if reach_w > 0.01 and (mode == "walk" or mode == "run") and attack_t < 0.0:
+			var cl_l: float = 0.52 + 0.18 * sin(t * 7.5)
+			var cl_r: float = 0.52 + 0.18 * sin(t * 7.5 + 1.8)
+			tgt["UpperArmL"] = (tgt.get("UpperArmL", Vector3.ZERO) as Vector3).lerp(Vector3(1.48 + cl_l * 0.25, 0.16, -0.18), reach_w)
+			tgt["UpperArmR"] = (tgt.get("UpperArmR", Vector3.ZERO) as Vector3).lerp(Vector3(1.48 + cl_r * 0.25, -0.16, 0.18), reach_w)
+			tgt["ForearmL"] = (tgt.get("ForearmL", Vector3.ZERO) as Vector3).lerp(Vector3(0.32 + maxf(0.0, sin(t * 9.0)) * 0.25, 0.0, 0.0), reach_w)
+			tgt["ForearmR"] = (tgt.get("ForearmR", Vector3.ZERO) as Vector3).lerp(Vector3(0.32 + maxf(0.0, cos(t * 9.0)) * 0.25, 0.0, 0.0), reach_w)
+			tgt["HandL"] = (tgt.get("HandL", Vector3.ZERO) as Vector3).lerp(Vector3(-0.35, 0.0, 0.0), reach_w)
+			tgt["HandR"] = (tgt.get("HandR", Vector3.ZERO) as Vector3).lerp(Vector3(-0.35, 0.0, 0.0), reach_w)
+			tgt["Jaw"] = tgt.get("Jaw", Vector3.ZERO) + Vector3(-0.28 * reach_w, 0.0, 0.0)
+		if airborne and (mode == "walk" or mode == "run"):
+			tgt["ThighL"] = (tgt.get("ThighL", Vector3.ZERO) as Vector3).lerp(Vector3(0.75, 0.0, -0.08), 0.72)
+			tgt["ThighR"] = (tgt.get("ThighR", Vector3.ZERO) as Vector3).lerp(Vector3(0.45, 0.0, 0.08), 0.72)
+			tgt["ShinL"] = (tgt.get("ShinL", Vector3.ZERO) as Vector3).lerp(Vector3(-1.15, 0.0, 0.0), 0.72)
+			tgt["ShinR"] = (tgt.get("ShinR", Vector3.ZERO) as Vector3).lerp(Vector3(-0.78, 0.0, 0.0), 0.72)
 		_apply_reactions(tgt, mode)
 		if twitch_amt > 0.0:
 			_tw_t -= delta

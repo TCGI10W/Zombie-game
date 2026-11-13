@@ -23,6 +23,9 @@ var _mat_gore: StandardMaterial3D
 var _mat_gore2: StandardMaterial3D
 var _mat_dust: StandardMaterial3D
 var _mat_spray: StandardMaterial3D
+var _mat_spark_metal: StandardMaterial3D
+var _mat_splinter_wood: StandardMaterial3D
+var _mat_sand_puff: StandardMaterial3D
 var _mesh_casing: CylinderMesh
 var _mesh_shell: CylinderMesh
 
@@ -52,6 +55,9 @@ func _ready() -> void:
 	_mat_gore2.roughness = 0.6
 	_mat_dust = _sprite_mat(Color(0.55, 0.52, 0.48, 0.5))
 	_mat_spray = _sprite_mat(Color(0.16, 0.006, 0.006, 0.92))
+	_mat_spark_metal = _sprite_mat(Color(1.0, 0.76, 0.28, 0.95))
+	_mat_splinter_wood = _sprite_mat(Color(0.68, 0.48, 0.26, 0.90))
+	_mat_sand_puff = _sprite_mat(Color(0.76, 0.66, 0.46, 0.62))
 
 	_mesh_casing = CylinderMesh.new()
 	_mesh_casing.top_radius = 0.005
@@ -114,7 +120,7 @@ func _dmg_label() -> Label3D:
 # Floating number over a zombie the local player hit. Labels come from a small
 # reused pool and quick hits on the same zombie add up into one number.
 func damage_number(target: Node3D, pos: Vector3, amount: float, headshot: bool, killed: bool) -> void:
-	if not GameState.damage_numbers or amount <= 0.0 or _scene() == null:
+	if (not GameState.damage_numbers and not GameState.is_overdrive()) or amount <= 0.0 or _scene() == null:
 		return
 	for i in range(_dmg_pool.size() - 1, -1, -1):
 		if not is_instance_valid(_dmg_pool[i]):
@@ -228,6 +234,21 @@ func scorch(pos: Vector3, size: float = 3.0) -> void:
 func impact(pos: Vector3, normal: Vector3) -> void:
 	bullet_hole(pos, normal)
 	_puff(pos + normal * 0.03, normal, _mat_dust, 6, 0.5, 1.6, 0.12)
+
+
+func surface_impact(_parent: Node, pos: Vector3, normal: Vector3, surface: String = "concrete") -> void:
+	bullet_hole(pos, normal)
+	var surf := surface.to_lower()
+	match surf:
+		"metal":
+			_puff(pos + normal * 0.03, normal, _mat_spark_metal, 9, 0.24, 5.2, 0.045, Vector3(0, -11.0, 0))
+			_puff(pos + normal * 0.03, normal, _mat_dust, 3, 0.35, 1.0, 0.08)
+		"wood":
+			_puff(pos + normal * 0.03, normal, _mat_splinter_wood, 7, 0.36, 2.8, 0.065, Vector3(0, -8.5, 0))
+		"sand", "dirt":
+			_puff(pos + normal * 0.04, normal, _mat_sand_puff, 9, 0.62, 2.1, 0.16, Vector3(0, -1.8, 0))
+		_:
+			_puff(pos + normal * 0.03, normal, _mat_dust, 7, 0.48, 2.0, 0.12, Vector3(0, -2.2, 0))
 
 
 func blood_spray(pos: Vector3, dir: Vector3, amount: int = 10) -> void:

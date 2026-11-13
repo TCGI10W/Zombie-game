@@ -14,7 +14,9 @@ var _static_player: AudioStreamPlayer3D
 func _ready() -> void:
 	add_to_group("wall_stations")
 	if ResourceLoader.exists("res://assets/models/prop_radio_console.glb"):
-		add_child((load("res://assets/models/prop_radio_console.glb") as PackedScene).instantiate())
+		var rc := (load("res://assets/models/prop_radio_console.glb") as PackedScene).instantiate() as Node3D
+		add_child(rc)
+		HitboxRig.attach_ballistic_trimesh(rc, "metal")
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
 	var cs := CollisionShape3D.new()
@@ -38,7 +40,7 @@ func _ready() -> void:
 	lbl.pixel_size = 0.0045
 	lbl.modulate = Color(0.75, 1.0, 0.65)
 	lbl.position = Vector3(0, 2.0, -0.2)
-	lbl.rotation.y = PI
+	lbl.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	add_child(lbl)
 
 

@@ -40,6 +40,8 @@ func setup(p_env: Environment) -> void:
 
 
 func _process(delta: float) -> void:
+	if GameState.is_overdrive() or GameState.is_pvp():
+		return
 	if _flash > 0.0:
 		_flash = maxf(0.0, _flash - delta * 5.0)
 		# Double-flicker like a real strike
@@ -74,6 +76,8 @@ func flash_sky(strength: float) -> void:
 
 # Lightning hits the ground at `pos`: used when hounds arrive.
 func strike(pos: Vector3) -> void:
+	if GameState.is_overdrive() or GameState.is_pvp():
+		return
 	_flash = 1.0
 	var top := pos + Vector3(randf_range(-3.0, 3.0), 34.0, randf_range(-3.0, 3.0))
 	var bolt := Node3D.new()

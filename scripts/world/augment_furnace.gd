@@ -13,7 +13,9 @@ func _ready() -> void:
 	add_to_group("wall_stations")
 	add_to_group("augment_furnace")
 	if ResourceLoader.exists("res://assets/models/prop_augment_furnace.glb"):
-		add_child((load("res://assets/models/prop_augment_furnace.glb") as PackedScene).instantiate())
+		var af := (load("res://assets/models/prop_augment_furnace.glb") as PackedScene).instantiate() as Node3D
+		add_child(af)
+		HitboxRig.attach_ballistic_trimesh(af, "metal")
 
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
@@ -61,7 +63,7 @@ func _ready() -> void:
 	lbl.pixel_size = 0.005
 	lbl.modulate = Color(1.0, 0.6, 0.3)
 	lbl.position = Vector3(0, 2.45, -0.55)
-	lbl.rotation.y = PI
+	lbl.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	add_child(lbl)
 
 

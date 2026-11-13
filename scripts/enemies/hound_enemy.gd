@@ -23,6 +23,8 @@ var leap_dir: Vector3 = Vector3.ZERO
 var bit_this_leap: bool = false
 var appear_t: float = 0.45
 var _ember_mat: StandardMaterial3D
+var _turn_bank: float = 0.0
+var _hound_prev_yaw: float = 0.0
 
 
 func setup_hound(round_num: int) -> void:
@@ -76,6 +78,7 @@ func setup_hound(round_num: int) -> void:
 			(m as MeshInstance3D).layers = 2
 	if pv.has("Body"):
 		body_rest = (pv["Body"] as Node3D).position
+	_hurtboxes = HitboxRig.attach_hound(self, pv)
 
 	_build_status_vfx(0.9, Color(1.0, 0.45, 0.1))
 	_build_3d_audio(0.9)
@@ -191,6 +194,13 @@ func _physics_process(delta: float) -> void:
 		if GameState.request_zombie_vocal(1.0):
 			_play_3d_roar("hound_growl" if randf() < 0.6 else "hound_bark", randf_range(0.9, 1.1))
 
+	_nav_repath_t = maxf(0.0, _nav_repath_t - delta)
+	_jump_cd = maxf(0.0, _jump_cd - delta)
+	if appear_t <= 0.0 and leap_t < 0.0:
+		_apply_anti_stuck(delta)
+	if is_on_floor() and velocity.y <= 0.5:
+		StepHelper.try_step_up(self, Vector3(velocity.x, 0.0, velocity.z), delta, 0.34)
+
 	move_and_slide()
 	_animate_hound(delta, Vector2(velocity.x, velocity.z).length(), false)
 
@@ -248,7 +258,10 @@ func _animate_hound(delta: float, spd: float, stunned: bool) -> void:
 			tgt["HindLower" + sd] = Vector3(-0.95 * sw * maxf(0.0, cos(hth)), 0, 0)
 			tgt["HindPaw" + sd] = Vector3(0.85 * sw * maxf(0.0, cos(hth)), 0, 0)
 		var pitch := 0.1 * sw * sin(g + 0.6)
-		tgt["Body"] = Vector3(pitch, 0, 0)
+		var yaw_v: float = wrapf(rotation.y - _hound_prev_yaw, -PI, PI) / maxf(delta, 0.001)
+		_hound_prev_yaw = rotation.y
+		_turn_bank = lerpf(_turn_bank, clampf(-yaw_v * 0.055, -0.28, 0.28), clampf(delta * 10.0, 0.0, 1.0))
+		tgt["Body"] = Vector3(pitch, 0, _turn_bank)
 		tgt["Neck"] = Vector3(-0.12 - pitch * 0.9, 0, 0)
 		tgt["Head"] = Vector3(0.05 + 0.04 * sin(2.0 * g), 0, 0)
 		tgt["Jaw"] = Vector3(-0.18 - 0.16 * maxf(0.0, sin(2.0 * g)), 0, 0)
@@ -288,6 +301,7 @@ func _animate_hound(delta: float, spd: float, stunned: bool) -> void:
 
 func _die(was_headshot: bool) -> void:
 	is_dead = true
+	HitboxRig.release_and_free(_hurtboxes)
 	collision_layer = 0
 	collision_mask = 0
 	stun_halo.visible = false

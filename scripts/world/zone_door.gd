@@ -18,7 +18,8 @@ var _visual: Node3D
 func _ready() -> void:
 	add_to_group("wall_stations")
 	_body = StaticBody3D.new()
-	_body.collision_layer = 1
+	_body.collision_layer = 1 | HitboxRig.BALLISTIC_WORLD_LAYER
+	_body.set_meta("surface", "metal")
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	bs.size = Vector3(width, height, 0.3)

@@ -15,6 +15,7 @@ func _ready() -> void:
 	if ResourceLoader.exists("res://assets/models/prop_generator.glb"):
 		var m: Node3D = (load("res://assets/models/prop_generator.glb") as PackedScene).instantiate()
 		add_child(m)
+		HitboxRig.attach_ballistic_trimesh(m, "metal")
 		_lever = m.find_child("Lever", true, false)
 		_status = m.find_child("StatusLight", true, false) as MeshInstance3D
 

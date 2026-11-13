@@ -125,7 +125,9 @@ func _build_plaque() -> void:
 
 func _build_forge() -> void:
 	if ResourceLoader.exists("res://assets/models/prop_weapon_forge.glb"):
-		add_child((load("res://assets/models/prop_weapon_forge.glb") as PackedScene).instantiate())
+		var f_inst := (load("res://assets/models/prop_weapon_forge.glb") as PackedScene).instantiate() as Node3D
+		add_child(f_inst)
+		HitboxRig.attach_ballistic_trimesh(f_inst, "metal")
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
 	var cs := CollisionShape3D.new()
@@ -150,7 +152,7 @@ func _build_forge() -> void:
 	label_3d.pixel_size = 0.0046
 	label_3d.modulate = Color(0.86, 0.78, 0.68)
 	label_3d.position = Vector3(0, 3.1, -0.3)
-	label_3d.rotation.y = PI
+	label_3d.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	add_child(label_3d)
 
 

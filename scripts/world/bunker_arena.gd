@@ -16,7 +16,9 @@ const FurnaceScript := preload("res://scripts/world/augment_furnace.gd")
 const GeneratorScript := preload("res://scripts/world/power_generator.gd")
 const SkullScript := preload("res://scripts/world/secret_skull.gd")
 const SecondWindScript := preload("res://scripts/world/second_wind_station.gd")
+const DefensePadScript := preload("res://scripts/world/defense_pad.gd")
 const RadioScript := preload("res://scripts/world/exfil_radio.gd")
+const BarrelScript := preload("res://scripts/world/explosive_barrel.gd")
 const EMERGENCY_RED := Color(1.0, 0.16, 0.1)
 
 const WALL_H := 4.2
@@ -31,12 +33,12 @@ var zone_names: Dictionary = {"plaza": "TOWN PLAZA", "church": "OLD CHURCH", "wa
 var zone_polys: Dictionary = {}
 var windows: Array[Node3D] = []
 var boss_points: Dictionary = {
-	"plaza": [Vector3(0.0, 0.1, -12.0), Vector3(13.0, 0.1, 8.0), Vector3(-14.0, 0.1, -2.0)],
-	"church": [Vector3(1.0, 0.1, -36.0)],
-	"warehouse": [Vector3(42.0, 0.1, -6.0), Vector3(42.0, 0.1, 22.0)],
+	"plaza": [Vector3(0.0, 0.1, -11.5), Vector3(11.5, 0.1, 8.0), Vector3(-9.2, 0.1, 2.2)],
+	"church": [Vector3(1.0, 0.1, -33.5)],
+	"warehouse": [Vector3(39.0, 0.1, -6.0), Vector3(42.0, 0.1, 22.0)],
 	"hospital": [Vector3(-38.0, 0.1, -20.0)],
-	"rail": [Vector3(-36.0, 0.1, 31.5), Vector3(-10.0, 0.1, 31.5)],
-	"cemetery": [Vector3(36.0, 0.1, -40.0)],
+	"rail": [Vector3(-21.0, 0.1, 20.5), Vector3(-18.0, 0.1, 31.2)],
+	"cemetery": [Vector3(34.0, 0.1, -44.0)],
 }
 var player_spawn: Vector3 = Vector3(0.0, 0.2, 9.0)
 var lz_pos: Vector3 = Vector3(-7.0, 0.0, 4.0)
@@ -50,7 +52,6 @@ var flicker_lamps: Array[OmniLight3D] = []
 var power_on: bool = false
 var powered_lamps: Array[Dictionary] = []
 var skulls_found: int = 0
-var _song_player: AudioStreamPlayer
 var _flicker_time: float = 0.0
 
 var m_conc: Material
@@ -65,13 +66,7 @@ var m_wood: Material
 func _ready() -> void:
 	add_to_group("arena")
 	_make_polys()
-	m_conc = MaterialLib.get_world("concrete", 0.5, Color(0.78, 0.8, 0.84), 0.0, 1.0, 0.0, 0.55)
-	m_dark_conc = MaterialLib.get_world("concrete", 0.5, Color(0.5, 0.51, 0.55), 0.0, 1.0, 0.0, 0.4)
-	m_metal = MaterialLib.get_world("rusted_metal", 0.5, Color(0.85, 0.82, 0.8), 0.35, 0.9, 0.0, 0.25)
-	m_wood = MaterialLib.get_world("wood_planks", 0.5, Color(0.9, 0.85, 0.78), 0.0, 1.0, 0.0, 0.3)
-	m_stone = MaterialLib.get_world("concrete", 0.4, Color(0.66, 0.62, 0.58), 0.0, 1.0, 0.0, 0.6)
-	m_brick = MaterialLib.get_world("concrete", 0.6, Color(0.62, 0.42, 0.36), 0.0, 1.0, 0.0, 0.5)
-	m_fence = MaterialLib.get_world("rusted_metal", 0.5, Color(0.55, 0.52, 0.5), 0.4, 0.9, 0.0, 0.2)
+	_init_base_materials()
 
 	_build_environment()
 	_build_ground()
@@ -82,14 +77,128 @@ func _ready() -> void:
 	_build_rail()
 	_build_cemetery()
 	_build_outside()
-	_window_lights()
+	if not GameState.is_pvp():
+		_window_lights()
+	if GameState.is_overdrive():
+		_build_overdrive_pads()
+		set_power(true)
+	elif GameState.is_pvp():
+		for zk in zones_open.keys():
+			zones_open[zk] = true
+		set_power(true)
+	elif not GameState.is_horror_mode():
+		# Classic CASUAL / INFINITE: lights are ON from Round 1 while Motor Pool Generator still gates stations
+		_apply_lamp_visuals(true)
 	_bake_navigation()
-	_scatter_blood.call_deferred()
+	if not GameState.is_overdrive() and not GameState.is_pvp():
+		_scatter_blood.call_deferred()
+
+
+func _init_base_materials() -> void:
+	m_conc = MaterialLib.get_world("concrete", 0.5, Color(0.78, 0.8, 0.84), 0.0, 1.0, 0.0, 0.55)
+	m_dark_conc = MaterialLib.get_world("concrete", 0.5, Color(0.5, 0.51, 0.55), 0.0, 1.0, 0.0, 0.4)
+	m_metal = MaterialLib.get_world("rusted_metal", 0.5, Color(0.85, 0.82, 0.8), 0.35, 0.9, 0.0, 0.25)
+	m_wood = MaterialLib.get_world("wood_planks", 0.5, Color(0.9, 0.85, 0.78), 0.0, 1.0, 0.0, 0.3)
+	m_stone = MaterialLib.get_world("concrete", 0.4, Color(0.66, 0.62, 0.58), 0.0, 1.0, 0.0, 0.6)
+	m_brick = MaterialLib.get_world("concrete", 0.6, Color(0.62, 0.42, 0.36), 0.0, 1.0, 0.0, 0.5)
+	m_fence = MaterialLib.get_world("rusted_metal", 0.5, Color(0.55, 0.52, 0.5), 0.4, 0.9, 0.0, 0.2)
 
 
 # ---------------------------------------------------------------------------
-# PUBLIC API (wave manager)
+# PUBLIC API (wave manager & PvP map contract)
 # ---------------------------------------------------------------------------
+func get_map_id() -> String:
+	return "nacht"
+
+
+func get_map_title() -> String:
+	return "OUTPOST NACHT-7"
+
+
+func get_map_bounds() -> Rect2:
+	return Rect2(Vector2(-54.0, -62.0), Vector2(116.0, 104.0))
+
+
+func get_pvp_sector_zones() -> Dictionary:
+	return {
+		0: "rail",
+		1: "church",
+		2: "warehouse",
+		3: "hospital",
+		4: "plaza",
+		5: "cemetery",
+	}
+
+
+func get_pvp_spawn_points() -> Dictionary:
+	return {
+		0: [
+			Vector3(-33.0, 0.0, 19.6), Vector3(-30.0, 0.0, 19.6), Vector3(-27.0, 0.0, 19.6), Vector3(-24.0, 0.0, 19.6),
+			Vector3(-21.0, 0.0, 19.6), Vector3(-18.0, 0.0, 19.6), Vector3(-15.0, 0.0, 19.6), Vector3(-12.5, 0.0, 19.6),
+			Vector3(-22.0, 0.0, 28.4), Vector3(-19.0, 0.0, 28.4), Vector3(-16.0, 0.0, 28.4), Vector3(-13.0, 0.0, 28.4),
+			Vector3(-10.0, 0.0, 28.4), Vector3(-7.0, 0.0, 28.4), Vector3(-21.0, 0.0, 31.2), Vector3(-18.0, 0.0, 31.2),
+		],
+		1: [
+			Vector3(-17.5, 0.0, -31.0), Vector3(-14.5, 0.0, -31.0), Vector3(-11.5, 0.0, -31.0), Vector3(-8.5, 0.0, -31.0),
+			Vector3(-17.5, 0.0, -35.0), Vector3(-14.5, 0.0, -35.0), Vector3(-11.5, 0.0, -35.0), Vector3(-8.5, 0.0, -35.0),
+			Vector3(10.5, 0.0, -31.0), Vector3(13.2, 0.0, -31.0), Vector3(15.9, 0.0, -31.0), Vector3(18.6, 0.0, -31.0),
+			Vector3(11.2, 0.0, -35.5), Vector3(13.8, 0.0, -35.5), Vector3(16.4, 0.0, -35.5), Vector3(19.0, 0.0, -35.5),
+		],
+		2: [
+			Vector3(34.0, 0.0, -9.2), Vector3(36.8, 0.0, -9.2), Vector3(39.6, 0.0, -9.2), Vector3(42.2, 0.0, -9.2),
+			Vector3(24.0, 0.0, -2.8), Vector3(27.0, 0.0, -2.8), Vector3(30.0, 0.0, -2.8), Vector3(33.0, 0.0, -2.8),
+			Vector3(36.0, 0.0, -2.8), Vector3(39.0, 0.0, -2.8), Vector3(42.0, 0.0, -2.8), Vector3(35.0, 0.0, 10.0),
+			Vector3(38.0, 0.0, 10.0), Vector3(41.0, 0.0, 10.0), Vector3(43.8, 0.0, 10.0), Vector3(46.2, 0.0, 10.0),
+		],
+		3: [
+			Vector3(-29.5, 0.0, -9.5), Vector3(-29.5, 0.0, -3.5), Vector3(-29.5, 0.0, 0.0), Vector3(-29.5, 0.0, 3.2),
+			Vector3(-26.0, 0.0, -9.5), Vector3(-26.0, 0.0, -6.0), Vector3(-26.0, 0.0, -2.5), Vector3(-26.0, 0.0, 0.8),
+			Vector3(-23.0, 0.0, -6.0), Vector3(-23.0, 0.0, -2.5), Vector3(-23.0, 0.0, 0.8), Vector3(-23.0, 0.0, 3.5),
+			Vector3(-41.2, 0.0, -22.5), Vector3(-38.0, 0.0, -22.5), Vector3(-41.2, 0.0, -18.5), Vector3(-35.5, 0.0, -18.5),
+		],
+		4: [
+			Vector3(-10.5, 0.0, 9.5), Vector3(-8.0, 0.0, 9.5), Vector3(-3.0, 0.0, 9.8), Vector3(0.0, 0.0, 10.8),
+			Vector3(3.2, 0.0, 9.8), Vector3(6.5, 0.0, 9.5), Vector3(9.5, 0.0, 9.5), Vector3(12.5, 0.0, 9.5),
+			Vector3(-7.0, 0.0, -12.2), Vector3(-3.5, 0.0, -12.2), Vector3(0.0, 0.0, -12.2), Vector3(3.5, 0.0, -12.2),
+			Vector3(7.0, 0.0, -12.2), Vector3(-6.5, 0.0, -8.5), Vector3(5.5, 0.0, -8.5), Vector3(8.5, 0.0, -6.5),
+		],
+		5: [
+			Vector3(26.5, 0.0, -39.0), Vector3(29.5, 0.0, -43.2), Vector3(32.5, 0.0, -43.2), Vector3(35.5, 0.0, -43.2),
+			Vector3(38.2, 0.0, -43.2), Vector3(27.5, 0.0, -46.2), Vector3(33.0, 0.0, -46.2), Vector3(36.0, 0.0, -46.2),
+			Vector3(30.5, 0.0, -49.2), Vector3(33.5, 0.0, -49.2), Vector3(28.5, 0.0, -28.0), Vector3(32.0, 0.0, -28.0),
+			Vector3(36.0, 0.0, -28.0), Vector3(40.0, 0.0, -28.0), Vector3(48.5, 0.0, -36.0), Vector3(49.5, 0.0, -40.0),
+		],
+	}
+
+
+func get_pvp_objectives(mode_id: String) -> Array:
+	if mode_id == "snd":
+		return [
+			{"id": "A", "label": "PLAZA A", "kind": "bomb_site", "pos": Vector3(0.0, 0.0, 8.2)},
+			{"id": "B", "label": "CHURCH B", "kind": "bomb_site", "pos": Vector3(1.0, 0.0, -33.0)},
+		]
+	if mode_id == "dom":
+		return [
+			{"id": "A", "label": "RAIL A", "kind": "dom_flag", "pos": Vector3(-24.5, 0.22, 25.2)},
+			{"id": "B", "label": "PLAZA B", "kind": "dom_flag", "pos": Vector3(0.0, 0.0, 8.2)},
+			{"id": "C", "label": "CHURCH C", "kind": "dom_flag", "pos": Vector3(1.0, 0.0, -33.0)},
+		]
+	return []
+
+
+func get_pvp_hotspots() -> Array[Vector3]:
+	return [
+		Vector3(0.0, 0.0, 8.5),
+		Vector3(-8.5, 0.0, -9.0),
+		Vector3(14.0, 0.0, -6.5),
+		Vector3(-24.0, 0.22, 25.2),
+		Vector3(1.0, 0.0, -32.0),
+		Vector3(34.0, 0.0, 8.0),
+		Vector3(-26.5, 0.0, -2.5),
+		Vector3(34.5, 0.0, -44.0),
+	]
+
+
 func is_zone_open(zone_id: String) -> bool:
 	return zones_open.get(zone_id, false)
 
@@ -148,15 +257,16 @@ func _seg_box(a: Vector2, d: Vector2, t0: float, t1: float, y0: float, y1: float
 # A wall on the edge of `zone`: barricaded windows at the given distances,
 # and optionally a buyable door [distance, zone it opens, cost].
 func _edge(zone: String, a: Vector2, b: Vector2, wins: Array, door: Array = [], mat: Material = null, h: float = WALL_H) -> void:
+	var actual_wins: Array = [] if GameState.is_pvp() else wins
 	var gaps := []
-	for w in wins:
+	for w in actual_wins:
 		gaps.append([w, WINDOW_W, WINDOW_H])
 	if not door.is_empty():
 		gaps.append([door[0], DOOR_W, DOOR_H])
 	_seg(a, b, gaps, mat if mat else m_conc, h)
 	var d := (b - a).normalized()
 	var out := _outward(zone, a, b)
-	for w in wins:
+	for w in actual_wins:
 		var p: Vector2 = a + d * float(w)
 		_add_window(Vector3(p.x, 0, p.y), Vector3(out.x, 0, out.y), zone)
 	if not door.is_empty():
@@ -172,6 +282,8 @@ func _outward(zone: String, a: Vector2, b: Vector2) -> Vector2:
 
 # Wall station on the inside face of a wall of `zone`.
 func _wall_buy(zone: String, a: Vector2, b: Vector2, dist: float, stype: String, wid: String, title: String, cost: int, acost: int, y: float = 1.55, inset: float = 0.32) -> void:
+	if GameState.is_pvp():
+		return
 	var d := (b - a).normalized()
 	var inn := -_outward(zone, a, b)
 	var p: Vector2 = a + d * dist + inn * inset
@@ -180,7 +292,8 @@ func _wall_buy(zone: String, a: Vector2, b: Vector2, dist: float, stype: String,
 		col = Color(0.76, 0.62, 0.30)
 	elif stype == "forge":
 		col = Color(0.68, 0.16, 0.14)
-	_spawn_station(stype, wid, title, cost, acost, col, Vector3(p.x, y, p.y), rad_to_deg(atan2(inn.x, inn.y)))
+	var rot_deg := rad_to_deg(atan2(inn.x, inn.y)) + (180.0 if stype == "forge" else 0.0)
+	_spawn_station(stype, wid, title, cost, acost, col, Vector3(p.x, y, p.y), rot_deg)
 
 
 func _roof(center: Vector3, size: Vector2) -> void:
@@ -189,10 +302,11 @@ func _roof(center: Vector3, size: Vector2) -> void:
 
 func _post_light(pos: Vector3, col: Color, energy: float, rng: float, rot: float = 0.0) -> void:
 	_prop("prop_lamp_post", pos, rot, Vector3(0.3, 4.0, 0.3), Vector3(0, 2.0, 0))
+	var lit_night := not GameState.is_horror_mode() and not GameState.is_overdrive() and not GameState.is_pvp()
 	var l := OmniLight3D.new()
 	l.light_color = col
-	l.light_energy = energy * 0.48
-	l.omni_range = rng * 0.85
+	l.light_energy = energy * (0.90 if lit_night else 0.44)
+	l.omni_range = rng * (1.12 if lit_night else 0.85)
 	l.position = pos + Vector3(0, 4.3, 0)
 	add_child(l)
 
@@ -210,11 +324,17 @@ func _fill_lights(points: Array, col: Color, energy: float, rng: float) -> void:
 
 
 func _place(script: GDScript, pos: Vector3, rot: float) -> Node3D:
+	if GameState.is_pvp() and script != BarrelScript:
+		return null
 	var n: Node3D = script.new()
 	n.position = pos
 	n.rotation_degrees.y = rot
 	add_child(n)
 	return n
+
+
+func _barrel(pos: Vector3) -> void:
+	_place(BarrelScript, pos, randf() * 360.0)
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +348,18 @@ func _build_ground() -> void:
 		MaterialLib.get_world("asphalt", 0.33, Color(0.88, 0.90, 0.96), 0.05, 1.0, 1.0, 0.0, true))
 	var tile := MaterialLib.get_world("concrete_floor", 0.5, Color(0.56, 0.57, 0.6), 0.0, 1.0, 0.0, 0.0, true)
 	_add_floor_tile(Vector3(1, 0, -31), Vector2(18, 30), tile)
-	_add_floor_tile(Vector3(1, 0, -33), Vector2(42, 10), tile)
+	_add_floor_tile(Vector3(-14, 0, -33), Vector2(12, 10), tile)
+	_add_floor_tile(Vector3(16, 0, -33), Vector2(12, 10), tile)
+	var apse_floor := MeshInstance3D.new()
+	var afm := CylinderMesh.new()
+	afm.top_radius = 8.95
+	afm.bottom_radius = 8.95
+	afm.height = 0.02
+	afm.radial_segments = 16
+	apse_floor.mesh = afm
+	apse_floor.material_override = tile
+	apse_floor.position = Vector3(1, 0.009, -46.0)
+	add_child(apse_floor)
 	_add_floor_tile(Vector3(35, 0, 0), Vector2(30, 24), tile)
 	_add_floor_tile(Vector3(42, 0, 22), Vector2(16, 20), tile)
 	var htile := MaterialLib.get_world("concrete_floor", 0.5, Color(0.62, 0.68, 0.66), 0.0, 0.9, 0.0, 0.0, true)
@@ -250,22 +381,67 @@ func _build_plaza() -> void:
 	_edge("plaza", P[6], P[7], [6.0], [], m_brick)
 	_edge("hospital", Vector2(-20, -12), Vector2(-20, 6), [], [9.0, "hospital", 1250], m_conc)
 
-	# Fountain in the middle: run trains around it
-	_add_static_box(Vector3(0, 0.35, -2.0), Vector3(6.0, 0.7, 6.0), m_stone)
-	_add_static_box(Vector3(0, 0.35, -2.0), Vector3(8.4, 0.7, 2.4), m_stone, Vector3(0, PI / 4.0, 0))
-	_add_static_box(Vector3(0, 1.6, -2.0), Vector3(1.2, 1.8, 1.2), m_stone)
+	# Fountain in the middle: run trains around it (hollow octagonal basin + visible water)
+	_add_static_box(Vector3(0, 0.28, -2.0), Vector3(5.8, 0.56, 5.8), m_stone)
+	_add_static_box(Vector3(0, 0.28, -2.0), Vector3(5.8, 0.56, 5.8), m_stone, Vector3(0, PI / 4.0, 0))
+	for side_i in range(8):
+		var seg_ang := float(side_i) * (PI / 4.0)
+		var dir2 := Vector2(sin(seg_ang), cos(seg_ang))
+		var rim_pos := Vector3(dir2.x * 2.68, 0.69, -2.0 + dir2.y * 2.68)
+		_add_static_box(rim_pos, Vector3(2.45, 0.30, 0.42), m_conc, Vector3(0, seg_ang, 0))
+	var basin := MeshInstance3D.new()
+	var bm_in := CylinderMesh.new()
+	bm_in.top_radius = 2.52
+	bm_in.bottom_radius = 2.52
+	bm_in.height = 0.04
+	bm_in.radial_segments = 16
+	basin.mesh = bm_in
+	basin.material_override = m_dark_conc
+	basin.position = Vector3(0, 0.57, -2.0)
+	add_child(basin)
+
 	var water := MeshInstance3D.new()
-	var wm := BoxMesh.new()
-	wm.size = Vector3(5.4, 0.04, 5.4)
+	var wm := CylinderMesh.new()
+	wm.top_radius = 2.50
+	wm.bottom_radius = 2.50
+	wm.height = 0.04
+	wm.radial_segments = 16
 	water.mesh = wm
-	water.material_override = MaterialLib.get_emissive(Color(0.15, 0.35, 0.45), 0.6, 0.85)
-	water.position = Vector3(0, 0.72, -2.0)
+	var water_mat := StandardMaterial3D.new()
+	water_mat.albedo_color = Color(0.05, 0.13, 0.18, 0.94)
+	water_mat.roughness = 0.06
+	water_mat.metallic = 0.25
+	water_mat.metallic_specular = 0.9
+	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	water.material_override = water_mat
+	water.position = Vector3(0, 0.62, -2.0)
 	add_child(water)
+
+	# Stepped central memorial spire
+	_add_static_box(Vector3(0, 1.05, -2.0), Vector3(1.5, 0.9, 1.5), m_stone)
+	var spill := MeshInstance3D.new()
+	var sm := CylinderMesh.new()
+	sm.top_radius = 1.25
+	sm.bottom_radius = 0.85
+	sm.height = 0.26
+	sm.radial_segments = 16
+	spill.mesh = sm
+	spill.material_override = m_conc
+	spill.position = Vector3(0, 1.55, -2.0)
+	add_child(spill)
+	_add_static_box(Vector3(0, 2.25, -2.0), Vector3(0.82, 1.3, 0.82), m_stone)
+	var cap := MeshInstance3D.new()
+	var cm := BoxMesh.new()
+	cm.size = Vector3(0.98, 0.14, 0.98)
+	cap.mesh = cm
+	cap.material_override = m_conc
+	cap.position = Vector3(0, 2.94, -2.0)
+	add_child(cap)
 	var fl := OmniLight3D.new()
-	fl.light_color = Color(0.32, 0.44, 0.56)
-	fl.light_energy = 0.32
-	fl.omni_range = 6.5
-	fl.position = Vector3(0, 2.8, -2.0)
+	fl.light_color = Color(0.36, 0.48, 0.58)
+	fl.light_energy = 0.22
+	fl.omni_range = 5.5
+	fl.position = Vector3(0, 2.4, -2.0)
 	add_child(fl)
 	# Cover and scenery
 	_prop("prop_car_wreck", Vector3(-12.0, 0, -4.0), 20.0, Vector3(1.9, 1.3, 4.3), Vector3(0, 0.65, 0))
@@ -275,15 +451,57 @@ func _build_plaza() -> void:
 	_add_crate_stack(Vector3(16.5, 0, 9.5), 2)
 	for p in [Vector3(-16.0, 0, 8.0), Vector3(14.0, 0, -11.0), Vector3(4.0, 0, 13.0)]:
 		_add_fire_barrel(p)
+	for bp in [Vector3(-10.5, 0.0, -9.5), Vector3(12.5, 0.0, -3.5), Vector3(-13.5, 0.0, 9.5)]:
+		_barrel(bp)
 	for lp in [Vector3(-15.0, 0, -6.0), Vector3(15.0, 0, 3.0), Vector3(-6.0, 0, 12.5)]:
 		_post_light(lp, Color(1.0, 0.82, 0.55), 2.2, 13.0)
 	# Stations
 	_wall_buy("plaza", P[0], P[1], 3.0, "weapon", "smg", "KURZ-9 SMG", 1000, 500)
 	_wall_buy("plaza", P[2], P[3], 3.0, "weapon", "rifle", "COMMANDO M14A", 1200, 600)
-	_place(FurnaceScript, Vector3(-15.5, 0.0, 3.0), 90.0)
+	_place(FurnaceScript, Vector3(-15.5, 0.0, 3.0), -90.0)
 	_place(load("res://scripts/world/supply_depot.gd") as GDScript, Vector3(17.0, 0.0, 5.0), -90.0)
-	_place(SecondWindScript, Vector3(-4.5, 0.0, -13.5), 0.0)
-	_skull(Vector3(0.0, 2.6, -2.0), 30.0)
+	_place(SecondWindScript, Vector3(-4.5, 0.0, -13.5), 180.0)
+	_skull(Vector3(0.0, 3.16, -2.0), 30.0)
+
+
+func _build_overdrive_pads() -> void:
+	var pads := [
+		["turret", "NORTH TURRET", Vector3(-7.5, 0.0, -7.5)],
+		["turret", "SOUTH TURRET", Vector3(8.5, 0.0, 8.5)],
+		["shock", "WEST SHOCK COIL", Vector3(-9.5, 0.0, 7.5)],
+		["shock", "EAST SHOCK COIL", Vector3(9.5, 0.0, -7.5)],
+	]
+	for cfg in pads:
+		var pad: DefensePad = DefensePadScript.new()
+		pad.position = cfg[2]
+		add_child(pad)
+		pad.setup(String(cfg[0]), String(cfg[1]))
+	# Tournament gold light pylons around Town Plaza terrace
+	var col_mat := StandardMaterial3D.new()
+	col_mat.albedo_color = Color(0.14, 0.16, 0.20)
+	col_mat.metallic = 0.72
+	col_mat.roughness = 0.30
+	var strip_mat := MaterialLib.get_emissive(Color(1.0, 0.84, 0.22), 3.6, 0.95)
+	for corner in [Vector3(-4.6, 0.0, -4.6), Vector3(4.6, 0.0, -4.6), Vector3(-4.6, 0.0, 4.6), Vector3(4.6, 0.0, 4.6)]:
+		var pillar := MeshInstance3D.new()
+		var pm := CylinderMesh.new()
+		pm.top_radius = 0.15
+		pm.bottom_radius = 0.20
+		pm.height = 3.2
+		pm.radial_segments = 8
+		pillar.mesh = pm
+		pillar.material_override = col_mat
+		pillar.position = corner + Vector3(0.0, 1.6, 0.0)
+		add_child(pillar)
+		var ring := MeshInstance3D.new()
+		var rm := CylinderMesh.new()
+		rm.top_radius = 0.18
+		rm.bottom_radius = 0.18
+		rm.height = 0.22
+		ring.mesh = rm
+		ring.material_override = strip_mat
+		ring.position = corner + Vector3(0.0, 3.05, 0.0)
+		add_child(ring)
 
 
 # ---------------------------------------------------------------------------
@@ -305,8 +523,28 @@ func _build_church() -> void:
 	_edge("church", Vector2(22, -28), Vector2(10, -28), [6.0], [], m_stone, H)
 	_edge("church", Vector2(10, -28), Vector2(10, -16), [4.5], [], m_stone, H)
 	_roof(Vector3(1, H + 0.2, -31.0), Vector2(18.6, 30.6))
-	_roof(Vector3(1, H + 0.2, -33.0), Vector2(42.6, 10.6))
-	_roof(Vector3(1, H + 0.2, -50.5), Vector2(18.6, 9.6))
+	_roof(Vector3(-14.15, H + 0.2, -33.0), Vector2(12.3, 10.6))
+	_roof(Vector3(16.15, H + 0.2, -33.0), Vector2(12.3, 10.6))
+	var apse_roof_sb := StaticBody3D.new()
+	apse_roof_sb.collision_layer = 1 | HitboxRig.BALLISTIC_WORLD_LAYER
+	apse_roof_sb.set_meta("surface", "concrete")
+	apse_roof_sb.position = Vector3(1, H + 0.19, -46.0)
+	var apse_rm := CylinderMesh.new()
+	apse_rm.top_radius = 9.3
+	apse_rm.bottom_radius = 9.3
+	apse_rm.height = 0.38
+	apse_rm.radial_segments = 16
+	var apse_rmi := MeshInstance3D.new()
+	apse_rmi.mesh = apse_rm
+	apse_rmi.material_override = m_dark_conc
+	apse_roof_sb.add_child(apse_rmi)
+	var apse_rcs := CollisionShape3D.new()
+	var apse_rcyl := CylinderShape3D.new()
+	apse_rcyl.radius = 9.3
+	apse_rcyl.height = 0.38
+	apse_rcs.shape = apse_rcyl
+	apse_roof_sb.add_child(apse_rcs)
+	add_child(apse_roof_sb)
 	# Pillars down the nave and pews between them
 	for z in [-20.0, -25.0, -40.0, -44.0]:
 		for x in [-4.5, 6.5]:
@@ -334,6 +572,8 @@ func _build_church() -> void:
 	_place(RadioScript, Vector3(-4.0, 0.0, -47.0), 135.0)
 	_wall_buy("church", Vector2(-8, -16), Vector2(-8, -28), 3.0, "weapon", "shotgun", "TRENCH-12 PUMP", 1500, 750)
 	_skull(Vector3(-4.5, H - 0.4, -44.0), 90.0)
+	for bp in [Vector3(-6.0, 0.0, -24.5), Vector3(8.0, 0.0, -35.0)]:
+		_barrel(bp)
 
 
 func _apse_points() -> Array:
@@ -368,6 +608,7 @@ func _build_warehouse() -> void:
 		truck.position = Vector3(38.0, 0, 2.0)
 		truck.rotation_degrees.y = 90.0
 		add_child(truck)
+		HitboxRig.attach_ballistic_trimesh(truck, "metal")
 	_add_invisible_collider(Vector3(37.6, 1.4, 2.0), Vector3(7.4, 2.8, 2.4), 0.0)
 	_prop("prop_fuel_tank", Vector3(46.5, 0, 28.5), 0.0, Vector3(3.6, 2.1, 1.8), Vector3(0, 1.05, 0))
 	_prop("prop_tire_stack", Vector3(48.4, 0, 9.5), 0.0, Vector3(0.9, 1.0, 0.9), Vector3(0, 0.5, 0))
@@ -377,9 +618,11 @@ func _build_warehouse() -> void:
 		_add_lamp(p, Color(1.0, 0.9, 0.7), 2.6, p.x > 40.0 and p.z > 10.0)
 		(powered_lamps[-1]["light"] as OmniLight3D).omni_range = 16.0
 	_fill_lights([Vector3(27, 4.5, -3), Vector3(41, 4.5, -3), Vector3(30, 4.5, 8), Vector3(42, 4.5, 24)], Color(0.75, 0.8, 0.9), 0.8, 14.0)
-	_place(GeneratorScript, Vector3(24.0, 0, -8.5), 0.0)
+	_place(GeneratorScript, Vector3(24.0, 0, -8.5), 180.0)
 	_wall_buy("warehouse", Vector2(50, -12), Vector2(50, 32), 14.0, "weapon", "lmg", "RAZORBACK LMG", 3000, 1500)
 	_wall_buy("warehouse", Vector2(20, -12), Vector2(50, -12), 15.0, "ammo_box", "", "AMMO CACHE", 450, 0)
+	for bp in [Vector3(25.5, 0.0, 2.5), Vector3(42.5, 0.0, 6.0), Vector3(40.0, 0.0, 24.0)]:
+		_barrel(bp)
 
 
 # ---------------------------------------------------------------------------
@@ -419,8 +662,10 @@ func _build_hospital() -> void:
 		_add_invisible_collider(p + Vector3(0, 1.2, 0), Vector3(1.1, 2.4, 1.1), 0.0)
 	_wall_buy("hospital", Vector2(-44, 6), Vector2(-44, -30), 13.0, "forge", "", "WEAPON FORGE", 5000, 0, 0.0, 2.8)
 	_wall_buy("hospital", Vector2(-32, -12), Vector2(-20, -12), 3.0, "ammo_box", "", "AMMO CACHE", 450, 0)
-	_place(SecondWindScript, Vector3(-43.4, 0.0, -18.0), 90.0)
+	_place(SecondWindScript, Vector3(-43.4, 0.0, -18.0), -90.0)
 	_skull(Vector3(-21.0, 2.05, -9.0), -90.0)
+	for bp in [Vector3(-28.5, 0.0, -6.5), Vector3(-40.5, 0.0, -14.5)]:
+		_barrel(bp)
 
 
 # ---------------------------------------------------------------------------
@@ -435,11 +680,15 @@ func _build_rail() -> void:
 	_edge("rail", R[5], R[0], [4.0], [], m_fence, 3.4)
 	for tz in [21.0, 29.5]:
 		for side in [-0.72, 0.72]:
-			_add_static_box(Vector3(-20.0, 0.06, tz + side), Vector3(50.0, 0.12, 0.12), m_metal)
+			_add_visual_box(Vector3(-20.0, 0.05, tz + side), Vector3(50.0, 0.10, 0.12), m_metal)
 		for i in range(25):
-			_add_static_box(Vector3(-44.0 + 2.0 * i, 0.03, tz), Vector3(0.3, 0.06, 2.0), m_wood)
-	# Low platform between the tracks (low enough to walk onto)
-	_add_static_box(Vector3(-20.0, 0.12, 25.2), Vector3(40.0, 0.24, 3.4), m_stone)
+			_add_visual_box(Vector3(-44.0 + 2.0 * i, 0.02, tz), Vector3(0.3, 0.04, 2.0), m_wood)
+	# Beveled passenger platform between tracks with flush 20-deg ramps on all 4 sides
+	_add_static_box(Vector3(-20.0, 0.11, 25.2), Vector3(38.8, 0.22, 2.5), m_stone)
+	_add_static_box(Vector3(-20.0, -0.0065, 23.65), Vector3(38.8, 0.22, 0.72), m_stone, Vector3(-deg_to_rad(20.0), 0.0, 0.0))
+	_add_static_box(Vector3(-20.0, -0.0065, 26.75), Vector3(38.8, 0.22, 0.72), m_stone, Vector3(deg_to_rad(20.0), 0.0, 0.0))
+	_add_static_box(Vector3(-39.70, -0.0065, 25.2), Vector3(0.72, 0.22, 2.5), m_stone, Vector3(0.0, 0.0, deg_to_rad(20.0)))
+	_add_static_box(Vector3(-0.30, -0.0065, 25.2), Vector3(0.72, 0.22, 2.5), m_stone, Vector3(0.0, 0.0, -deg_to_rad(20.0)))
 	# Wagons
 	_add_static_box(Vector3(-30.0, 1.7, 29.5), Vector3(12.0, 3.0, 2.8), m_metal)
 	_add_static_box(Vector3(-5.0, 1.5, 21.0), Vector3(9.0, 2.6, 2.8), m_brick)
@@ -449,11 +698,13 @@ func _build_rail() -> void:
 	_add_sandbags(Vector3(-20.0, 0, 18.0), 0.0)
 	for p in [Vector3(-26.0, 0, 32.5), Vector3(2.0, 0, 30.0)]:
 		_add_fire_barrel(p)
-	for lp in [Vector3(-36.0, 0, 25.2), Vector3(-20.0, 0, 25.2), Vector3(-4.0, 0, 25.2)]:
+	for lp in [Vector3(-36.0, 0.22, 25.2), Vector3(-20.0, 0.22, 25.2), Vector3(-4.0, 0.22, 25.2)]:
 		_post_light(lp, Color(1.0, 0.82, 0.55), 2.0, 12.0)
 	_wall_buy("rail", R[2], R[3], 16.0, "weapon", "revolver", ".44 HAND CANNON", 1750, 875)
 	_wall_buy("rail", R[2], R[3], 32.0, "ammo_box", "", "AMMO CACHE", 450, 0)
 	_skull(Vector3(-27.0, 3.4, 29.5), 0.0)
+	for bp in [Vector3(-16.0, 0.0, 23.0), Vector3(-33.5, 0.0, 24.5)]:
+		_barrel(bp)
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +734,8 @@ func _build_cemetery() -> void:
 		_prop("prop_dead_tree", t, t.x * 7.0, Vector3(0.6, 3.0, 0.6), Vector3(0, 1.5, 0), 1.1)
 	for lp in [Vector3(34.0, 0, -36.0), Vector3(46.0, 0, -36.0)]:
 		_post_light(lp, Color(0.6, 0.75, 1.0), 1.8, 12.0)
+	for bp in [Vector3(31.5, 0.0, -34.5), Vector3(39.5, 0.0, -47.5)]:
+		_barrel(bp)
 
 
 # ---------------------------------------------------------------------------
@@ -559,16 +812,24 @@ func _window_lights() -> void:
 # ---------------------------------------------------------------------------
 # BUILDING HELPERS AND SHARED PARTS
 # ---------------------------------------------------------------------------
+func lamps_powered() -> bool:
+	return power_on or not GameState.is_horror_mode()
+
+
 func _process(delta: float) -> void:
 	_flicker_time += delta * 7.5
 	for i in range(fire_lights.size()):
 		var fl := fire_lights[i]
 		fl.light_energy = 2.0 + sin(_flicker_time + float(i) * 1.9) * 0.42 + cos(_flicker_time * 2.3 + float(i)) * 0.22
-	if power_on:
+	if lamps_powered():
+		var horror_flicker := GameState.is_horror_mode()
 		for i in range(flicker_lamps.size()):
 			var lamp := flicker_lamps[i]
 			var n := sin(_flicker_time * 3.1 + float(i) * 7.0) + sin(_flicker_time * 7.7 + float(i))
-			lamp.light_energy = 0.08 if n > 1.45 else 1.45
+			if horror_flicker:
+				lamp.light_energy = 0.08 if n > 1.45 else 1.45
+			else:
+				lamp.light_energy = 1.38 + 0.14 * sin(_flicker_time * 0.8 + float(i))
 	else:
 		var pulse := 0.20 + sin(_flicker_time * 0.35) * 0.10
 		for d in powered_lamps:
@@ -580,7 +841,7 @@ func _process(delta: float) -> void:
 
 
 func get_boss_spawn(player_pos: Vector3) -> Vector3:
-	var best := Vector3(0, 0.1, -4.8)
+	var best := Vector3(0, 0.1, -11.5)
 	var best_d := -1.0
 	for zid in boss_points:
 		if not is_zone_open(zid):
@@ -590,7 +851,49 @@ func get_boss_spawn(player_pos: Vector3) -> Vector3:
 			if d > best_d:
 				best_d = d
 				best = p
-	return best
+	return find_clear_ground_point(best, "", 0.55)
+
+
+func find_clear_ground_point(desired: Vector3, required_zone: String = "", radius: float = 0.44) -> Vector3:
+	if not is_inside_tree() or get_world_3d() == null:
+		return desired
+	var space := get_world_3d().direct_space_state
+	var cap := CapsuleShape3D.new()
+	cap.radius = radius
+	cap.height = 1.68
+	var sq := PhysicsShapeQueryParameters3D.new()
+	sq.shape = cap
+	sq.collision_mask = 1 | 16
+
+	var offsets: Array[Vector2] = [Vector2.ZERO]
+	for r in [0.9, 1.8, 2.8, 4.0, 5.4]:
+		for k in range(12):
+			var ang := float(k) * (TAU / 12.0)
+			offsets.append(Vector2(cos(ang) * r, sin(ang) * r))
+
+	for off in offsets:
+		var cx := desired.x + off.x
+		var cz := desired.z + off.y
+		var z_here := zone_at(Vector3(cx, 0.0, cz))
+		if required_zone != "":
+			if z_here != required_zone:
+				continue
+		elif z_here == "" or not is_zone_open(z_here):
+			continue
+
+		var r_q := PhysicsRayQueryParameters3D.create(Vector3(cx, 2.5, cz), Vector3(cx, -0.6, cz), 1)
+		var ray_hit := space.intersect_ray(r_q)
+		if ray_hit.is_empty():
+			continue
+		var floor_y := (ray_hit["position"] as Vector3).y
+		if floor_y > 0.32 or (ray_hit["normal"] as Vector3).y < 0.72:
+			continue
+
+		sq.transform = Transform3D(Basis.IDENTITY, Vector3(cx, floor_y + 0.92, cz))
+		if space.intersect_shape(sq, 1).is_empty():
+			return Vector3(cx, floor_y + 0.05, cz)
+
+	return desired
 
 
 func _build_environment() -> void:
@@ -599,42 +902,59 @@ func _build_environment() -> void:
 	world_env = env
 
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.005, 0.008, 0.014)
-	sky_mat.sky_horizon_color = Color(0.016, 0.020, 0.028)
-	sky_mat.ground_bottom_color = Color(0.004, 0.004, 0.006)
-	sky_mat.ground_horizon_color = Color(0.012, 0.015, 0.020)
-	# Stars, Milky Way, moonlit clouds and the moon itself
-	if ResourceLoader.exists("res://assets/textures/sky_night.png"):
-		sky_mat.sky_cover = load("res://assets/textures/sky_night.png")
-		sky_mat.sky_cover_modulate = Color(0.28, 0.32, 0.40, 1.0)
+	var is_od := GameState.is_overdrive() or GameState.is_pvp()
+	var is_horror := GameState.is_horror_mode()
+	if is_od:
+		sky_mat.sky_top_color = Color(0.24, 0.56, 0.92)
+		sky_mat.sky_horizon_color = Color(0.90, 0.80, 0.62)
+		sky_mat.ground_bottom_color = Color(0.24, 0.22, 0.18)
+		sky_mat.ground_horizon_color = Color(0.76, 0.68, 0.54)
+		sky_mat.sun_angle_max = 18.0
+	elif is_horror:
+		sky_mat.sky_top_color = Color(0.005, 0.008, 0.014)
+		sky_mat.sky_horizon_color = Color(0.016, 0.020, 0.028)
+		sky_mat.ground_bottom_color = Color(0.004, 0.004, 0.006)
+		sky_mat.ground_horizon_color = Color(0.012, 0.015, 0.020)
+		if ResourceLoader.exists("res://assets/textures/sky_night.png"):
+			sky_mat.sky_cover = load("res://assets/textures/sky_night.png")
+			sky_mat.sky_cover_modulate = Color(0.24, 0.28, 0.36, 1.0)
+	else:
+		# Classic moonlit night for CASUAL & INFINITE (visible terrain & horizon, not pitch-black)
+		sky_mat.sky_top_color = Color(0.032, 0.052, 0.105)
+		sky_mat.sky_horizon_color = Color(0.075, 0.105, 0.175)
+		sky_mat.ground_bottom_color = Color(0.022, 0.028, 0.042)
+		sky_mat.ground_horizon_color = Color(0.055, 0.075, 0.120)
+		if ResourceLoader.exists("res://assets/textures/sky_night.png"):
+			sky_mat.sky_cover = load("res://assets/textures/sky_night.png")
+			sky_mat.sky_cover_modulate = Color(0.72, 0.78, 0.94, 1.0)
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.055, 0.070, 0.090)
-	env.ambient_light_energy = 0.16
+	env.ambient_light_color = Color(0.68, 0.76, 0.88) if is_od else (Color(0.055, 0.070, 0.090) if is_horror else Color(0.18, 0.22, 0.30))
+	env.ambient_light_energy = 0.82 if is_od else (0.12 if is_horror else 0.46)
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 0.98
+	env.tonemap_exposure = 1.06 if is_od else (0.94 if is_horror else 1.04)
 	env.glow_enabled = true
-	env.glow_intensity = 0.42
-	env.glow_bloom = 0.12
+	env.glow_intensity = 0.52 if is_od else (0.42 if is_horror else 0.48)
+	env.glow_bloom = 0.16 if is_od else (0.12 if is_horror else 0.14)
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	env.ssao_enabled = true
 	env.ssr_enabled = true
-	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.036
-	env.volumetric_fog_albedo = Color(0.08, 0.095, 0.115)
+	env.volumetric_fog_enabled = not is_od
+	env.volumetric_fog_density = 0.0 if is_od else (0.038 if is_horror else 0.010)
+	env.volumetric_fog_albedo = Color(0.08, 0.095, 0.115) if is_horror else Color(0.22, 0.26, 0.35)
 	env.volumetric_fog_emission = Color(0.0, 0.0, 0.0)
 	we.environment = env
 	add_child(we)
 
 	var moon := DirectionalLight3D.new()
-	moon.light_color = Color(0.42, 0.50, 0.66)
-	moon.light_energy = 0.24
+	moon.light_color = Color(1.0, 0.91, 0.75) if is_od else (Color(0.42, 0.50, 0.66) if is_horror else Color(0.64, 0.74, 0.94))
+	moon.light_energy = 2.15 if is_od else (0.18 if is_horror else 0.78)
 	moon.shadow_enabled = true
-	moon.rotation_degrees = Vector3(-52.0, -34.0, 0.0)
+	moon.rotation_degrees = Vector3(-42.0, -28.0, 0.0) if is_od else Vector3(-52.0, -34.0, 0.0)
 	add_child(moon)
 
 
@@ -659,12 +979,22 @@ func _add_lamp(pos: Vector3, col: Color, energy: float, flicker: bool) -> void:
 
 func set_power(on: bool) -> void:
 	power_on = on
+	_apply_lamp_visuals(lamps_powered())
+
+
+func _apply_lamp_visuals(lit: bool) -> void:
 	for d in powered_lamps:
 		var l: OmniLight3D = d["light"]
-		l.light_color = d["color"]
-		l.light_energy = d["energy"]
-		if d["fixture"] != null:
-			(d["fixture"] as MeshInstance3D).material_override = MaterialLib.get_emissive(d["color"], 2.4)
+		if lit:
+			l.light_color = d["color"]
+			l.light_energy = d["energy"]
+			if d["fixture"] != null:
+				(d["fixture"] as MeshInstance3D).material_override = MaterialLib.get_emissive(d["color"], 2.4)
+		else:
+			l.light_color = EMERGENCY_RED
+			l.light_energy = 0.0 if d["fixture"] == null else 0.20
+			if d["fixture"] != null:
+				(d["fixture"] as MeshInstance3D).material_override = MaterialLib.get_emissive(EMERGENCY_RED, 0.85)
 
 
 func skull_found() -> void:
@@ -682,6 +1012,14 @@ func skull_found() -> void:
 
 
 func _prop(model: String, pos: Vector3, rot_deg: float, col_size: Vector3, col_off: Vector3, scale_f: float = 1.0) -> void:
+	var surf := "concrete"
+	var m_low := model.to_lower()
+	if "car" in m_low or "truck" in m_low or "fuel" in m_low or "tank" in m_low or "barrel" in m_low or "container" in m_low or "pipe" in m_low:
+		surf = "metal"
+	elif "crate" in m_low or "pallet" in m_low or "wood" in m_low:
+		surf = "wood"
+	elif "sand" in m_low:
+		surf = "sand"
 	var path := "res://assets/models/%s.glb" % model
 	if ResourceLoader.exists(path):
 		var inst: Node3D = (load(path) as PackedScene).instantiate()
@@ -689,6 +1027,7 @@ func _prop(model: String, pos: Vector3, rot_deg: float, col_size: Vector3, col_o
 		inst.rotation_degrees.y = rot_deg
 		inst.scale = Vector3.ONE * scale_f
 		add_child(inst)
+		HitboxRig.attach_ballistic_trimesh(inst, surf)
 	if col_size != Vector3.ZERO:
 		var sb := StaticBody3D.new()
 		sb.collision_layer = 1
@@ -704,6 +1043,8 @@ func _prop(model: String, pos: Vector3, rot_deg: float, col_size: Vector3, col_o
 
 
 func _skull(pos: Vector3, rot_deg: float) -> void:
+	if GameState.is_pvp():
+		return
 	var sk: StaticBody3D = SkullScript.new()
 	sk.position = pos
 	sk.rotation_degrees.y = rot_deg
@@ -714,10 +1055,12 @@ func _skull(pos: Vector3, rot_deg: float) -> void:
 
 
 func _add_door(pos: Vector3, rot_y: float, zone_id: String, cost: int) -> void:
+	if GameState.is_pvp():
+		return
 	var door: Node3D = ZoneDoorScript.new()
 	door.zone_id = zone_id
 	door.title = zone_names[zone_id]
-	door.cost = cost
+	door.cost = maxi(100, int(roundi(float(cost) * 0.5 / 50.0) * 50)) if GameState.is_overdrive() else cost
 	door.width = DOOR_W
 	door.height = DOOR_H
 	door.position = pos
@@ -735,16 +1078,25 @@ func _on_door_opened(zone_id: String) -> void:
 
 
 func _bake_navigation() -> void:
+	if is_inside_tree() and get_world_3d() != null:
+		var nmap := get_world_3d().navigation_map
+		NavigationServer3D.map_set_cell_size(nmap, 0.15)
+		NavigationServer3D.map_set_cell_height(nmap, 0.15)
 	var nav_mesh := NavigationMesh.new()
-	nav_mesh.cell_size = 0.25
-	nav_mesh.cell_height = 0.25
-	nav_mesh.agent_radius = 0.5
-	nav_mesh.agent_height = 2.0
-	nav_mesh.agent_max_climb = 0.25
-	nav_mesh.agent_max_slope = 40.0
+	nav_mesh.cell_size = 0.15
+	nav_mesh.cell_height = 0.15
+	nav_mesh.agent_radius = 0.45
+	nav_mesh.agent_height = 1.95
+	nav_mesh.agent_max_climb = 0.30
+	nav_mesh.agent_max_slope = 44.0
+	nav_mesh.region_min_size = 12.0
 	nav_mesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
-	nav_mesh.geometry_collision_mask = 1
-	nav_mesh.filter_baking_aabb = AABB(Vector3(-52.0, -1.0, -60.0), Vector3(112.0, 3.2, 100.0))
+	nav_mesh.geometry_collision_mask = 1 | 16
+	var mb: Rect2 = get_map_bounds()
+	nav_mesh.filter_baking_aabb = AABB(
+		Vector3(mb.position.x - 2.0, -1.0, mb.position.y - 2.0),
+		Vector3(mb.size.x + 4.0, 5.2, mb.size.y + 4.0)
+	)
 	var source := NavigationMeshSourceGeometryData3D.new()
 	NavigationServer3D.parse_source_geometry_data(nav_mesh, source, self)
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
@@ -776,6 +1128,7 @@ func _add_sandbags(pos: Vector3, rot_deg: float) -> void:
 		inst.rotation_degrees.y = rot_deg
 		inst.scale = Vector3.ONE * 1.35
 		add_child(inst)
+		HitboxRig.attach_ballistic_trimesh(inst, "sand")
 	_add_invisible_collider(pos + Vector3(0, 0.55, 0), Vector3(2.1, 1.1, 0.7), rot_deg)
 
 
@@ -791,6 +1144,7 @@ func _add_fire_barrel(bpos: Vector3) -> void:
 		b.position = bpos
 		b.scale = Vector3.ONE * 1.15
 		add_child(b)
+		HitboxRig.attach_ballistic_trimesh(b, "metal")
 	_add_invisible_collider(bpos + Vector3(0, 0.55, 0), Vector3(0.8, 1.1, 0.8), 0.0)
 
 	var flame_orb := MeshInstance3D.new()
@@ -834,6 +1188,8 @@ func _add_fire_barrel(bpos: Vector3) -> void:
 
 
 func _spawn_station(stype: String, wid: String, stitle: String, scost: int, sacost: int, col: Color, pos: Vector3, rot_y: float) -> void:
+	if GameState.is_pvp():
+		return
 	var ws := WallStation.new()
 	ws.station_type = stype
 	ws.weapon_id = wid
@@ -856,9 +1212,40 @@ func _add_floor_tile(center: Vector3, size: Vector2, mat: Material) -> void:
 	add_child(mi)
 
 
+func _add_visual_box(pos: Vector3, size: Vector3, mat: Material, rot: Vector3 = Vector3.ZERO) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	mi.material_override = mat
+	mi.position = pos
+	mi.rotation = rot
+	add_child(mi)
+	return mi
+
+
+func _infer_surface(mat: Material) -> String:
+	if mat == m_wood:
+		return "wood"
+	if mat == m_metal:
+		return "metal"
+	if mat is StandardMaterial3D:
+		var sm := mat as StandardMaterial3D
+		if sm.albedo_texture != null:
+			var tp := sm.albedo_texture.resource_path.to_lower()
+			if "wood" in tp:
+				return "wood"
+			if "metal" in tp or "steel" in tp or "iron" in tp or "rust" in tp:
+				return "metal"
+		if sm.metallic >= 0.45:
+			return "metal"
+	return "concrete"
+
+
 func _add_static_box(pos: Vector3, size: Vector3, mat: Material, rot: Vector3 = Vector3.ZERO) -> StaticBody3D:
 	var sb := StaticBody3D.new()
-	sb.collision_layer = 1
+	sb.collision_layer = 1 | HitboxRig.BALLISTIC_WORLD_LAYER
+	sb.set_meta("surface", _infer_surface(mat))
 	sb.position = pos
 	sb.rotation = rot
 

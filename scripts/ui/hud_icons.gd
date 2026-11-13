@@ -188,7 +188,32 @@ static func stat_icon(id: String) -> String:
 static func weapon_icon(wclass: String) -> String:
 	if INDEX.has(wclass):
 		return wclass
+	match wclass:
+		"br": return "rifle"
+		"launcher": return "flame"
+		"special": return "crosshair"
+		"wonder": return "bolt"
 	return "rifle"
+
+
+static func equipment_icon(eq_id: String) -> String:
+	match eq_id:
+		"frag", "semtex", "impact": return "grenade"
+		"thermite": return "flame"
+		"flashbang": return "bolt"
+		"smoke": return "fog"
+		"concussion": return "blast"
+		"stim": return "syringe"
+	return "grenade"
+
+
+static func perk_icon(perk_id: String) -> String:
+	match perk_id:
+		"fast_hands": return "swap"
+		"flak_jacket": return "shield"
+		"scavenger": return "box"
+		"tactical_mask": return "helmet"
+	return "star"
 
 
 static func skill_icon(char_id: String, slot: String, monster: bool = false) -> String:
@@ -218,6 +243,7 @@ static func powerup_icon(id: String) -> String:
 	match id:
 		"insta_kill": return "skull"
 		"double_points": return "coin"
+		"quad_points": return "coin"
 		"fire_sale": return "tag"
 		"adrenaline": return "bolt"
 	return "star"

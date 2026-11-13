@@ -67,6 +67,7 @@ func setup(p_player: PlayerController, p_wave: WaveManager, p_arena: BunkerArena
 	arena = p_arena
 	container = p_container
 	weapon_keys = GameState.WEAPONS.keys()
+	weapon_keys.append("knife")
 	add_to_group("net_game")
 	_index_world()
 	_place_local_player()
@@ -79,7 +80,7 @@ func setup(p_player: PlayerController, p_wave: WaveManager, p_arena: BunkerArena
 		_ready_peers[1] = true
 	render_delay = 0.12
 	# Coming back to a run (resume or rejoin): restore this player's loadout
-	if GameState.pending_resume or GameState.late_join:
+	if (GameState.pending_resume or GameState.late_join) and not GameState.is_pvp():
 		player.import_state(GameState.load_player_state(GameState.run_id))
 
 
@@ -106,6 +107,8 @@ func _my_index() -> int:
 
 
 func _place_local_player() -> void:
+	if GameState.is_pvp() and is_instance_valid(player):
+		player.team_id = Net.my_team
 	player.global_position = _spawn_point(_my_index())
 
 
@@ -113,7 +116,8 @@ func _add_avatar(id: int) -> void:
 	if avatars.has(id):
 		return
 	var av: RemotePlayer = RemotePlayerScript.new()
-	av.setup(id, Net.player_name(id), Net.player_color(id))
+	var tid: int = Net.player_team(id)
+	av.setup(id, Net.player_name(id), Net.player_color(id), tid)
 	get_parent().add_child(av)
 	av.global_position = arena.player_spawn
 	avatars[id] = av
@@ -121,9 +125,15 @@ func _add_avatar(id: int) -> void:
 
 func _on_roster_changed() -> void:
 	for id in Net.players.keys():
-		if int(id) != Net.my_id() and not avatars.has(int(id)):
-			_add_avatar(int(id))
-			player.status_banner_requested.emit("%s JOINED THE SQUAD" % Net.player_name(int(id)), Color(0.55, 0.9, 1.0))
+		var pid: int = int(id)
+		if pid != Net.my_id() and not avatars.has(pid):
+			_add_avatar(pid)
+			var msg: String = "%s JOINED THE MATCH" if GameState.is_pvp() else "%s JOINED THE SQUAD"
+			player.status_banner_requested.emit(msg % Net.player_name(pid), Color(0.55, 0.9, 1.0))
+		elif pid != Net.my_id() and avatars.has(pid):
+			var av_upd: RemotePlayer = avatars[pid] as RemotePlayer
+			if is_instance_valid(av_upd):
+				av_upd.set_team_id(Net.player_team(pid))
 	for id in avatars.keys():
 		if not Net.players.has(id):
 			var av: Node = avatars[id]
@@ -154,33 +164,39 @@ func _process(delta: float) -> void:
 					all_in = false
 			if all_in or _wait_t > READY_TIMEOUT:
 				started = true
-				if GameState.pending_resume:
+				if GameState.is_pvp() or wave_mgr == null:
+					var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+					if pvp_dir and pvp_dir.has_method("on_net_started"):
+						pvp_dir.on_net_started()
+				elif GameState.pending_resume:
 					wave_mgr.resume_saved_world()
 				else:
 					wave_mgr.start_round(1)
-		_snap_t += delta
-		if _snap_t >= SNAP_INTERVAL:
-			_snap_t = 0.0
-			_send_snapshot()
-		if _hit_count > 0:
-			_c_hits.rpc(_hits.data_array)
-			_hits = StreamPeerBuffer.new()
-			_hit_count = 0
-		_check_t += delta
-		if _check_t >= 0.5:
-			_check_t = 0.0
-			_check_game_over()
+		if not GameState.is_pvp() and wave_mgr != null:
+			_snap_t += delta
+			if _snap_t >= SNAP_INTERVAL:
+				_snap_t = 0.0
+				_send_snapshot()
+			if _hit_count > 0:
+				_c_hits.rpc(_hits.data_array)
+				_hits = StreamPeerBuffer.new()
+				_hit_count = 0
+			_check_t += delta
+			if _check_t >= 0.5:
+				_check_t = 0.0
+				_check_game_over()
 	elif not _loaded_ack:
 		_hello_t -= delta
 		if _hello_t <= 0.0:
 			_hello_t = 1.0
 			_s_loaded.rpc_id(1)
-	if _revive_show_t > 0.0:
-		_revive_show_t -= delta
-		if _revive_show_t <= 0.0:
-			revive_in = 0.0
-	_update_spectate()
-	_update_hud(delta)
+	if not GameState.is_pvp():
+		if _revive_show_t > 0.0:
+			_revive_show_t -= delta
+			if _revive_show_t <= 0.0:
+				revive_in = 0.0
+		_update_spectate()
+		_update_hud(delta)
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +214,11 @@ func _s_loaded() -> void:
 
 # Host: bring a player who joined mid-run up to date.
 func _send_late_state(peer: int) -> void:
+	if GameState.is_pvp() or wave_mgr == null:
+		var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+		var st_pvp: Dictionary = pvp_dir.export_net_state() if pvp_dir and pvp_dir.has_method("export_net_state") else {}
+		_c_late_state.rpc_id(peer, {"pvp": true, "pvp_state": st_pvp})
+		return
 	var boards := {}
 	var doors: Array = []
 	var power := false
@@ -225,6 +246,11 @@ func _send_late_state(peer: int) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _c_late_state(st: Dictionary) -> void:
 	started = true
+	if bool(st.get("pvp", false)) or GameState.is_pvp() or wave_mgr == null:
+		var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+		if pvp_dir and pvp_dir.has_method("import_net_state"):
+			pvp_dir.import_net_state(st.get("pvp_state", {}))
+		return
 	for i in st.get("doors", []):
 		if int(i) < world_nodes.size():
 			world_nodes[int(i)].net_apply("open", [])
@@ -648,7 +674,7 @@ func any_teammate_standing() -> bool:
 
 
 func _check_game_over() -> void:
-	if game_over or not started:
+	if GameState.is_pvp() or game_over or not started:
 		return
 	var standing := 0
 	var extracted := 0
@@ -675,7 +701,8 @@ func _game_over(_any_extracted: bool) -> void:
 	if game_over:
 		return
 	game_over = true
-	wave_mgr.set_process(false)
+	if wave_mgr:
+		wave_mgr.set_process(false)
 	if player.extracted:
 		return # their win screen is already up
 	if not player.is_dead:
@@ -698,6 +725,8 @@ var _spec_target: RemotePlayer = null
 # While dead: see the game through a living teammate's eyes until the next
 # round. Your own gun, HUD and body are hidden; click to switch teammate.
 func _update_spectate() -> void:
+	if GameState.is_pvp():
+		return
 	var hud := get_parent().get_node_or_null("GameHUD") as CanvasLayer
 	var spectating := player.is_dead and not game_over and not player.extracted
 	if not spectating:
@@ -750,6 +779,7 @@ func _set_spec_target(t: RemotePlayer) -> void:
 func _build_hud() -> void:
 	_hud = CanvasLayer.new()
 	_hud.layer = 6
+	_hud.visible = not GameState.is_pvp()
 	add_child(_hud)
 	_roster_box = VBoxContainer.new()
 	_roster_box.anchor_left = 1.0
@@ -874,3 +904,59 @@ func _c_zombie_trap(pos: Vector3, t: int) -> void:
 	var wm := get_tree().current_scene.get_node_or_null("WaveManager")
 	if wm:
 		wm._place_trap(pos, t)
+
+
+# ---------------------------------------------------------------------------
+# PVP AUTHORITY & EVENT SYNC
+# ---------------------------------------------------------------------------
+func request_pvp_hit(target_key: String, damage: float, is_hs: bool, weapon_id: String, attacker_pos: Vector3) -> void:
+	var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+	if pvp_dir == null:
+		return
+	if Net.is_host() or not Net.is_online():
+		var my_key: String = "peer_%d" % Net.my_id()
+		pvp_dir.apply_pvp_hit(my_key, target_key, damage, is_hs, weapon_id, attacker_pos)
+	else:
+		_s_pvp_hit.rpc_id(1, target_key, damage, is_hs, weapon_id, attacker_pos)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _s_pvp_hit(target_key: String, damage: float, is_hs: bool, weapon_id: String, attacker_pos: Vector3) -> void:
+	if not Net.is_host():
+		return
+	var sender: int = multiplayer.get_remote_sender_id()
+	var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+	if pvp_dir:
+		pvp_dir.apply_pvp_hit("peer_%d" % sender, target_key, damage, is_hs, weapon_id, attacker_pos)
+
+
+func broadcast_pvp_event(ev: Dictionary) -> void:
+	if Net.is_host() and Net.is_online():
+		_c_pvp_event.rpc(ev)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _c_pvp_event(ev: Dictionary) -> void:
+	var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+	if pvp_dir and pvp_dir.has_method("handle_net_event"):
+		pvp_dir.handle_net_event(ev)
+
+
+func request_pvp_interact(zone_id: String, action: String) -> void:
+	var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+	if pvp_dir == null:
+		return
+	if Net.is_host() or not Net.is_online():
+		pvp_dir.handle_interact("peer_%d" % Net.my_id(), zone_id, action)
+	else:
+		_s_pvp_interact.rpc_id(1, zone_id, action)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _s_pvp_interact(zone_id: String, action: String) -> void:
+	if not Net.is_host():
+		return
+	var sender: int = multiplayer.get_remote_sender_id()
+	var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+	if pvp_dir:
+		pvp_dir.handle_interact("peer_%d" % sender, zone_id, action)

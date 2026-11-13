@@ -26,7 +26,7 @@ func start(session: Node) -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_layer.add_child(bg)
 	var lbl := Label.new()
-	lbl.text = "PREPARING THE OUTBREAK..."
+	lbl.text = "PREPARING MULTIPLAYER ARENA..." if GameState.is_pvp() else "PREPARING THE OUTBREAK..."
 	lbl.add_theme_font_size_override("font_size", 28)
 	lbl.add_theme_color_override("font_color", Color(0.95, 0.35, 0.25))
 	lbl.set_anchors_preset(Control.PRESET_CENTER)

@@ -39,7 +39,7 @@ var life_runs: int = 0
 var life_nemesis_slain: int = 0
 
 # Timed power-ups dropped by zombies (seconds remaining)
-var powerup_timers: Dictionary = {"insta_kill": 0.0, "double_points": 0.0, "fire_sale": 0.0}
+var powerup_timers: Dictionary = {"insta_kill": 0.0, "double_points": 0.0, "quad_points": 0.0, "fire_sale": 0.0}
 
 # Saved between sessions
 var best_round: int = 0
@@ -58,15 +58,40 @@ var key_binds: Dictionary = {} # action -> "k:<physical keycode>" or "m:<mouse b
 var show_crosshair: bool = false
 var damage_numbers: bool = false
 var show_minimap: bool = false
-var bodycam_mode: bool = true
-var game_mode: String = "casual" # "casual" (ends at round 20) or "infinite"
+var game_mode: String = "casual" # "casual", "infinite", "horror", "overdrive", or "pvp"
+var last_pve_mode: String = "casual"
+var pvp_mode: String = "tdm" # "tdm", "gungame", "snd", "dom"
+var pvp_map: String = "nacht" # "random" or a key in PVP_MAPS
+var active_pvp_map: String = "nacht"
+var team_preset: int = 2 # 2 (16v16), 4 (4x8), or 6 (6x6)
+var pvp_player_cap: int = 32 # 32, 24, 16, or 0 (humans only)
+var pvp_loadout_weapon: String = "m4_carbine"
+var pvp_selected_team: int = 0
+var active_loadout_index: int = 0
+var custom_loadouts: Array = []
+var pve_use_custom_loadout: bool = false
+var pvp_wins: int = 0
+var pvp_kills_life: int = 0
 var best_round_infinite: int = 0
-var fov_setting: float = 94.0
+var best_round_horror: int = 0
+var best_round_overdrive: int = 0
+var fov_setting: float = 90.0
 var post_fx_enabled: bool = true
 var graphics_quality: int = 2 # 0 low, 1 medium, 2 high
 var vsync_on: bool = true
 var show_fps: bool = false
 var menu_sound: bool = true # main-menu ambience + UI sounds
+var ads_sens_mult: float = 0.85
+var sprint_mode: int = 0 # 0=Hold (+double-tap Tac-Sprint), 1=Toggle Sprint, 2=Auto Tac-Sprint
+var ads_mode: int = 0 # 0=Hold ADS, 1=Toggle ADS
+var crouch_mode: int = 0 # 0=Toggle Crouch, 1=Hold Crouch
+var viewmodel_bob: float = 1.0
+var screen_shake: float = 1.0
+var crosshair_enabled: bool = true
+var crosshair_color: int = 0 # 0=White, 1=Cyan, 2=Green, 3=Amber, 4=Crimson
+var hitmarker_sfx: bool = true
+var msaa_level: int = 1 # 0=Off, 1=2x, 2=4x
+var render_scale_setting: float = 1.0
 var _best_round_at_start: int = 0
 var rebuild_points_round: int = 0 # points earned rebuilding barriers this round
 const REBUILD_POINTS_CAP := 500
@@ -117,108 +142,43 @@ const CHARACTERS := {
 
 # Weapon stats. ads_pos = viewmodel position while aiming (y puts the sights on
 # the crosshair), muzzle = (up, forward) offset of the barrel tip.
-const WEAPONS := {
-	"pistol": {
-		"id": "pistol", "name": "M1911 SIDEARM", "class": "pistol",
-		"model": "res://assets/models/vm_pistol.glb", "sfx": "gun_pistol",
-		"damage": 42.0, "headshot_mult": 2.3, "fire_rate": 0.17, "automatic": false,
-		"mag_size": 8, "reserve_max": 80, "reload_time": 1.3, "reload_type": "mag",
-		"pellets": 1, "spread_deg": 1.4, "ads_spread_deg": 0.15, "bloom": 0.6,
-		"range": 70.0, "recoil_pitch": 1.6, "recoil_yaw": 0.6, "penetration": 0, "move_mult": 1.05,
-		"ads_pos": Vector3(0.0, -0.074, -0.34), "ads_fov": 64.0, "ads_time": 0.16, "muzzle": Vector2(0.042, 0.26),
-		"box_weight": 0,
-	},
-	"smg": {
-		"id": "smg", "name": "KURZ-9 SMG", "class": "smg",
-		"model": "res://assets/models/vm_smg.glb", "sfx": "gun_smg",
-		"damage": 34.0, "headshot_mult": 2.2, "fire_rate": 0.07, "automatic": true,
-		"mag_size": 32, "reserve_max": 256, "reload_time": 1.9, "reload_type": "mag",
-		"pellets": 1, "spread_deg": 2.4, "ads_spread_deg": 0.6, "bloom": 0.35,
-		"range": 50.0, "recoil_pitch": 0.75, "recoil_yaw": 0.55, "penetration": 0, "move_mult": 1.03,
-		"ads_pos": Vector3(0.0, -0.075, -0.30), "ads_fov": 60.0, "ads_time": 0.17, "muzzle": Vector2(0.035, 0.44),
-		"box_weight": 10,
-	},
-	"rifle": {
-		"id": "rifle", "name": "COMMANDO M14A", "class": "rifle",
-		"model": "res://assets/models/vm_rifle.glb", "sfx": "gun_rifle",
-		"damage": 58.0, "headshot_mult": 2.4, "fire_rate": 0.115, "automatic": true,
-		"mag_size": 30, "reserve_max": 210, "reload_time": 2.0, "reload_type": "mag",
-		"pellets": 1, "spread_deg": 2.2, "ads_spread_deg": 0.25, "bloom": 0.45,
-		"range": 95.0, "recoil_pitch": 1.25, "recoil_yaw": 0.5, "penetration": 1, "move_mult": 0.96,
-		"ads_pos": Vector3(0.0, -0.088, -0.30), "ads_fov": 55.0, "ads_time": 0.22, "muzzle": Vector2(0.036, 0.79),
-		"box_weight": 10,
-	},
-	"shotgun": {
-		"id": "shotgun", "name": "TRENCH-12 PUMP", "class": "shotgun",
-		"model": "res://assets/models/vm_shotgun.glb", "sfx": "gun_shotgun",
-		"damage": 34.0, "headshot_mult": 1.85, "fire_rate": 0.72, "automatic": false,
-		"mag_size": 6, "reserve_max": 54, "reload_time": 0.45, "reload_type": "shell",
-		"pellets": 8, "spread_deg": 5.2, "ads_spread_deg": 3.4, "bloom": 0.0,
-		"range": 36.0, "recoil_pitch": 4.2, "recoil_yaw": 1.0, "penetration": 0, "move_mult": 0.97,
-		"ads_pos": Vector3(0.0, -0.07, -0.30), "ads_fov": 64.0, "ads_time": 0.2, "muzzle": Vector2(0.048, 0.72),
-		"box_weight": 10,
-	},
-	"lmg": {
-		"id": "lmg", "name": "RAZORBACK LMG", "class": "lmg",
-		"model": "res://assets/models/vm_lmg.glb", "sfx": "gun_lmg",
-		"damage": 64.0, "headshot_mult": 2.0, "fire_rate": 0.085, "automatic": true,
-		"mag_size": 100, "reserve_max": 400, "reload_time": 4.2, "reload_type": "mag",
-		"pellets": 1, "spread_deg": 3.2, "ads_spread_deg": 0.55, "bloom": 0.3,
-		"range": 85.0, "recoil_pitch": 1.05, "recoil_yaw": 0.75, "penetration": 2, "move_mult": 0.86,
-		"ads_pos": Vector3(0.0, -0.112, -0.30), "ads_fov": 56.0, "ads_time": 0.32, "muzzle": Vector2(0.04, 0.80),
-		"box_weight": 12,
-	},
-	"sniper": {
-		"id": "sniper", "name": "LONGSHOT .50", "class": "sniper",
-		"model": "res://assets/models/vm_sniper.glb", "sfx": "gun_sniper",
-		"damage": 680.0, "headshot_mult": 3.0, "fire_rate": 1.2, "automatic": false,
-		"mag_size": 5, "reserve_max": 40, "reload_time": 3.0, "reload_type": "mag",
-		"pellets": 1, "spread_deg": 8.0, "ads_spread_deg": 0.0, "bloom": 0.0,
-		"range": 140.0, "recoil_pitch": 6.5, "recoil_yaw": 1.2, "penetration": 5, "move_mult": 0.9,
-		"ads_pos": Vector3(0.0, -0.115, -0.25), "ads_fov": 22.0, "ads_time": 0.3, "muzzle": Vector2(0.04, 0.97),
-		"scoped": true, "box_weight": 10,
-	},
-	"revolver": {
-		"id": "revolver", "name": ".44 HAND CANNON", "class": "pistol",
-		"model": "res://assets/models/vm_revolver.glb", "sfx": "gun_revolver",
-		"damage": 185.0, "headshot_mult": 2.5, "fire_rate": 0.36, "automatic": false,
-		"mag_size": 6, "reserve_max": 72, "reload_time": 2.4, "reload_type": "mag",
-		"pellets": 1, "spread_deg": 1.8, "ads_spread_deg": 0.2, "bloom": 1.4,
-		"range": 70.0, "recoil_pitch": 5.0, "recoil_yaw": 1.4, "penetration": 1, "move_mult": 1.04,
-		"ads_pos": Vector3(0.0, -0.073, -0.34), "ads_fov": 60.0, "ads_time": 0.17, "muzzle": Vector2(0.045, 0.30),
-		"box_weight": 12,
-	},
-	"volt": {
-		"id": "volt", "name": "VOLT CANNON", "class": "wonder",
-		"model": "res://assets/models/vm_volt.glb", "sfx": "gun_volt",
-		"damage": 1100.0, "headshot_mult": 1.0, "fire_rate": 0.8, "automatic": false,
-		"mag_size": 6, "reserve_max": 36, "reload_time": 2.8, "reload_type": "mag",
-		"pellets": 1, "spread_deg": 0.8, "ads_spread_deg": 0.1, "bloom": 0.0,
-		"range": 70.0, "recoil_pitch": 4.5, "recoil_yaw": 0.8, "penetration": 0, "move_mult": 0.95,
-		"ads_pos": Vector3(0.0, -0.14, -0.36), "ads_fov": 62.0, "ads_time": 0.2, "muzzle": Vector2(0.02, 0.45),
-		"chain": 5, "box_weight": 4,
-	},
-}
+const WEAPONS := WeaponCatalog.WEAPONS
+const LETHALS := WeaponCatalog.LETHALS
+const TACTICALS := WeaponCatalog.TACTICALS
+const FIELD_PERKS := WeaponCatalog.FIELD_PERKS
+const WEAPON_CAMOS := WeaponCatalog.WEAPON_CAMOS
+const WEAPON_CAMO_ORDER := WeaponCatalog.WEAPON_CAMO_ORDER
 
 const WEAPON_ATTACHMENTS := {
-	"suppressor": {"tag": "SUPP", "name": "SUPPRESSED", "sfx": "gun_suppressed", "dmg": 0.96, "spread": 0.84, "recoil": 0.80, "muzzle": 0.22},
-	"tac_laser": {"tag": "LASER", "name": "TAC-LASER", "spread": 0.52, "ads_speed": 1.15, "laser": true},
-	"ext_mag": {"tag": "EXT-MAG", "name": "EXTENDED MAG", "mag": 1.45, "reload": 1.08},
-	"heavy_barrel": {"tag": "HVY-BRL", "name": "HEAVY BARREL", "dmg": 1.22, "range": 1.30, "recoil": 1.12},
-	"quickdraw": {"tag": "Q-DRAW", "name": "QUICKDRAW GRIP", "reload": 0.78, "recoil": 0.88},
-	"overpressured": {"tag": "+P", "name": "+P HOLLOW-POINT", "dmg": 1.16, "stagger": 1.65, "recoil": 1.14},
+	"suppressor": {"tag": "SUPP", "slot": "MUZZLE", "name": "MONOLITHIC SUPPRESSOR", "desc": "SILENCED · -20% RECOIL", "sfx": "gun_suppressed", "dmg": 0.96, "spread": 0.84, "recoil": 0.80, "muzzle": 0.22},
+	"tac_laser": {"tag": "LASER", "slot": "LASER", "name": "AN/PEQ-15 TAC LASER", "desc": "-48% HIP SPREAD · +15% ADS", "spread": 0.52, "ads_speed": 1.15, "laser": true},
+	"ext_mag": {"tag": "EXT-MAG", "slot": "MAG", "name": "45-RD EXTENDED MAG", "desc": "+45% MAG CAPACITY", "mag": 1.45, "reload": 1.08},
+	"heavy_barrel": {"tag": "HVY-BRL", "slot": "BARREL", "name": "MATCH HEAVY BARREL", "desc": "+22% DMG · +30% RANGE", "dmg": 1.22, "range": 1.30, "recoil": 1.12},
+	"quickdraw": {"tag": "Q-DRAW", "slot": "GRIP", "name": "ANGLED QUICKDRAW GRIP", "desc": "+22% RELOAD · -12% RECOIL", "reload": 0.78, "recoil": 0.88},
+	"overpressured": {"tag": "+P", "slot": "LOAD", "name": "+P OVERPRESSURED", "desc": "+16% DMG · +65% STAGGER", "dmg": 1.16, "stagger": 1.65, "recoil": 1.14},
+	"red_dot": {"tag": "RDS", "slot": "OPTIC", "name": "REFLEX RED DOT", "desc": "CLEAR REFLEX · +12% ADS", "spread": 0.72, "ads_speed": 1.12},
+	"fmj": {"tag": "FMJ", "slot": "AMMO", "name": "FMJ ARMOR-PIERCING", "desc": "+14% DMG · +15% RANGE", "dmg": 1.14, "range": 1.15},
 }
+
+
+static func is_attachment_allowed(w_id: String, aid: String) -> bool:
+	if not WEAPON_ATTACHMENTS.has(aid) or not WEAPONS.has(w_id):
+		return false
+	var w_cls := String(WEAPONS[w_id].get("class", ""))
+	if (w_cls == "wonder" or w_cls == "launcher" or w_cls == "special" or w_id == "volt") and (aid == "suppressor" or aid == "overpressured"):
+		return false
+	if w_id == "revolver" and aid == "suppressor":
+		return false
+	if w_id == "rpg7" and aid == "red_dot":
+		return false
+	return true
 
 
 static func roll_crate_attachments(w_id: String) -> Array[String]:
-	var w_cls := String(WEAPONS.get(w_id, {}).get("class", ""))
 	var pool: Array[String] = []
 	for k in WEAPON_ATTACHMENTS.keys():
-		if (w_cls == "wonder" or w_id == "volt") and (k == "suppressor" or k == "overpressured"):
-			continue
-		if w_id == "revolver" and k == "suppressor":
-			continue
-		pool.append(String(k))
+		if is_attachment_allowed(w_id, String(k)):
+			pool.append(String(k))
 	for i in range(pool.size() - 1, 0, -1):
 		var j := randi() % (i + 1)
 		var tmp := pool[i]
@@ -328,7 +288,7 @@ func _setup_audio_buses() -> void:
 		master_comp.gain = 0.5
 		AudioServer.add_bus_effect(0, master_comp)
 
-	for bus_name in ["SFX", "Zombies", "Music"]:
+	for bus_name in ["SFX", "Zombies"]:
 		if AudioServer.get_bus_index(bus_name) == -1:
 			var idx := AudioServer.bus_count
 			AudioServer.add_bus(idx)
@@ -379,15 +339,48 @@ func load_save() -> void:
 		show_crosshair = bool(cfg.get_value("settings", "show_crosshair", false))
 		damage_numbers = bool(cfg.get_value("settings", "damage_numbers", false))
 		show_minimap = bool(cfg.get_value("settings", "show_minimap", false))
-		bodycam_mode = bool(cfg.get_value("settings", "bodycam", true))
 		game_mode = String(cfg.get_value("settings", "game_mode", "casual"))
+		if game_mode not in ["casual", "infinite", "horror", "overdrive", "pvp"]:
+			game_mode = "casual"
+		last_pve_mode = String(cfg.get_value("settings", "last_pve_mode", "casual"))
+		if last_pve_mode not in ["casual", "infinite", "horror", "overdrive"]:
+			last_pve_mode = "casual"
+		pvp_mode = String(cfg.get_value("settings", "pvp_mode", "tdm"))
+		if pvp_mode not in ["tdm", "gungame", "snd", "dom"]:
+			pvp_mode = "tdm"
+		pvp_map = String(cfg.get_value("settings", "pvp_map", "nacht"))
+		if pvp_map != "random" and not PVP_MAPS.has(pvp_map):
+			pvp_map = "nacht"
+		active_pvp_map = pvp_map if PVP_MAPS.has(pvp_map) else "nacht"
+		team_preset = int(cfg.get_value("settings", "team_preset", 2))
+		if team_preset not in [2, 4, 6]:
+			team_preset = 2
+		pvp_player_cap = int(cfg.get_value("settings", "pvp_player_cap", 32))
+		if pvp_player_cap not in [32, 24, 16, 0]:
+			pvp_player_cap = 32
+		pvp_loadout_weapon = String(cfg.get_value("settings", "pvp_loadout_weapon", "m4_carbine"))
+		if not is_valid_primary(pvp_loadout_weapon):
+			pvp_loadout_weapon = "m4_carbine"
+		pvp_selected_team = clampi(int(cfg.get_value("settings", "pvp_selected_team", 0)), 0, pvp_team_count() - 1)
+		active_loadout_index = clampi(int(cfg.get_value("settings", "active_loadout_index", 0)), 0, WeaponCatalog.DEFAULT_LOADOUTS.size() - 1)
+		pve_use_custom_loadout = bool(cfg.get_value("settings", "pve_use_custom_loadout", false))
+		var saved_sets = cfg.get_value("settings", "custom_loadouts", [])
+		custom_loadouts = []
+		if saved_sets is Array:
+			for s in saved_sets:
+				if s is Dictionary:
+					custom_loadouts.append(sanitize_loadout(s))
+		_ensure_loadouts()
+		pvp_loadout_weapon = String(get_active_loadout().get("primary", "m4_carbine"))
+		pvp_wins = int(cfg.get_value("records", "pvp_wins", 0))
+		pvp_kills_life = int(cfg.get_value("records", "pvp_kills_life", 0))
 		best_round_infinite = int(cfg.get_value("records", "best_round_infinite", 0))
-		fov_setting = float(cfg.get_value("settings", "fov", 94.0))
+		best_round_horror = int(cfg.get_value("records", "best_round_horror", 0))
+		best_round_overdrive = int(cfg.get_value("records", "best_round_overdrive", 0))
+		fov_setting = float(cfg.get_value("settings", "fov", 90.0))
 		post_fx_enabled = bool(cfg.get_value("settings", "post_fx", true))
 		if not bool(cfg.get_value("settings", "horror_v2_migrated", false)):
-			bodycam_mode = true
 			post_fx_enabled = true
-			fov_setting = maxf(fov_setting, 92.0)
 			show_crosshair = false
 			damage_numbers = false
 			show_minimap = false
@@ -395,7 +388,19 @@ func load_save() -> void:
 		vsync_on = bool(cfg.get_value("settings", "vsync", true))
 		show_fps = bool(cfg.get_value("settings", "show_fps", false))
 		menu_sound = bool(cfg.get_value("settings", "menu_sound", true))
+		ads_sens_mult = clampf(float(cfg.get_value("settings", "ads_sens_mult", 0.85)), 0.30, 1.50)
+		sprint_mode = clampi(int(cfg.get_value("settings", "sprint_mode", 0)), 0, 2)
+		ads_mode = clampi(int(cfg.get_value("settings", "ads_mode", 0)), 0, 1)
+		crouch_mode = clampi(int(cfg.get_value("settings", "crouch_mode", 0)), 0, 1)
+		viewmodel_bob = clampf(float(cfg.get_value("settings", "viewmodel_bob", 1.0)), 0.0, 1.0)
+		screen_shake = clampf(float(cfg.get_value("settings", "screen_shake", 1.0)), 0.0, 1.0)
+		crosshair_enabled = bool(cfg.get_value("settings", "crosshair_enabled", true))
+		crosshair_color = clampi(int(cfg.get_value("settings", "crosshair_color", 0)), 0, 4)
+		hitmarker_sfx = bool(cfg.get_value("settings", "hitmarker_sfx", true))
+		msaa_level = clampi(int(cfg.get_value("settings", "msaa_level", 1)), 0, 2)
+		render_scale_setting = clampf(float(cfg.get_value("settings", "render_scale_setting", 1.0)), 0.70, 1.0)
 		difficulty = clampi(int(cfg.get_value("settings", "difficulty", 1)), 0, DIFFICULTIES.size() - 1)
+		overdrive_difficulty = clampi(int(cfg.get_value("settings", "overdrive_difficulty", 1)), 0, OVERDRIVE_DIFFICULTIES.size() - 1)
 		career_xp = int(cfg.get_value("records", "career_xp", 0))
 		nemesis = cfg.get_value("records", "nemesis", {})
 		life_kills = int(cfg.get_value("records", "life_kills", 0))
@@ -403,6 +408,8 @@ func load_save() -> void:
 		life_commanders = int(cfg.get_value("records", "life_commanders", 0))
 		life_runs = int(cfg.get_value("records", "life_runs", 0))
 		life_nemesis_slain = int(cfg.get_value("records", "life_nemesis_slain", 0))
+	_ensure_loadouts()
+	pvp_loadout_weapon = String(get_active_loadout().get("primary", "m4_carbine"))
 	apply_volume()
 
 
@@ -423,17 +430,42 @@ func write_save() -> void:
 	cfg.set_value("settings", "show_crosshair", show_crosshair)
 	cfg.set_value("settings", "damage_numbers", damage_numbers)
 	cfg.set_value("settings", "show_minimap", show_minimap)
-	cfg.set_value("settings", "bodycam", bodycam_mode)
 	cfg.set_value("settings", "horror_v2_migrated", true)
 	cfg.set_value("settings", "game_mode", game_mode)
+	cfg.set_value("settings", "last_pve_mode", last_pve_mode)
+	cfg.set_value("settings", "pvp_mode", pvp_mode)
+	cfg.set_value("settings", "pvp_map", pvp_map)
+	cfg.set_value("settings", "team_preset", team_preset)
+	cfg.set_value("settings", "pvp_player_cap", pvp_player_cap)
+	cfg.set_value("settings", "pvp_loadout_weapon", pvp_loadout_weapon)
+	cfg.set_value("settings", "pvp_selected_team", pvp_selected_team)
+	cfg.set_value("settings", "active_loadout_index", active_loadout_index)
+	cfg.set_value("settings", "pve_use_custom_loadout", pve_use_custom_loadout)
+	cfg.set_value("settings", "custom_loadouts", custom_loadouts)
+	cfg.set_value("records", "pvp_wins", pvp_wins)
+	cfg.set_value("records", "pvp_kills_life", pvp_kills_life)
 	cfg.set_value("records", "best_round_infinite", best_round_infinite)
+	cfg.set_value("records", "best_round_horror", best_round_horror)
+	cfg.set_value("records", "best_round_overdrive", best_round_overdrive)
 	cfg.set_value("settings", "fov", fov_setting)
 	cfg.set_value("settings", "post_fx", post_fx_enabled)
 	cfg.set_value("settings", "graphics", graphics_quality)
 	cfg.set_value("settings", "vsync", vsync_on)
 	cfg.set_value("settings", "show_fps", show_fps)
 	cfg.set_value("settings", "menu_sound", menu_sound)
+	cfg.set_value("settings", "ads_sens_mult", ads_sens_mult)
+	cfg.set_value("settings", "sprint_mode", sprint_mode)
+	cfg.set_value("settings", "ads_mode", ads_mode)
+	cfg.set_value("settings", "crouch_mode", crouch_mode)
+	cfg.set_value("settings", "viewmodel_bob", viewmodel_bob)
+	cfg.set_value("settings", "screen_shake", screen_shake)
+	cfg.set_value("settings", "crosshair_enabled", crosshair_enabled)
+	cfg.set_value("settings", "crosshair_color", crosshair_color)
+	cfg.set_value("settings", "hitmarker_sfx", hitmarker_sfx)
+	cfg.set_value("settings", "msaa_level", msaa_level)
+	cfg.set_value("settings", "render_scale_setting", render_scale_setting)
 	cfg.set_value("settings", "difficulty", difficulty)
+	cfg.set_value("settings", "overdrive_difficulty", overdrive_difficulty)
 	cfg.set_value("records", "career_xp", career_xp)
 	cfg.set_value("records", "nemesis", nemesis)
 	cfg.set_value("records", "life_kills", life_kills)
@@ -452,15 +484,16 @@ func apply_volume() -> void:
 		if bi >= 0:
 			AudioServer.set_bus_volume_db(bi, linear_to_db(maxf(0.0001, sfx_volume)))
 			AudioServer.set_bus_mute(bi, sfx_volume <= 0.001)
-	var mb := AudioServer.get_bus_index("Music")
-	if mb >= 0:
-		AudioServer.set_bus_mute(mb, true) # no music in this game
 
 
 # Saves progress for this run. Returns true if this run beat the best round
 # that was on record when the run started.
 func record_run() -> bool:
-	if game_mode == "infinite":
+	if game_mode == "overdrive":
+		best_round_overdrive = maxi(best_round_overdrive, current_round)
+	elif game_mode == "horror":
+		best_round_horror = maxi(best_round_horror, current_round)
+	elif game_mode == "infinite":
 		best_round_infinite = maxi(best_round_infinite, current_round)
 	else:
 		best_round = maxi(best_round, current_round)
@@ -492,12 +525,15 @@ func _setup_input_map() -> void:
 	_bind_keys("crouch", [KEY_C, KEY_CTRL])
 	_bind_keys("melee", [KEY_V])
 	_bind_keys("grenade", [KEY_G])
+	_bind_keys("tactical", [KEY_4])
 	_bind_keys("throw_c4", [KEY_T])
 	_bind_keys("place_mine", [KEY_B])
 	_bind_keys("borrowed_skill", [KEY_X])
 	_bind_keys("borrowed_skill_2", [KEY_Z])
 	_bind_keys("map", [KEY_M])
+	_bind_keys("ready_round", [KEY_N])
 	_bind_keys("flashlight", [KEY_L])
+	_bind_keys("inspect_weapon", [KEY_I])
 	var mmb := InputEventMouseButton.new()
 	mmb.button_index = MOUSE_BUTTON_MIDDLE
 	InputMap.action_add_event("flashlight", mmb)
@@ -512,10 +548,10 @@ func _setup_input_map() -> void:
 const REBINDABLE := [
 	["move_forward", "MOVE FORWARD"], ["move_back", "MOVE BACK"], ["move_left", "MOVE LEFT"], ["move_right", "MOVE RIGHT"],
 	["jump", "JUMP"], ["sprint", "SPRINT"], ["crouch", "CROUCH / SLIDE"], ["fire", "SHOOT"], ["aim", "AIM"],
-	["reload", "RELOAD"], ["interact", "INTERACT / BUY"], ["melee", "KNIFE"], ["grenade", "GRENADE"],
+	["reload", "RELOAD"], ["interact", "INTERACT / BUY"], ["melee", "KNIFE"], ["grenade", "LETHAL GRENADE"], ["tactical", "TACTICAL (FLASH / SMOKE)"],
 	["skill_1", "SKILL 1"], ["skill_2", "SKILL 2 (ULTIMATE)"], ["weapon_1", "WEAPON 1"], ["weapon_2", "WEAPON 2"],
 	["throw_c4", "C4 (TAP / HOLD)"], ["place_mine", "PLACE MINE"], ["borrowed_skill", "RELIC SKILL 1"], ["borrowed_skill_2", "RELIC SKILL 2"],
-	["flashlight", "FLASHLIGHT"], ["map", "FULL MAP"], ["scoreboard", "SCOREBOARD (HOLD)"],
+	["flashlight", "FLASHLIGHT"], ["inspect_weapon", "INSPECT WEAPON"], ["ready_round", "READY NEXT ROUND"], ["map", "FULL MAP"], ["scoreboard", "SCOREBOARD (HOLD)"],
 ]
 var _default_events: Dictionary = {}
 
@@ -608,7 +644,59 @@ func _apply_key_binds() -> void:
 
 # Swaps default key letters like "[E]" in on-screen text for the player's keys.
 const _KEY_HINTS := {"E": "interact", "Q": "skill_1", "F": "skill_2", "R": "reload", "G": "grenade", "V": "melee",
-	"T": "throw_c4", "B": "place_mine", "X": "borrowed_skill", "Z": "borrowed_skill_2"}
+	"T": "throw_c4", "B": "place_mine", "X": "borrowed_skill", "Z": "borrowed_skill_2", "N": "ready_round", "I": "inspect_weapon"}
+
+
+func get_crosshair_color() -> Color:
+	const CH_COLS: Array = [
+		Color(0.95, 0.95, 0.95, 0.88),
+		Color(0.22, 0.92, 1.0, 0.92),
+		Color(0.28, 0.96, 0.44, 0.92),
+		Color(1.0, 0.78, 0.20, 0.92),
+		Color(1.0, 0.24, 0.24, 0.92),
+	]
+	return CH_COLS[clampi(crosshair_color, 0, CH_COLS.size() - 1)] as Color
+
+
+func reset_settings_category(cat: String) -> void:
+	match cat:
+		"display":
+			graphics_quality = 2
+			msaa_level = 1
+			render_scale_setting = 1.0
+			resolution = "native"
+			fullscreen = false
+			vsync_on = true
+			fov_setting = 90.0
+			post_fx_enabled = true
+			show_fps = false
+			apply_graphics()
+		"gameplay":
+			crosshair_enabled = true
+			show_crosshair = false
+			crosshair_color = 0
+			damage_numbers = false
+			show_minimap = false
+			viewmodel_bob = 1.0
+			screen_shake = 1.0
+		"controls":
+			mouse_sens_mult = 1.0
+			ads_sens_mult = 0.85
+			invert_y = false
+			sprint_mode = 0
+			ads_mode = 0
+			crouch_mode = 0
+		"audio":
+			master_volume = 0.8
+			sfx_volume = 1.0
+			step_volume = 1.0
+			hitmarker_sfx = true
+			menu_sound = true
+			apply_volume()
+		"keybinds":
+			reset_key_binds()
+			return
+	write_save()
 
 
 func keyify(text: String) -> String:
@@ -673,23 +761,23 @@ func _preload_audio() -> void:
 		"monster_roar", "monster_rend", "monster_slam", "pain_drug",
 		"gorilla_slam", "zombie_groan", "zombie_step_1", "zombie_step_2",
 		"boss_step", "zombie_roar_1", "zombie_roar_2", "zombie_attack_roar",
-		"boss_roar", "round_sting", "buy_ching",
+		"boss_roar", "buy_ching",
 		"gun_smg", "gun_lmg", "gun_sniper", "gun_revolver", "gun_volt",
 		"knife_swing", "knife_hit", "grenade_explode", "grenade_pin",
 		"crate_open", "crate_reveal", "furnace_burn", "level_up", "dry_fire",
 		"board_repair", "board_tear", "door_open", "player_hurt", "weapon_swap",
 		"slide", "player_step_1", "player_step_2", "shell_insert",
-		"flesh_hit", "hit_flesh", "headshot_ding", "ricochet", "gore_splat", "shell_tink", "zombie_death", "pump_rack", "bolt_cycle",
+		"flesh_hit", "hit_flesh", "ricochet", "gore_splat", "shell_tink", "zombie_death", "pump_rack", "bolt_cycle",
 		"mag_out", "mag_in", "power_on", "trap_zap", "electrocute", "skull_shatter",
-		"heartbeat", "hit_tick", "kill_confirm", "low_ammo_tick", "streak_sting",
-		"rain_loop", "rain_indoor_loop", "roof_rain_loop", "wind_loop", "fire_loop", "hum_loop", "drone_loop",
+		"heartbeat", "hit_tick", "kill_confirm", "low_ammo_tick",
+		"rain_loop", "rain_indoor_loop", "roof_rain_loop", "wind_loop", "fire_loop", "hum_loop",
 		"creak", "drip", "crow", "bell_far", "train_horn", "scream_far",
-		"hound_growl", "hound_bark", "hound_howl", "hound_bite", "hound_death", "hound_round_sting",
+		"hound_growl", "hound_bark", "hound_howl", "hound_bite", "hound_death",
 		"lightning_strike", "thunder_far", "bloater_pop", "player_cough", "player_downed", "second_wind",
-		"heli_loop", "flare_ignite", "flare_burn", "radio_call", "radio_beep", "exfil_siren", "exfil_success",
-		"carpenter", "fire_sale", "powerup_spawn",
+		"heli_loop", "flare_ignite", "flare_burn", "radio_call", "radio_beep", "exfil_siren",
+		"carpenter", "powerup_spawn",
 		"breath_panic", "whisper_eerie", "metal_scrape", "fluorescent_buzz",
-		"flashlight_click", "headshot_crunch", "round_end_sting", "boss_blackout", "gun_suppressed"
+		"flashlight_click", "headshot_crunch", "boss_blackout", "gun_suppressed"
 	]
 	for n in names:
 		var path := "res://assets/audio/%s.wav" % n
@@ -728,7 +816,14 @@ func play_sfx(sfx_name: String, volume_db: float = 0.0, pitch_scale: float = 1.0
 func reset_run() -> void:
 	_zombie_roar_cooldown = 0.0
 	_zombie_roar_slots.clear()
-	_best_round_at_start = best_round_infinite if game_mode == "infinite" else best_round
+	if game_mode == "overdrive":
+		_best_round_at_start = best_round_overdrive
+	elif game_mode == "horror":
+		_best_round_at_start = best_round_horror
+	elif game_mode == "infinite":
+		_best_round_at_start = best_round_infinite
+	else:
+		_best_round_at_start = best_round
 	points_mult = 1.0
 	points = start_points()
 	_run_finished = false
@@ -760,7 +855,9 @@ func event_points_mult() -> float:
 func add_points(amount: int) -> void:
 	if amount > 0:
 		amount = int(round(float(amount) * points_mult * diff("points") * event_points_mult()))
-		if is_powerup_active("double_points"):
+		if is_powerup_active("quad_points"):
+			amount *= 4
+		elif is_powerup_active("double_points"):
 			amount *= 2
 	points += amount
 	points_changed.emit(points, amount)
@@ -902,9 +999,9 @@ func apply_graphics() -> void:
 	if vp == null:
 		return
 	var q := graphics_quality
-	vp.msaa_3d = Viewport.MSAA_2X if q == 2 else Viewport.MSAA_DISABLED
+	var msaa_modes: Array = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X]
+	vp.msaa_3d = msaa_modes[clampi(msaa_level, 0, 2)] as Viewport.MSAA
 	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
-	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR if q == 0 else Viewport.SCALING_3D_MODE_BILINEAR
 	var res := _resolution_size()
 	var render_scale := 1.0
 	if DisplayServer.get_name() != "headless":
@@ -917,7 +1014,9 @@ func apply_graphics() -> void:
 		elif res != Vector2i.ZERO and fullscreen and scr.y > 0:
 			# Fullscreen: the game renders at that resolution and is scaled to the screen
 			render_scale = clampf(float(res.y) / float(scr.y), 0.25, 1.0)
-	vp.scaling_3d_scale = render_scale * (0.75 if q == 0 else 1.0)
+	var eff_scale: float = clampf(render_scale * render_scale_setting * (0.82 if q == 0 and render_scale_setting >= 0.99 else 1.0), 0.5, 1.0)
+	vp.scaling_3d_scale = eff_scale
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR if eff_scale < 0.99 else Viewport.SCALING_3D_MODE_BILINEAR
 	vp.positional_shadow_atlas_size = [1024, 2048, 4096][q]
 	RenderingServer.directional_shadow_atlas_set_size([1024, 2048, 4096][q], true)
 	var scene := get_tree().current_scene
@@ -928,7 +1027,7 @@ func apply_graphics() -> void:
 		if env:
 			env.ssr_enabled = q == 2
 			env.ssao_enabled = q >= 1
-			env.volumetric_fog_enabled = q >= 1
+			env.volumetric_fog_enabled = (q >= 1) and not (is_overdrive() or is_pvp())
 
 
 # ---------------------------------------------------------------------------
@@ -949,6 +1048,14 @@ const DIFFICULTIES := [
 	{"hp": 1.95, "dmg": 1.65, "speed": 1.12, "crowd": 1.3, "special": 1.7, "boss": 1.25, "regen": 0.8, "points": 0.95, "score": 3.5, "horror": 1.0},
 	{"hp": 2.3, "dmg": 1.9, "speed": 1.16, "crowd": 1.4, "special": 2.0, "boss": 1.35, "regen": 0.7, "points": 0.9, "score": 4.5, "horror": 1.0},
 ]
+const OVERDRIVE_DIFFICULTY_NAMES := ["ROOKIE", "TURBO", "MAYHEM", "CARNAGE", "OVERKILL"]
+const OVERDRIVE_DIFFICULTIES := [
+	{"hp": 0.70, "dmg": 0.65, "speed": 1.05, "crowd": 1.15, "special": 1.15, "boss": 0.85, "regen": 1.50, "points": 1.25, "score": 0.85, "horror": 0.0, "mutators": 1, "boss_traits": 0, "twin_every": 0, "combo_window": 6.5},
+	{"hp": 0.90, "dmg": 0.90, "speed": 1.12, "crowd": 1.30, "special": 1.40, "boss": 1.00, "regen": 1.30, "points": 1.25, "score": 1.20, "horror": 0.0, "mutators": 1, "boss_traits": 1, "twin_every": 0, "combo_window": 5.5},
+	{"hp": 1.15, "dmg": 1.15, "speed": 1.20, "crowd": 1.50, "special": 1.75, "boss": 1.20, "regen": 1.15, "points": 1.35, "score": 1.75, "horror": 0.0, "mutators": 2, "boss_traits": 1, "twin_every": 0, "combo_window": 4.8},
+	{"hp": 1.45, "dmg": 1.40, "speed": 1.28, "crowd": 1.75, "special": 2.15, "boss": 1.40, "regen": 1.00, "points": 1.45, "score": 2.50, "horror": 0.0, "mutators": 2, "boss_traits": 2, "twin_every": 5, "combo_window": 4.2},
+	{"hp": 1.80, "dmg": 1.70, "speed": 1.36, "crowd": 2.00, "special": 2.60, "boss": 1.65, "regen": 0.85, "points": 1.60, "score": 3.50, "horror": 0.0, "mutators": 2, "boss_traits": 2, "twin_every": 3, "combo_window": 3.6},
+]
 const FINAL_ROUND := 20
 const META_UNLOCKS := [
 	{"level": 2, "id": "points_250", "text": "+250 STARTING POINTS"},
@@ -964,18 +1071,158 @@ const META_UNLOCKS := [
 	{"level": 18, "id": "points_1250", "text": "+750 MORE STARTING POINTS"},
 	{"level": 20, "id": "reload", "text": "+10% RELOAD & WEAPON SWAP SPEED"},
 ]
+const MAX_PVP_PLAYERS := 32
+const PVP_MODES := {
+	"tdm": {"name": "TEAM DEATHMATCH", "short": "TDM", "tag": "75 / 50 KILLS", "icon": "skull", "desc": "Fast-paced squad combat across all arena sectors. First team to score cap wins."},
+	"gungame": {"name": "GUN GAME", "short": "GUN GAME", "tag": "12 TIERS", "icon": "rifle", "desc": "Advance 12 weapons ending with RPG-7V2 & Knife. Knife kills demote victims!"},
+	"snd": {"name": "SEARCH & DESTROY", "short": "S&D", "tag": "NO RESPAWN", "icon": "bolt", "desc": "1 life per round. Plant or defuse C4 at Site A or B across 2, 4, or 6 squads."},
+	"dom": {"name": "DOMINATION", "short": "DOMINATION", "tag": "3 FLAGS", "icon": "flag", "desc": "Capture & hold Objectives A, B, and C to earn +1 pt per flag every 2s to 150."},
+}
+const PVP_MAP_ORDER: Array[String] = ["nacht", "dockyard", "black_site", "quarry"]
+const PVP_MAPS := {
+	"nacht": {
+		"id": "nacht", "name": "OUTPOST NACHT-7", "short": "NACHT-7", "tag": "LARGE · 6 SECTORS",
+		"icon": "compass", "accent": Color(0.95, 0.42, 0.28),
+		"desc": "Fortified 6-sector town around a central memorial plaza.",
+	},
+	"dockyard": {
+		"id": "dockyard", "name": "IRONCLAD DOCKYARD", "short": "DOCKYARD", "tag": "FAST · CQC PORT",
+		"icon": "chopper", "accent": Color(0.28, 0.78, 1.00),
+		"desc": "Symmetric 3-lane container terminal, crane hub & coastal helipad.",
+	},
+	"black_site": {
+		"id": "black_site", "name": "SUB-ZERO BLACK SITE", "short": "BLACK SITE", "tag": "MEDIUM · ARCTIC LAB",
+		"icon": "snow", "accent": Color(0.48, 0.94, 1.00),
+		"desc": "Polar cryo-facility & raised missile silo rotunda with 4 breach lanes.",
+	},
+	"quarry": {
+		"id": "quarry", "name": "SUNSCORCH REFINERY", "short": "REFINERY", "tag": "OPEN · DESERT BASIN",
+		"icon": "flame", "accent": Color(1.00, 0.68, 0.22),
+		"desc": "Canyon oil refinery with long sightlines, trenches & cracking towers.",
+	},
+}
+const PVP_TEAMS := [
+	{"id": 0, "name": "ALPHA", "code": "ALP", "zone": "rail", "color": Color(0.96, 0.26, 0.22)},
+	{"id": 1, "name": "BRAVO", "code": "BRV", "zone": "church", "color": Color(0.24, 0.64, 1.00)},
+	{"id": 2, "name": "CHARLIE", "code": "CHL", "zone": "warehouse", "color": Color(0.26, 0.92, 0.50)},
+	{"id": 3, "name": "DELTA", "code": "DLT", "zone": "hospital", "color": Color(1.00, 0.82, 0.20)},
+	{"id": 4, "name": "ECHO", "code": "ECH", "zone": "plaza", "color": Color(0.76, 0.40, 1.00)},
+	{"id": 5, "name": "FOXTROT", "code": "FOX", "zone": "cemetery", "color": Color(1.00, 0.50, 0.16)},
+]
+const PVP_TEAM_PRESETS := {
+	2: {"teams": 2, "max_per_team": 16, "max_players": 32, "label": "2 TEAMS (16v16)"},
+	4: {"teams": 4, "max_per_team": 8, "max_players": 32, "label": "4 TEAMS (4x8)"},
+	6: {"teams": 6, "max_per_team": 6, "max_players": 32, "label": "6 TEAMS (6x6)"},
+}
+const GUN_GAME_LADDER: Array[String] = ["pistol", "deagle_50", "spas12", "vector_45", "m4_carbine", "scar_h", "mk14_ebr", "m249_saw", "awm_magnum", "volt", "rpg7", "knife"]
+const PVP_WEAPON_DAMAGE := WeaponCatalog.PVP_DAMAGE
+
 var difficulty: int = 1 # 0 easy, 1 normal, 2 hard (the host's choice in co-op)
+var overdrive_difficulty: int = 1 # 0..4 index into OVERDRIVE_DIFFICULTIES
 var career_xp: int = 0
 var _run_finished: bool = false
 
 
+func is_overdrive() -> bool:
+	return game_mode == "overdrive"
+
+
+func is_horror_mode() -> bool:
+	return game_mode == "horror"
+
+
+func is_pvp() -> bool:
+	return game_mode == "pvp"
+
+
+func pvp_team_count() -> int:
+	return int(PVP_TEAM_PRESETS.get(team_preset, PVP_TEAM_PRESETS[2])["teams"])
+
+
+func pvp_max_per_team() -> int:
+	return int(PVP_TEAM_PRESETS.get(team_preset, PVP_TEAM_PRESETS[2])["max_per_team"])
+
+
+func pvp_team_color(tid: int) -> Color:
+	return PVP_TEAMS[clampi(tid, 0, PVP_TEAMS.size() - 1)]["color"]
+
+
+func pvp_team_name(tid: int) -> String:
+	return String(PVP_TEAMS[clampi(tid, 0, PVP_TEAMS.size() - 1)]["name"])
+
+
+func pvp_team_code(tid: int) -> String:
+	return String(PVP_TEAMS[clampi(tid, 0, PVP_TEAMS.size() - 1)]["code"])
+
+
+func pvp_weapon_damage(w_id: String) -> float:
+	return float(PVP_WEAPON_DAMAGE.get(w_id, 28.0))
+
+
+func resolve_pvp_map() -> String:
+	if pvp_map == "random":
+		var pool: Array[String] = []
+		for mid in PVP_MAP_ORDER:
+			pool.append(mid)
+		if PVP_MAPS.has(active_pvp_map) and pool.size() > 1 and randf() < 0.75:
+			pool.erase(active_pvp_map)
+		active_pvp_map = pool[randi() % pool.size()]
+		return active_pvp_map
+	if PVP_MAPS.has(pvp_map):
+		active_pvp_map = pvp_map
+		return active_pvp_map
+	pvp_map = "nacht"
+	active_pvp_map = "nacht"
+	return "nacht"
+
+
+func pvp_map_info(map_key: String = "") -> Dictionary:
+	var k: String = map_key if map_key != "" else active_pvp_map
+	return PVP_MAPS.get(k, PVP_MAPS["nacht"])
+
+
+func mode_label() -> String:
+	if is_pvp():
+		var m: Dictionary = PVP_MODES.get(pvp_mode, PVP_MODES["tdm"])
+		return "%s (%dT)" % [String(m["short"]), pvp_team_count()]
+	if game_mode == "overdrive":
+		return "OVERDRIVE"
+	if game_mode == "horror":
+		return "HORROR"
+	return "CASUAL" if game_mode == "casual" else "INFINITE"
+
+
+func active_diff_index() -> int:
+	if is_overdrive():
+		return clampi(overdrive_difficulty, 0, OVERDRIVE_DIFFICULTIES.size() - 1)
+	return clampi(difficulty, 0, DIFFICULTIES.size() - 1)
+
+
+func active_diff_name() -> String:
+	if is_overdrive():
+		return OVERDRIVE_DIFFICULTY_NAMES[active_diff_index()]
+	return DIFFICULTY_NAMES[active_diff_index()]
+
+
+func diff_name_for(m: String, idx: int) -> String:
+	if m == "overdrive":
+		return OVERDRIVE_DIFFICULTY_NAMES[clampi(idx, 0, OVERDRIVE_DIFFICULTY_NAMES.size() - 1)]
+	return DIFFICULTY_NAMES[clampi(idx, 0, DIFFICULTY_NAMES.size() - 1)]
+
+
 func diff(key: String) -> float:
+	if is_overdrive():
+		return float(OVERDRIVE_DIFFICULTIES[clampi(overdrive_difficulty, 0, OVERDRIVE_DIFFICULTIES.size() - 1)].get(key, 1.0))
 	return float(DIFFICULTIES[clampi(difficulty, 0, DIFFICULTIES.size() - 1)].get(key, 1.0))
 
 
-# How frightening the game is on this difficulty (0..1)
+# How frightening the game is on this mode & difficulty (0..1)
+# Horror blackout / sensory infected / carrion crows are exclusive to HORROR mode.
 func horror() -> float:
-	return diff("horror") if DIFFICULTIES[clampi(difficulty, 0, DIFFICULTIES.size() - 1)].has("horror") else 0.0
+	if not is_horror_mode():
+		return 0.0
+	var raw := diff("horror") if DIFFICULTIES[clampi(difficulty, 0, DIFFICULTIES.size() - 1)].has("horror") else 0.85
+	return clampf(raw, 0.80, 1.0)
 
 
 func diff_hp_mult() -> float:
@@ -1007,13 +1254,42 @@ func diff_lines(i: int) -> Array[String]:
 	pct.call("Boss health", "boss")
 	pct.call("Your health regen", "regen")
 	pct.call("Points earned", "points")
-	var hr := float(d.get("horror", 0.78))
-	var bits: Array[String] = ["pitch-black interiors", "tactical flashlight", "sleeper & stalker infected", "power blackouts"]
-	if hr >= 0.92:
-		bits.append("hidden zombie count")
-	out.append("Survival Horror %d%%: %s" % [roundi(hr * 100.0), ", ".join(bits)])
+	if is_horror_mode():
+		var hr := clampf(float(d.get("horror", 0.85)), 0.80, 1.0)
+		var bits: Array[String] = ["pitch-black blackout", "tactical flashlight", "LOS & sound infected", "carrion crows & 6s corpse mutations"]
+		if hr >= 0.92:
+			bits.append("hidden zombie count")
+		out.append("Survival Horror %d%%: %s" % [roundi(hr * 100.0), ", ".join(bits)])
+	else:
+		out.append("Night Outpost: lit streetlamps & interior lights ON")
 	if out.is_empty():
 		out.append("The standard experience")
+	out.append("Score x%s" % str(snappedf(float(d["score"]), 0.01)))
+	return out
+
+
+func overdrive_diff_lines(i: int) -> Array[String]:
+	var d: Dictionary = OVERDRIVE_DIFFICULTIES[clampi(i, 0, OVERDRIVE_DIFFICULTIES.size() - 1)]
+	var out: Array[String] = []
+	var pct := func(label: String, key: String) -> void:
+		var v := float(d.get(key, 1.0))
+		if absf(v - 1.0) > 0.001:
+			out.append("%s %s%d%%" % [label, "+" if v > 1.0 else "-", roundi(absf(v - 1.0) * 100.0)])
+	pct.call("Zombie speed", "speed")
+	pct.call("Zombies per round", "crowd")
+	pct.call("Zombie health", "hp")
+	pct.call("Zombie damage", "dmg")
+	out.append("Specials x%s" % str(snappedf(float(d["special"]), 0.01)))
+	var mut_n: int = int(d.get("mutators", 1))
+	out.append("%d Chaos Mutator%s / round" % [mut_n, "s" if mut_n > 1 else ""])
+	var tr_n: int = int(d.get("boss_traits", 0))
+	if tr_n > 0:
+		out.append("Champion Bosses (%d trait%s)" % [tr_n, "s" if tr_n > 1 else ""])
+	var tw_n: int = int(d.get("twin_every", 0))
+	if tw_n > 0:
+		out.append("Twin Bosses every %d rounds" % tw_n)
+	out.append("Combo window %.1fs" % float(d.get("combo_window", 5.0)))
+	out.append("Zero horror: golden daylight, pre-lit arena & tactical HUD")
 	out.append("Score x%s" % str(snappedf(float(d["score"]), 0.01)))
 	return out
 
@@ -1038,7 +1314,7 @@ func has_unlock(id: String) -> bool:
 
 
 func start_points() -> int:
-	return 500 + (250 if has_unlock("points_250") else 0) + (500 if has_unlock("points_500") else 0) + (750 if has_unlock("points_1250") else 0)
+	return 500 + (750 if is_overdrive() else 0) + (250 if has_unlock("points_250") else 0) + (500 if has_unlock("points_500") else 0) + (750 if has_unlock("points_1250") else 0)
 
 
 func run_score(outcome: String) -> int:
@@ -1071,7 +1347,7 @@ func finish_run(outcome: String) -> String:
 		record_run()
 		write_save()
 	var after := career_level()
-	var lines := ("CASUAL" if game_mode == "casual" else "INFINITE") + " MODE\nSCORE: %d   (%s)\n+%d XP   •   CAREER LEVEL %d   (%d / %d XP)" % [score, DIFFICULTY_NAMES[difficulty], gained, after, career_xp, xp_for_level(after + 1)]
+	var lines := mode_label() + " MODE\nSCORE: %d   (%s)\n+%d XP   •   CAREER LEVEL %d   (%d / %d XP)" % [score, active_diff_name(), gained, after, career_xp, xp_for_level(after + 1)]
 	for u in META_UNLOCKS:
 		if int(u["level"]) > before and int(u["level"]) <= after:
 			lines += "\n★ UNLOCKED: %s" % u["text"]
@@ -1149,3 +1425,129 @@ func load_player_state(for_run: int) -> Dictionary:
 func clear_run_save() -> void:
 	if FileAccess.file_exists(RUN_SAVE_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(RUN_SAVE_PATH))
+
+
+# ---------------------------------------------------------------------------
+# CUSTOM LOADOUT SETS (5 CoD / Battlefield-style Weapon + Equipment Classes)
+# ---------------------------------------------------------------------------
+static func is_valid_primary(w_id: String) -> bool:
+	if not WEAPONS.has(w_id):
+		return false
+	var slot := String(WEAPONS[w_id].get("slot", "primary"))
+	return slot == "primary" or slot == "both"
+
+
+static func is_valid_secondary(w_id: String) -> bool:
+	if not WEAPONS.has(w_id):
+		return false
+	var slot := String(WEAPONS[w_id].get("slot", "secondary"))
+	return slot == "secondary" or slot == "both"
+
+
+func sanitize_loadout(raw: Dictionary, fallback_idx: int = 0) -> Dictionary:
+	var def_arr := WeaponCatalog.DEFAULT_LOADOUTS
+	var def: Dictionary = def_arr[clampi(fallback_idx, 0, def_arr.size() - 1)]
+	var name_str := String(raw.get("name", def.get("name", "CUSTOM CLASS"))).strip_edges().to_upper()
+	if name_str.is_empty():
+		name_str = String(def.get("name", "CUSTOM CLASS"))
+	var pri := String(raw.get("primary", def.get("primary", "m4_carbine")))
+	if not is_valid_primary(pri):
+		pri = String(def.get("primary", "m4_carbine"))
+	var sec := String(raw.get("secondary", def.get("secondary", "rpg7")))
+	if not is_valid_secondary(sec):
+		sec = String(def.get("secondary", "rpg7"))
+	var atts: Array[String] = []
+	var raw_atts = raw.get("attachments", def.get("attachments", []))
+	if raw_atts is Array:
+		for a in raw_atts:
+			var aid := String(a)
+			if is_attachment_allowed(pri, aid) and aid not in atts:
+				atts.append(aid)
+				if atts.size() >= 3:
+					break
+	var sec_atts: Array[String] = []
+	var raw_sec_atts = raw.get("sec_attachments", def.get("sec_attachments", []))
+	if raw_sec_atts is Array:
+		for a in raw_sec_atts:
+			var aid := String(a)
+			if is_attachment_allowed(sec, aid) and aid not in sec_atts:
+				sec_atts.append(aid)
+				if sec_atts.size() >= 2:
+					break
+	var pri_camo := String(raw.get("pri_camo", def.get("pri_camo", "factory")))
+	if not WEAPON_CAMOS.has(pri_camo):
+		pri_camo = "factory"
+	var sec_camo := String(raw.get("sec_camo", def.get("sec_camo", "factory")))
+	if not WEAPON_CAMOS.has(sec_camo):
+		sec_camo = "factory"
+	var let_id := String(raw.get("lethal", def.get("lethal", "frag")))
+	if not LETHALS.has(let_id):
+		let_id = String(def.get("lethal", "frag"))
+	var tac_id := String(raw.get("tactical", def.get("tactical", "flashbang")))
+	if not TACTICALS.has(tac_id):
+		tac_id = String(def.get("tactical", "flashbang"))
+	var perk_id := String(raw.get("perk", def.get("perk", "fast_hands")))
+	if not FIELD_PERKS.has(perk_id):
+		perk_id = String(def.get("perk", "fast_hands"))
+	return {
+		"name": name_str.substr(0, 24),
+		"primary": pri,
+		"attachments": atts,
+		"pri_camo": pri_camo,
+		"secondary": sec,
+		"sec_attachments": sec_atts,
+		"sec_camo": sec_camo,
+		"lethal": let_id,
+		"tactical": tac_id,
+		"perk": perk_id,
+	}
+
+
+func _ensure_loadouts() -> void:
+	var target_count := WeaponCatalog.DEFAULT_LOADOUTS.size()
+	while custom_loadouts.size() < target_count:
+		var idx := custom_loadouts.size()
+		custom_loadouts.append(sanitize_loadout(WeaponCatalog.DEFAULT_LOADOUTS[idx], idx))
+	if custom_loadouts.size() > target_count:
+		custom_loadouts.resize(target_count)
+	for i in range(custom_loadouts.size()):
+		custom_loadouts[i] = sanitize_loadout(custom_loadouts[i], i)
+	active_loadout_index = clampi(active_loadout_index, 0, target_count - 1)
+
+
+func get_loadout(idx: int) -> Dictionary:
+	_ensure_loadouts()
+	return custom_loadouts[clampi(idx, 0, custom_loadouts.size() - 1)]
+
+
+func get_active_loadout() -> Dictionary:
+	_ensure_loadouts()
+	return custom_loadouts[active_loadout_index]
+
+
+func set_active_loadout(idx: int, save_now: bool = true) -> void:
+	_ensure_loadouts()
+	active_loadout_index = clampi(idx, 0, custom_loadouts.size() - 1)
+	pvp_loadout_weapon = String(custom_loadouts[active_loadout_index].get("primary", "m4_carbine"))
+	if save_now:
+		write_save()
+
+
+func update_loadout(idx: int, data: Dictionary, save_now: bool = true) -> void:
+	_ensure_loadouts()
+	var i := clampi(idx, 0, custom_loadouts.size() - 1)
+	custom_loadouts[i] = sanitize_loadout(data, i)
+	if i == active_loadout_index:
+		pvp_loadout_weapon = String(custom_loadouts[i].get("primary", "m4_carbine"))
+	if save_now:
+		write_save()
+
+
+func reset_loadout_slot(idx: int, save_now: bool = true) -> void:
+	_ensure_loadouts()
+	var i := clampi(idx, 0, custom_loadouts.size() - 1)
+	custom_loadouts[i] = sanitize_loadout(WeaponCatalog.DEFAULT_LOADOUTS[i], i)
+	if i == active_loadout_index:
+		pvp_loadout_weapon = String(custom_loadouts[i].get("primary", "m4_carbine"))
+	if save_now:
+		write_save()

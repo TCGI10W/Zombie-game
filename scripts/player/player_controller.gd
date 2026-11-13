@@ -4,6 +4,7 @@ extends CharacterBody3D
 signal hp_changed(hp: float, max_hp: float, overshield: float)
 signal ammo_changed(weapon_name: String, mag: int, reserve: int, is_reloading: bool, pap_active: bool)
 signal hitmarker_triggered(is_headshot: bool, is_kill: bool, is_ability: bool)
+signal shield_hitmarker_triggered()
 signal status_banner_requested(text: String, color: Color)
 signal interact_prompt_changed(prompt_text: String)
 signal player_died()
@@ -38,6 +39,13 @@ var overshield: float = 0.0
 var base_move_speed: float = 5.3
 var regen_delay_timer: float = 0.0
 var is_dead: bool = false
+var team_id: int = 0
+var pvp_knife_only: bool = false
+var last_fire_msec: int = 0
+
+
+func head_y() -> float:
+	return 1.38 if (is_crouching or is_sliding) else 1.62
 
 # Last stand: with a Second Wind charge, lethal damage knocks you down instead
 # of killing you, and you get back up a few seconds later.
@@ -88,12 +96,12 @@ var active_slot: int = 0
 var mag_ammo: Dictionary = {}
 var reserve_ammo: Dictionary = {}
 var upgraded: Dictionary = {} # w_id -> true once forged
-var weapon_mods: Dictionary = {} # w_id -> Array[String] from Mystery Crate rolls
+var weapon_mods: Dictionary = {} # w_id -> Array[String] from Mystery Crate rolls or Loadout
+var weapon_camos: Dictionary = {} # w_id -> camo id from custom loadout
 
-# Bodycam horror & panic state
+# Horror & weapon state
 var sensor_flash: float = 0.0
 var stress: float = 0.0
-var _cam_yaw_vel: float = 0.0
 var _breath_cd: float = 0.0
 var _stress_beat_cd: float = 0.0
 var _flash_hit_flicker: float = 0.0
@@ -116,6 +124,17 @@ var pending_slot: int = 0
 var knife_timer: float = 0.0
 var grenades: int = 2
 var grenade_cd: float = 0.0
+var tactical_count: int = 2
+var tactical_cd: float = 0.0
+var equipped_lethal: String = "frag"
+var equipped_tactical: String = "flashbang"
+var equipped_perk: String = "fast_hands"
+var flashbang_t: float = 0.0
+var concuss_t: float = 0.0
+var _burst_left: int = 0
+var _burst_gap: float = 0.0
+var _burst_w_id: String = ""
+var _scav_kills: int = 0
 var _dry_fired: bool = false
 var _hurt_sfx_cd: float = 0.0
 
@@ -189,6 +208,30 @@ var camera_shake: float = 0.0
 var sway: Vector2 = Vector2.ZERO
 var hurt_roll: float = 0.0
 var nearby_station: Node = null
+var _computed_ads_pos: Vector3 = Vector3(0.0, -0.075, -0.32)
+var _computed_ads_valid: bool = false
+var _player_hb: Dictionary = {}
+var _hurtboxes: Array[Area3D] = []
+var is_holding_breath: bool = false
+var breath_stamina: float = 1.0
+var _post_fire_settle: float = 0.0
+var _coyote_t: float = 0.0
+var _jump_buf_t: float = 0.0
+var is_tac_sprinting: bool = false
+var tac_sprint_t: float = 0.0
+var tac_stamina: float = 1.0
+var _last_sprint_tap_ms: int = -9999
+var _sprint_latched: bool = false
+var _ads_latched: bool = false
+var _mantle_active: bool = false
+var _mantle_t: float = 0.0
+var _mantle_dur: float = 0.30
+var _mantle_start: Vector3 = Vector3.ZERO
+var _mantle_apex: Vector3 = Vector3.ZERO
+var _mantle_end: Vector3 = Vector3.ZERO
+var _inspect_t: float = -1.0
+var _inspect_click2: bool = false
+var _wall_tuck_t: float = 0.0
 
 
 func _ready() -> void:
@@ -210,6 +253,9 @@ func _ready() -> void:
 		ev2.physical_keycode = KEY_Z
 		InputMap.action_add_event("borrowed_skill_2", ev2)
 	add_to_group("net_players")
+	if GameState.is_pvp():
+		add_to_group("pvp_combatants")
+		team_id = Net.my_team if Net.is_online() else GameState.pvp_selected_team
 	if GameState.has_unlock("grenade"):
 		grenades += 1
 	if GameState.has_unlock("second_wind"):
@@ -245,9 +291,18 @@ func _ready() -> void:
 	reserve_ammo["pistol"] = p_cfg["reserve_max"]
 
 	_build_camera_and_viewmodels()
-	_equip_weapon_model(get_current_weapon_id())
-	hp_changed.emit(hp, max_hp, overshield)
-	_emit_ammo()
+	_player_hb = HitboxRig.attach_local_player(self)
+	_hurtboxes.assign(_player_hb.get("areas", []))
+	var active_set := GameState.get_active_loadout()
+	equipped_lethal = String(active_set.get("lethal", "frag"))
+	equipped_tactical = String(active_set.get("tactical", "flashbang"))
+	equipped_perk = String(active_set.get("perk", "fast_hands"))
+	if GameState.pve_use_custom_loadout and not GameState.is_pvp():
+		apply_custom_loadout()
+	else:
+		_equip_weapon_model(get_current_weapon_id())
+		hp_changed.emit(hp, max_hp, overshield)
+		_emit_ammo()
 
 
 func _build_camera_and_viewmodels() -> void:
@@ -257,7 +312,7 @@ func _build_camera_and_viewmodels() -> void:
 
 	camera = Camera3D.new()
 	camera.fov = base_fov
-	camera.near = 0.03
+	camera.near = 0.025
 	camera.far = 180.0
 	camera.current = true
 	head_pivot.add_child(camera)
@@ -322,7 +377,7 @@ func _build_camera_and_viewmodels() -> void:
 	bm_mat.albedo_color = Color(0.85, 0.92, 1.0, 0.018)
 	flash_beam_mesh.material_override = bm_mat
 	flash_pivot.add_child(flash_beam_mesh)
-	flashlight_on = true
+	flashlight_on = not GameState.is_pvp()
 
 	tac_laser_beam = MeshInstance3D.new()
 	var lbm := CylinderMesh.new()
@@ -411,15 +466,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		var zoom_scale := 1.0
 		if is_ads and not is_monster_form:
 			zoom_scale = lerpf(1.0, camera.fov / base_fov, 0.85)
-		var sens := MOUSE_SENS * GameState.mouse_sens_mult * zoom_scale
+		var ads_scale: float = lerpf(1.0, GameState.ads_sens_mult, ads_t)
+		var sens := MOUSE_SENS * GameState.mouse_sens_mult * zoom_scale * ads_scale
 		rotate_y(-event.relative.x * sens)
 		var dy: float = -event.relative.y if GameState.invert_y else event.relative.y
 		head_pivot.rotation.x = clampf(head_pivot.rotation.x - dy * sens, deg_to_rad(-86.0), deg_to_rad(86.0))
-		sway += Vector2(event.relative.x, event.relative.y) * (0.00145 if GameState.bodycam_mode else 0.0009)
-		if GameState.bodycam_mode:
-			_cam_yaw_vel = clampf(_cam_yaw_vel - event.relative.x * 0.012, -1.0, 1.0)
+		sway += Vector2(event.relative.x, event.relative.y) * 0.0011
 		# The gun lags behind fast turns and swings back into place
-		var lag := (0.0022 if GameState.bodycam_mode else 0.0016) * (0.35 if is_ads else 1.0)
+		var lag := 0.0018 * (0.35 if is_ads else 1.0)
 		vm_rot_vel += Vector3(event.relative.y * lag, -event.relative.x * lag * 1.3, -event.relative.x * lag)
 
 	elif event is InputEventMouseButton and event.pressed:
@@ -443,6 +497,16 @@ func _physics_process(delta: float) -> void:
 	_handle_combat_inputs(delta)
 	_animate_viewmodels(delta)
 	_update_tac_laser()
+	var ct := 1.0 if is_downed else (0.85 if is_sliding else (0.72 if is_crouching else 0.0))
+	HitboxRig.update_local_player(_player_hb, ct, not is_dead)
+	var opt_k := String(gun_model.get_meta("optic_kind", "")) if is_instance_valid(gun_model) else ""
+	var can_steady := is_ads and not is_monster_form and (is_scoped() or opt_k == "acog")
+	if can_steady and Input.is_action_pressed("sprint") and breath_stamina > 0.04:
+		is_holding_breath = true
+		breath_stamina = maxf(0.0, breath_stamina - delta * 0.25)
+	else:
+		is_holding_breath = false
+		breath_stamina = minf(1.0, breath_stamina + delta * 0.22)
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +536,8 @@ func burn_into_stat(id: String, amount: int) -> int:
 
 func _apply_stats() -> void:
 	var new_max := base_max_hp + 15.0 * stat_eff("endurance") + (60.0 if has_perk("titan") else 0.0)
+	if GameState.is_overdrive():
+		new_max += 35.0 * float(od_mut_stacks("titan_plated")) + 50.0 * float(od_mut_stacks("phoenix_core"))
 	if new_max > max_hp:
 		hp += new_max - max_hp
 	max_hp = new_max
@@ -486,15 +552,35 @@ func dmg_mult() -> float:
 		m *= 1.15
 	if has_perk("mastery"):
 		m *= 1.35
+	if GameState.is_overdrive():
+		m *= 1.0 + 0.06 * float(od_rank_index())
+		if _od_has_mutator("glass_cannon"):
+			m *= 1.45
+		m *= 1.0 + 0.15 * float(od_mut_stacks("crit_surge"))
 	return m
 
 
 func speed_mult() -> float:
-	return (1.0 + 0.04 * stat_eff("speed")) * (1.3 if adrenaline_timer > 0.0 else 1.0) * (0.5 if trap_slow_t > 0.0 else 1.0)
+	var m := (1.0 + 0.04 * stat_eff("speed")) * (1.3 if adrenaline_timer > 0.0 else 1.0) * (0.5 if trap_slow_t > 0.0 else 1.0)
+	if concuss_t > 0.0:
+		m *= 0.62
+	if GameState.is_overdrive():
+		m *= 1.0 + 0.045 * float(od_rank_index())
+		if _od_has_mutator("low_grav"):
+			m *= 1.12
+	return m
 
 
 func dex_mult() -> float:
-	return (1.0 + 0.07 * stat_eff("dexterity")) * (1.25 if has_perk("hands") else 1.0) * (1.2 if adrenaline_timer > 0.0 else 1.0) * (1.1 if GameState.has_unlock("reload") else 1.0)
+	var m := (1.0 + 0.07 * stat_eff("dexterity")) * (1.25 if has_perk("hands") else 1.0) * (1.2 if adrenaline_timer > 0.0 else 1.0) * (1.1 if GameState.has_unlock("reload") else 1.0)
+	if equipped_perk == "fast_hands":
+		m *= 1.25
+	if GameState.is_overdrive():
+		m *= 1.0 + 0.08 * float(od_rank_index())
+		if _od_has_mutator("hyper_mag"):
+			m *= 1.40
+		m *= 1.0 + 0.25 * float(od_mut_stacks("quick_hands"))
+	return m
 
 
 func stamina_duration() -> float:
@@ -511,7 +597,6 @@ func stamina_recover_time() -> float:
 func _update_timers(delta: float) -> void:
 	_update_flashlight(delta)
 	sensor_flash = move_toward(sensor_flash, 0.0, delta * 2.6)
-	_cam_yaw_vel = lerpf(_cam_yaw_vel, 0.0, clampf(8.5 * delta, 0.0, 1.0))
 	fire_cooldown = maxf(0.0, fire_cooldown - delta)
 	monster_rend_cd = maxf(0.0, monster_rend_cd - delta)
 	monster_slam_cd = maxf(0.0, monster_slam_cd - delta)
@@ -523,10 +608,49 @@ func _update_timers(delta: float) -> void:
 	slide_cd = maxf(0.0, slide_cd - delta)
 	sprint_out = maxf(0.0, sprint_out - delta)
 	grenade_cd = maxf(0.0, grenade_cd - delta)
+	tactical_cd = maxf(0.0, tactical_cd - delta)
+	flashbang_t = maxf(0.0, flashbang_t - delta)
+	concuss_t = maxf(0.0, concuss_t - delta)
+	if _burst_left > 0:
+		_burst_gap -= delta
+		if _burst_gap <= 0.0:
+			var bw := get_current_weapon_id()
+			if bw == _burst_w_id and not is_dead and not is_downed and int(mag_ammo.get(bw, 0)) > 0:
+				_burst_left -= 1
+				var b_cfg := get_weapon_cfg(bw)
+				_burst_gap = float(b_cfg.get("burst_interval", 0.055))
+				mag_ammo[bw] = maxi(0, int(mag_ammo[bw]) - 1)
+				_emit_ammo()
+				_fire_single_shot(bw, b_cfg)
+			else:
+				_burst_left = 0
 	_hurt_sfx_cd = maxf(0.0, _hurt_sfx_cd - delta)
 	revive_invuln = maxf(0.0, revive_invuln - delta)
 	borrowed_cd = maxf(0.0, borrowed_cd - delta)
 	borrowed_cd2 = maxf(0.0, borrowed_cd2 - delta)
+	_phoenix_cd = maxf(0.0, _phoenix_cd - delta)
+	if GameState.is_overdrive():
+		var wm := get_parent().get_node_or_null("WaveManager") if get_parent() else null
+		var paused_combo := wm != null and bool(wm.get("in_intermission"))
+		if not paused_combo:
+			if od_overdrive_t > 0.0:
+				od_overdrive_t = maxf(0.0, od_overdrive_t - delta)
+			elif od_combo > 0:
+				od_combo_t = maxf(0.0, od_combo_t - delta)
+				if od_combo_t <= 0.0:
+					od_combo = 0
+		var extra_cd := delta * ((1.2 if _od_has_mutator("turbo_cd") else 0.0) + (0.5 if od_rank_index() >= 5 else 0.0))
+		if extra_cd > 0.0:
+			monster_rend_cd = maxf(0.0, monster_rend_cd - extra_cd)
+			monster_slam_cd = maxf(0.0, monster_slam_cd - extra_cd)
+			human_lunge_cd = maxf(0.0, human_lunge_cd - extra_cd)
+			monster_cd = maxf(0.0, monster_cd - extra_cd)
+			stim_cd = maxf(0.0, stim_cd - extra_cd)
+			tesla_cd = maxf(0.0, tesla_cd - extra_cd)
+			pap_cd = maxf(0.0, pap_cd - extra_cd)
+			grenade_cd = maxf(0.0, grenade_cd - extra_cd)
+			borrowed_cd = maxf(0.0, borrowed_cd - extra_cd)
+			borrowed_cd2 = maxf(0.0, borrowed_cd2 - extra_cd)
 	if pending_skill_t > 0.0:
 		pending_skill_t -= delta
 		if pending_skill_t <= 0.0:
@@ -545,7 +669,7 @@ func _update_timers(delta: float) -> void:
 	if knife_timer > 0.0:
 		knife_timer -= delta
 		if knife_timer <= 0.0:
-			knife_rig.visible = false
+			knife_rig.visible = pvp_knife_only and not is_dead
 
 	if grenade_spawn_t > 0.0:
 		grenade_spawn_t -= delta
@@ -620,6 +744,32 @@ func _update_timers(delta: float) -> void:
 # MOVEMENT: walk, stamina sprint, crouch, slide, jump, landing
 # ---------------------------------------------------------------------------
 func _handle_movement(delta: float) -> void:
+	if _mantle_active:
+		_mantle_t = minf(1.0, _mantle_t + delta / maxf(0.12, _mantle_dur))
+		var u: float = 1.0 - pow(1.0 - _mantle_t, 2.0)
+		var omt: float = 1.0 - u
+		global_position = _mantle_start * (omt * omt) + _mantle_apex * (2.0 * omt * u) + _mantle_end * (u * u)
+		velocity = Vector3.ZERO
+		is_sprinting = false
+		is_tac_sprinting = false
+		is_crouching = false
+		is_sliding = false
+		sprint_t = move_toward(sprint_t, 0.0, delta * 10.0)
+		tac_sprint_t = move_toward(tac_sprint_t, 0.0, delta * 10.0)
+		head_height = lerpf(head_height, STAND_HEAD, clampf(12.0 * delta, 0.0, 1.0))
+		land_dip = sin(_mantle_t * PI) * 0.14
+		head_pivot.position.y = head_height - land_dip
+		capsule.height = 1.82
+		col_shape.position.y = capsule.height * 0.5
+		if _mantle_t >= 1.0:
+			_mantle_active = false
+			var m_fwd: Vector3 = Vector3(_mantle_end.x - _mantle_start.x, 0.0, _mantle_end.z - _mantle_start.z)
+			if m_fwd.length_squared() > 0.001:
+				m_fwd = m_fwd.normalized()
+			velocity = m_fwd * 3.0
+		was_on_floor = true
+		return
+
 	var on_floor := is_on_floor()
 	var inp := Vector2.ZERO if _input_blocked() else Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	strafe_input = inp.x
@@ -634,52 +784,130 @@ func _handle_movement(delta: float) -> void:
 		walk_speed *= 1.15
 	var sprint_speed := walk_speed * 1.5
 
-	# --- Sprint & stamina ---
+	# --- Coyote time & jump input buffer ---
+	_coyote_t = 0.13 if on_floor else maxf(0.0, _coyote_t - delta)
+	if not _input_blocked() and Input.is_action_just_pressed("jump"):
+		_jump_buf_t = 0.14
+	else:
+		_jump_buf_t = maxf(0.0, _jump_buf_t - delta)
+
+	# --- Sprint & Tactical Sprint ---
 	var was_sprinting := is_sprinting
-	var want_sprint := Input.is_action_pressed("sprint") and inp.y < -0.3 and not Input.is_action_pressed("fire") \
-		and not Input.is_action_pressed("aim") and knife_timer <= 0.0 and not is_sliding and not is_monster_form and not is_downed
+	if _input_blocked():
+		_sprint_latched = false
+		is_tac_sprinting = false
+	else:
+		if Input.is_action_just_pressed("sprint"):
+			var now_ms: int = Time.get_ticks_msec()
+			if now_ms - _last_sprint_tap_ms <= 340 and tac_stamina > 0.18 and inp.y < -0.25:
+				is_tac_sprinting = true
+				_sprint_latched = true
+			elif GameState.sprint_mode == 1:
+				_sprint_latched = not _sprint_latched
+				if not _sprint_latched:
+					is_tac_sprinting = false
+			_last_sprint_tap_ms = now_ms
+		if inp.y >= -0.2:
+			_sprint_latched = false
+			is_tac_sprinting = false
+		elif GameState.sprint_mode == 2 and tac_stamina > 0.25 and not Input.is_action_pressed("fire") and not is_ads and not is_reloading and not is_crouching and not is_sliding:
+			is_tac_sprinting = true
+
+	var sprint_held: bool = false
+	if not _input_blocked():
+		if GameState.sprint_mode == 0:
+			sprint_held = Input.is_action_pressed("sprint")
+		elif GameState.sprint_mode == 1:
+			sprint_held = _sprint_latched
+		else:
+			sprint_held = inp.y < -0.35
+
+	var want_sprint := sprint_held and inp.y < -0.3 and not Input.is_action_pressed("fire") \
+		and not (is_ads and ads_t > 0.25) and knife_timer <= 0.0 and not is_sliding and not is_monster_form and not is_downed
 	if winded and stamina >= 0.35:
 		winded = false
 	is_sprinting = want_sprint and not winded and stamina > 0.0
 	if is_sprinting:
-		is_crouching = false
-		stamina -= delta / stamina_duration()
+		if _can_stand_up():
+			is_crouching = false
+		if is_tac_sprinting and tac_stamina > 0.02 and not is_reloading:
+			sprint_speed *= 1.15
+			tac_stamina = maxf(0.0, tac_stamina - delta * 0.28)
+			stamina -= delta * 1.18 / stamina_duration()
+			if tac_stamina <= 0.01:
+				is_tac_sprinting = false
+		else:
+			is_tac_sprinting = false
+			stamina -= delta / stamina_duration()
+			tac_stamina = minf(1.0, tac_stamina + delta * 0.22)
 		stamina_regen_delay = 0.7
 		if stamina <= 0.0:
 			stamina = 0.0
 			winded = true
 			is_sprinting = false
+			is_tac_sprinting = false
+			_sprint_latched = false
 	else:
+		is_tac_sprinting = false
+		tac_stamina = minf(1.0, tac_stamina + delta * 0.32)
 		stamina_regen_delay -= delta
 		if stamina_regen_delay <= 0.0:
 			stamina = minf(1.0, stamina + delta / stamina_recover_time())
 	if was_sprinting and not is_sprinting:
 		sprint_out = 0.16 / dex_mult()
 
-	# --- Crouch toggle / slide ---
-	if Input.is_action_just_pressed("crouch") and not is_monster_form and not is_downed:
-		var flat_v := Vector3(velocity.x, 0.0, velocity.z)
-		# Slide whenever you are moving fast enough (sprinting, or still carrying speed)
-		if on_floor and slide_cd <= 0.0 and (was_sprinting or flat_v.length() > walk_speed * 1.15):
-			_start_slide(flat_v if flat_v.length() > 0.5 else (wish if wish != Vector3.ZERO else -transform.basis.z), flat_v.length(), walk_speed)
-		elif not is_sliding:
-			is_crouching = not is_crouching
+	# --- Crouch / Slide / Slide-Cancel ---
+	if not _input_blocked() and not is_monster_form and not is_downed:
+		if Input.is_action_just_pressed("crouch"):
+			var flat_v := Vector3(velocity.x, 0.0, velocity.z)
+			if on_floor and slide_cd <= 0.0 and (was_sprinting or is_sprinting or flat_v.length() > walk_speed * 1.15):
+				_start_slide(flat_v if flat_v.length() > 0.5 else (wish if wish != Vector3.ZERO else -transform.basis.z), flat_v.length(), walk_speed)
+				if GameState.is_horror_mode() and is_inside_tree():
+					ZombieEnemy.broadcast_sound(get_tree(), global_position, 12.5, true, "slide")
+			elif not is_sliding:
+				if GameState.crouch_mode == 0:
+					if is_crouching and _can_stand_up():
+						is_crouching = false
+					else:
+						is_crouching = true
+		if GameState.crouch_mode == 1 and not is_sliding:
+			var want_c: bool = Input.is_action_pressed("crouch")
+			if want_c:
+				is_crouching = true
+			elif is_crouching and _can_stand_up():
+				is_crouching = false
+		# Slide cancel via ADS or Sprint after brief commit
+		if is_sliding and slide_timer > 0.16 and (Input.is_action_just_pressed("aim") or Input.is_action_just_pressed("sprint")):
+			is_sliding = false
+			is_crouching = not _can_stand_up()
+			slide_cd = 0.25
 
-	# --- Jump ---
-	if on_floor and Input.is_action_just_pressed("jump") and not is_downed:
-		if is_crouching and not is_sliding:
-			is_crouching = false
-		else:
-			velocity.y = JUMP_VEL
-			_try_vault(wish)
-			vm_vel.y -= 0.32
-			cam_spring_vel.y -= 0.25
-			if is_sliding:
-				is_sliding = false
-				slide_cd = 0.45
+	# --- Contextual Ledge Mantle or Coyote-Buffered Jump ---
+	if not _input_blocked() and not is_downed:
+		var jump_want: bool = _jump_buf_t > 0.0 or (not on_floor and Input.is_action_pressed("jump") and inp.y < -0.25 and velocity.y > -4.5)
+		if jump_want and _try_start_mantle(wish):
+			_jump_buf_t = 0.0
+			_coyote_t = 0.0
+			return
+		if _jump_buf_t > 0.0 and _coyote_t > 0.0:
+			_jump_buf_t = 0.0
+			_coyote_t = 0.0
+			if is_crouching and not is_sliding and _can_stand_up():
+				is_crouching = false
+			else:
+				velocity.y = JUMP_VEL * (1.42 if _od_has_mutator("low_grav") else 1.0)
+				if GameState.is_horror_mode() and is_inside_tree():
+					ZombieEnemy.broadcast_sound(get_tree(), global_position, 11.0, true, "jump")
+				_try_vault(wish)
+				vm_vel.y -= 0.32
+				cam_spring_vel.y -= 0.25
+				if is_sliding:
+					is_sliding = false
+					is_crouching = false
+					slide_cd = 0.35
 
 	if not on_floor:
-		velocity.y -= GRAVITY * delta
+		velocity.y -= GRAVITY * (0.52 if _od_has_mutator("low_grav") else 1.0) * delta
 		air_grace = 0.2
 	else:
 		air_grace = maxf(0.0, air_grace - delta)
@@ -701,10 +929,27 @@ func _handle_movement(delta: float) -> void:
 		velocity.x = slide_dir.x * slide_speed
 		velocity.z = slide_dir.z * slide_speed
 		bob_phase += delta * 2.0
+		if GameState.is_overdrive():
+			var ss := od_mut_stacks("shock_slide")
+			if ss > 0 and not _slide_shock_fired:
+				_slide_shock_fired = true
+				_volt_burst(global_position + Vector3(0.0, 0.55, 0.0), 55.0 * float(ss) * dmg_mult(), 3.8)
+			var now_s := Time.get_ticks_msec() / 1000.0
+			var hit_dmg: float = (38.0 + 22.0 * float(od_rank_index())) * dmg_mult()
+			for node in get_tree().get_nodes_in_group("enemies"):
+				var z := node as ZombieEnemy
+				if z == null or z.is_dead:
+					continue
+				if z.global_position.distance_to(global_position) <= 1.75 and now_s - float(z.get_meta("od_slide_t", -5.0)) > 0.55:
+					z.set_meta("od_slide_t", now_s)
+					z.apply_stun(0.95, false)
+					var sres: Dictionary = z.take_damage(hit_dmg, z.global_position + Vector3(0, 0.9, 0), false, "melee")
+					if sres.get("killed", false):
+						_on_enemy_killed_by_player(z, false)
 		if slide_speed < walk_speed * 0.6 or slide_timer > SLIDE_MAX_TIME:
 			is_sliding = false
 			is_crouching = Input.is_action_pressed("crouch")
-			slide_cd = 0.45
+			slide_cd = 0.28 if GameState.is_overdrive() else 0.45
 	else:
 		var speed := walk_speed
 		if is_monster_form:
@@ -725,6 +970,11 @@ func _handle_movement(delta: float) -> void:
 			velocity.x = move_toward(velocity.x, 0.0, 32.0 * delta)
 			velocity.z = move_toward(velocity.z, 0.0, 32.0 * delta)
 
+	if on_floor and velocity.y <= 0.5:
+		var stepped_h: float = StepHelper.try_step_up(self, Vector3(velocity.x, 0.0, velocity.z), delta, 0.34)
+		if stepped_h > 0.0:
+			land_dip = clampf(land_dip + stepped_h * 0.72, 0.0, 0.26)
+
 	var fall_speed := -velocity.y
 	move_and_slide()
 	if is_sliding:
@@ -740,6 +990,8 @@ func _handle_movement(delta: float) -> void:
 		vm_rot_vel.x -= clampf(fall_speed * 0.25, 0.4, 2.5)
 		cam_spring_vel.y -= clampf(fall_speed * 0.09, 0.2, 1.1)
 		GameState.play_sfx("player_step_1", -6.0, 0.8)
+		if GameState.is_horror_mode() and is_inside_tree() and fall_speed > 4.5:
+			ZombieEnemy.broadcast_sound(get_tree(), global_position, 12.5, true, "land")
 	was_on_floor = now_floor
 
 	# Footsteps & view bob
@@ -759,6 +1011,9 @@ func _handle_movement(delta: float) -> void:
 			cam_spring_vel.x += 0.05 * side * hard
 			var vol := -13.0 if is_crouching else (-8.0 if is_sprinting else -11.0)
 			GameState.play_sfx("player_step_1" if step_index % 2 == 0 else "player_step_2", vol, randf_range(0.9, 1.1))
+			if GameState.is_horror_mode() and is_inside_tree():
+				var step_rad := 1.8 if is_crouching else (14.5 if is_sprinting else 6.5)
+				ZombieEnemy.broadcast_sound(get_tree(), global_position, step_rad, is_sprinting, "step")
 
 	# Head height & collision shape for crouch / slide
 	var low := is_crouching or is_sliding or is_downed
@@ -772,6 +1027,7 @@ func _handle_movement(delta: float) -> void:
 	head_pivot.position.y = head_height - land_dip
 
 	sprint_t = move_toward(sprint_t, 1.0 if is_sprinting else 0.0, delta * 6.0)
+	tac_sprint_t = move_toward(tac_sprint_t, 1.0 if is_tac_sprinting else 0.0, delta * 8.5)
 
 	# Field of view
 	var target_fov := base_fov
@@ -779,9 +1035,16 @@ func _handle_movement(delta: float) -> void:
 		target_fov = 92.0
 	elif is_sliding:
 		target_fov = base_fov + 8.0
+	elif is_tac_sprinting:
+		target_fov = base_fov + 9.5
 	elif is_sprinting:
 		target_fov = base_fov + 6.0
 	var ads_fov: float = cfg.get("ads_fov", 60.0)
+	var opt_k := String(gun_model.get_meta("optic_kind", "")) if is_instance_valid(gun_model) else ""
+	if opt_k == "acog":
+		ads_fov = minf(ads_fov, 40.0)
+	elif opt_k in ["red_dot", "holo", "volt_holo"]:
+		ads_fov = minf(ads_fov, 56.0)
 	target_fov = lerpf(target_fov, ads_fov, _ease_ads())
 	camera.fov = lerpf(camera.fov, target_fov, clampf(14.0 * delta, 0.0, 1.0))
 
@@ -790,10 +1053,13 @@ func _start_slide(dir: Vector3, entry_speed: float, walk_speed: float) -> void:
 	is_sliding = true
 	is_sprinting = false
 	is_crouching = false
+	_slide_shock_fired = false
 	slide_timer = 0.0
 	slide_dir = Vector3(dir.x, 0.0, dir.z).normalized()
 	# Kick off with a boost on top of the speed you had, a bit less when already very fast
 	slide_speed = entry_speed + clampf(walk_speed * 0.5, 1.5, 4.0) * clampf(1.6 - entry_speed / (walk_speed * 2.5), 0.4, 1.0)
+	if GameState.is_overdrive():
+		slide_speed *= 1.18 + 0.08 * float(mini(3, od_mut_stacks("shock_slide")))
 	GameState.play_sfx("slide", -4.0, randf_range(0.95, 1.05))
 
 
@@ -823,7 +1089,8 @@ func _handle_combat_inputs(delta: float) -> void:
 		if Input.is_action_pressed("interact") and nearby_station.has_method("interact_hold"):
 			nearby_station.interact_hold(self, delta)
 
-	if not is_monster_form:
+	var in_gungame: bool = GameState.is_pvp() and GameState.pvp_mode == "gungame"
+	if not is_monster_form and not in_gungame:
 		if Input.is_action_just_pressed("weapon_1"):
 			_begin_swap(0)
 		elif Input.is_action_just_pressed("weapon_2"):
@@ -841,20 +1108,47 @@ func _handle_combat_inputs(delta: float) -> void:
 
 	if Input.is_action_just_pressed("melee") and knife_timer <= 0.0 and swap_state == 0 and not is_downed:
 		_do_knife()
-	if Input.is_action_just_pressed("grenade") and grenades > 0 and grenade_cd <= 0.0 and knife_timer <= 0.0 and not is_downed:
+	if pvp_knife_only:
+		is_ads = false
+		ads_t = 0.0
+		if Input.is_action_pressed("fire") and knife_timer <= 0.0 and not is_downed:
+			_do_knife()
+		return
+	if not in_gungame and Input.is_action_just_pressed("grenade") and grenades > 0 and grenade_cd <= 0.0 and knife_timer <= 0.0 and not is_downed:
 		_throw_grenade()
+	if not in_gungame and Input.is_action_just_pressed("tactical") and tactical_count > 0 and tactical_cd <= 0.0 and knife_timer <= 0.0 and not is_downed:
+		_use_tactical()
 
 	var w_id := get_current_weapon_id()
 	var w_cfg := get_weapon_cfg(w_id)
 
-	# --- Aim down sights ---
-	is_ads = Input.is_action_pressed("aim") and not is_sprinting and swap_state == 0 and knife_timer <= 0.0 \
-		and not (is_reloading and w_cfg["reload_type"] == "mag")
+	# --- Aim down sights (Hold or Toggle) ---
+	var can_ads: bool = not is_sprinting and swap_state == 0 and knife_timer <= 0.0 \
+		and not (is_reloading and w_cfg["reload_type"] == "mag") and not _mantle_active
+	if not can_ads:
+		_ads_latched = false
+	elif GameState.ads_mode == 1:
+		if Input.is_action_just_pressed("aim"):
+			_ads_latched = not _ads_latched
+	else:
+		_ads_latched = Input.is_action_pressed("aim")
+	is_ads = _ads_latched and can_ads
 	var ads_speed := dex_mult() / float(w_cfg.get("ads_time", 0.2))
 	ads_t = move_toward(ads_t, 1.0 if is_ads else 0.0, delta * ads_speed)
 
+	# --- Weapon Inspect [I] ---
+	if Input.is_action_just_pressed("inspect_weapon") and not is_reloading and not is_sprinting and not is_ads and knife_timer <= 0.0 and swap_state == 0 and grenade_anim_t < 0.0 and not _mantle_active:
+		if _inspect_t >= 0.0:
+			_inspect_t = -1.0
+		else:
+			_inspect_t = 0.0
+			_inspect_click2 = false
+			GameState.play_sfx("flashlight_click", -12.0, 0.88)
+
 	# --- Fire ---
 	var trigger := Input.is_action_pressed("fire") if w_cfg["automatic"] else Input.is_action_just_pressed("fire")
+	if is_ads or is_reloading or is_sprinting or knife_timer > 0.0 or swap_state != 0 or grenade_anim_t >= 0.0 or trigger:
+		_inspect_t = -1.0
 	if not Input.is_action_pressed("fire"):
 		_dry_fired = false
 	if trigger:
@@ -917,8 +1211,17 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 	if not _can_shoot() or (is_reloading and w_cfg["reload_type"] == "mag"):
 		return
 
+	last_fire_msec = Time.get_ticks_msec()
+	if GameState.is_pvp() and GameState.pvp_mode == "gungame":
+		reserve_ammo[w_id] = maxi(int(reserve_ammo.get(w_id, 0)), int(w_cfg["mag_size"]) * 4)
+	if GameState.is_pvp():
+		var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+		if pvp_dir and pvp_dir.has_method("report_gunfire_ping"):
+			pvp_dir.report_gunfire_ping(global_position, bool(w_cfg.get("suppressed", false)))
+
+	var free_mag := pap_timer > 0.0 or (GameState.is_overdrive() and od_rank_index() >= 5)
 	var cur_mag: int = mag_ammo[w_id]
-	if cur_mag <= 0 and pap_timer <= 0.0:
+	if cur_mag <= 0 and not free_mag:
 		if reserve_ammo[w_id] > 0:
 			_start_reload()
 		elif not _dry_fired:
@@ -935,19 +1238,34 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 		rate_mult *= 1.2
 	if has_perk("mastery"):
 		rate_mult *= 1.15
+	if GameState.is_overdrive():
+		rate_mult *= 1.0 + 0.06 * float(od_rank_index())
+		if _od_has_mutator("hyper_mag"):
+			rate_mult *= 1.65
+		rate_mult *= 1.0 + 0.20 * float(od_mut_stacks("quick_hands"))
 
 	fire_cooldown = float(w_cfg["fire_rate"]) / rate_mult
-	_last_shot_heavy = float(w_cfg.get("damage", 0.0)) >= 150.0 or String(w_cfg.get("class", "")) in ["sniper", "shotgun"]
-	if pap_timer <= 0.0:
+	var burst_n: int = int(w_cfg.get("burst_count", 1))
+	if burst_n > 1:
+		_burst_left = mini(burst_n - 1, maxi(0, cur_mag - 1))
+		_burst_gap = float(w_cfg.get("burst_interval", 0.055))
+		_burst_w_id = w_id
+	_last_shot_heavy = float(w_cfg.get("damage", 0.0)) >= 150.0 or String(w_cfg.get("class", "")) in ["sniper", "shotgun", "launcher"]
+	if not free_mag:
 		mag_ammo[w_id] = maxi(0, cur_mag - 1)
 		var left: int = int(mag_ammo[w_id])
 		var low_at: int = maxi(2, ceili(float(w_cfg["mag_size"]) * 0.25))
 		if left <= low_at:
-			# Dry clicks that climb in pitch as the mag runs out
 			GameState.play_sfx("low_ammo_tick", -8.0 + 3.0 * (1.0 - float(left) / float(low_at)), 1.0 + 0.5 * (1.0 - float(left) / float(low_at)))
 	_emit_ammo()
+	_fire_single_shot(w_id, w_cfg)
 
-	var pitch_s := randf_range(0.95, 1.05)
+	if mag_ammo[w_id] <= 0 and reserve_ammo[w_id] > 0 and pap_timer <= 0.0:
+		_start_reload()
+
+
+func _fire_single_shot(w_id: String, w_cfg: Dictionary) -> void:
+	var pitch_s := randf_range(0.95, 1.05) * float(w_cfg.get("sfx_pitch", 1.0))
 	if pap_timer > 0.0:
 		pitch_s *= 1.2
 	elif upgraded.has(w_id):
@@ -955,18 +1273,15 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 	GameState.play_sfx(w_cfg["sfx"], -2.0, pitch_s)
 	fire_anim_t = 0.0
 	shots_fired += 1
-	match w_id:
-		"shotgun":
-			pump_t = -0.14
-			pump_eject = true
-		"sniper":
-			bolt_t = -0.22
-		"revolver", "volt":
-			pass
-		_:
-			_eject_casing(false)
+	if w_id in ["shotgun", "spas12"]:
+		pump_t = -0.14
+		pump_eject = true
+	elif w_id in ["sniper", "awm_magnum", "kar98k_marksman"]:
+		bolt_t = -0.22
+	elif String(w_cfg.get("projectile", "")) == "" and not w_id in ["revolver", "volt"]:
+		_eject_casing(false)
 
-	# Muzzle flash + Bodycam CMOS exposure dip
+	# Muzzle flash & gunshot wake signal
 	var flash_col := Color(1.0, 0.72, 0.30)
 	if pap_timer > 0.0 or upgraded.has(w_id):
 		flash_col = Color(0.8, 0.4, 1.0)
@@ -979,21 +1294,25 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 	muzzle_light.visible = true
 	muzzle_flash.visible = not is_scoped() and muz_mult > 0.05
 	(muzzle_flash.material_override as StandardMaterial3D).albedo_color = flash_col
-	muzzle_flash.scale = Vector3.ONE * randf_range(0.8, 1.3) * (1.6 if w_cfg["class"] in ["shotgun", "sniper", "lmg"] else 1.0) * muz_mult
+	muzzle_flash.scale = Vector3.ONE * randf_range(0.8, 1.3) * (1.6 if w_cfg["class"] in ["shotgun", "sniper", "lmg", "launcher"] else 1.0) * muz_mult
 	muzzle_flash.rotation.z = randf() * TAU
 	muzzle_flash_timer = 0.045
 	if muz_mult > 0.5:
 		sensor_flash = minf(1.0, sensor_flash + (0.45 if _last_shot_heavy else 0.26))
 	else:
 		sensor_flash = minf(1.0, sensor_flash + 0.05)
+	if GameState.is_horror_mode() and is_inside_tree():
+		var shot_rad := 8.5 if (muz_mult <= 0.5 or w_cfg.get("proj", "") == "arrow") else (42.0 if _last_shot_heavy else 34.0)
+		ZombieEnemy.broadcast_sound(get_tree(), global_position, shot_rad, true, "gunshot")
 
-	# Recoil: part of the kick stays (aim climbs), part recovers
+	# Recoil
 	var ads_k := lerpf(1.0, 0.6, _ease_ads()) * (0.75 if is_crouching else 1.0)
 	var kick := deg_to_rad(float(w_cfg["recoil_pitch"])) * ads_k
 	var yaw := deg_to_rad(randf_range(-1.0, 1.0) * float(w_cfg["recoil_yaw"])) * ads_k
 	head_pivot.rotation.x = clampf(head_pivot.rotation.x + kick * 0.35, deg_to_rad(-86.0), deg_to_rad(86.0))
 	rotate_y(yaw * 0.35)
 	recoil_view += Vector2(kick * 0.65, yaw * 0.65)
+	_post_fire_settle = 0.16
 	recoil_kick.z += 0.03 + kick * 0.6
 	recoil_kick.x += kick * 0.9
 	vm_rot_vel += Vector3(kick * 14.0, yaw * 8.0, randf_range(-1.0, 1.0) * kick * 10.0)
@@ -1002,17 +1321,30 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 	var spread_deg := current_spread_deg()
 	bloom = minf(bloom + float(w_cfg["bloom"]), 4.5)
 
-	var pellets: int = w_cfg["pellets"]
 	var base_dmg: float = float(w_cfg["damage"]) * dmg_mult() * (2.2 if pap_timer > 0.0 else 1.0)
-	var any_hit := false
-	var any_hs := false
-	var any_kill := false
-
 	var cam_xf := camera.global_transform
 	var cam_origin := cam_xf.origin
 	var cam_fwd := -cam_xf.basis.z
 	var muzzle_world := gun_rig.to_global(Vector3(0, w_cfg["muzzle"].x, -w_cfg["muzzle"].y))
 
+	var proj_kind := String(w_cfg.get("projectile", ""))
+	if proj_kind != "":
+		var ang_p := randf() * TAU
+		var rp := sqrt(randf()) * deg_to_rad(spread_deg * 0.45)
+		var dir_p := (cam_fwd + cam_xf.basis.x * cos(ang_p) * rp + cam_xf.basis.y * sin(ang_p) * rp).normalized()
+		var proj := LaunchedProjectile.new()
+		var p_speed := float(w_cfg.get("proj_speed", 44.0))
+		var blast_r := float(w_cfg.get("blast_radius", 5.0))
+		var pvp_dmg := float(GameState.PVP_WEAPON_DAMAGE.get(w_id, 120.0))
+		proj.setup(proj_kind, cam_origin + cam_fwd * 0.75, dir_p, p_speed, base_dmg, pvp_dmg, blast_r, self, w_id, team_id if GameState.is_pvp() else -1)
+		get_tree().current_scene.add_child(proj)
+		return
+
+	var pellets: int = w_cfg["pellets"]
+	var any_hit := false
+	var any_hs := false
+	var any_kill := false
+	var any_shield := false
 	for i in range(pellets):
 		var ang := randf() * TAU
 		var r := sqrt(randf()) * deg_to_rad(spread_deg)
@@ -1021,6 +1353,14 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 		any_hit = any_hit or res["hit"]
 		any_hs = any_hs or res["headshot"]
 		any_kill = any_kill or res["killed"]
+		any_shield = any_shield or bool(res.get("shield", false))
+		if i == 0 and float(w_cfg.get("blast_radius", 0.0)) > 0.1:
+			FX.scorch(res["end"], 1.1)
+			var br := float(w_cfg["blast_radius"])
+			for znode in get_tree().get_nodes_in_group("enemies"):
+				var ze := znode as ZombieEnemy
+				if ze != null and not ze.is_dead and ze.global_position.distance_to(res["end"]) <= br:
+					ze.take_damage(float(w_cfg.get("blast_damage", 65.0)) * dmg_mult(), res["end"], false, "explosive")
 		if pellets == 1 or i % 2 == 0:
 			var t_col := Color(1.0, 0.82, 0.38)
 			if pap_timer > 0.0:
@@ -1033,64 +1373,191 @@ func _try_fire_weapon(w_id: String, w_cfg: Dictionary) -> void:
 
 	if any_hit:
 		hitmarker_triggered.emit(any_hs, any_kill, false)
+	elif any_shield:
+		shield_hitmarker_triggered.emit()
 
-	if mag_ammo[w_id] <= 0 and reserve_ammo[w_id] > 0 and pap_timer <= 0.0:
-		_start_reload()
 
-
-# One bullet. Passes through up to `penetration` zombies, losing damage each time.
+# One bullet. Passes through up to `penetration` enemies using per-bone hurtboxes and exact trimesh world geometry.
 func _fire_ray(origin: Vector3, dir: Vector3, cfg: Dictionary, dmg: float, give_points: bool) -> Dictionary:
 	var space := get_world_3d().direct_space_state
 	var max_range: float = cfg["range"]
 	var to_pt := origin + dir * max_range
 	var exclude: Array[RID] = [get_rid()]
+	for shb in _hurtboxes:
+		if is_instance_valid(shb):
+			exclude.append(shb.get_rid())
+	var is_pvp_mode: bool = GameState.is_pvp()
+	if is_pvp_mode:
+		for c in get_tree().get_nodes_in_group("pvp_combatants"):
+			if c is CollisionObject3D and "team_id" in c and int(c.team_id) == team_id:
+				exclude.append((c as CollisionObject3D).get_rid())
+				var hbs: Variant = c.get("_hurtboxes")
+				if hbs is Array:
+					for hb in hbs:
+						if is_instance_valid(hb):
+							exclude.append((hb as CollisionObject3D).get_rid())
 	var pierces_left: int = int(cfg.get("penetration", 0)) + 1
 	var from := origin
-	var out := {"hit": false, "headshot": false, "killed": false, "end": to_pt}
+	var out := {"hit": false, "headshot": false, "killed": false, "shield": false, "end": to_pt}
 	var dmg_now := dmg
+	var hit_owners: Array = []
 	while pierces_left > 0:
-		var q := PhysicsRayQueryParameters3D.create(from, to_pt, 1 | 4)
+		var q := PhysicsRayQueryParameters3D.create(from, to_pt, HitboxRig.BULLET_MASK)
+		q.collide_with_areas = true
+		q.collide_with_bodies = true
 		q.exclude = exclude
 		var hit := space.intersect_ray(q)
 		if hit.is_empty():
 			break
 		var pt: Vector3 = hit["position"]
+		var nrm: Vector3 = hit.get("normal", -dir)
 		out["end"] = pt
 		var collider: Object = hit["collider"]
-		if collider is ZombieEnemy:
-			var z: ZombieEnemy = collider
-			var final_dmg := dmg_now
-			var head_y := z.head_y()
-			if pt.y >= head_y and not z.is_crawler:
-				final_dmg *= float(cfg["headshot_mult"])
-			var res := z.take_damage(final_dmg, pt, pap_timer > 0.0)
-			if res["dealt"] > 0.0:
-				out["hit"] = true
-				if float(cfg.get("stagger_mult", 1.0)) > 1.0 and not z.is_dead and not z.is_boss and z.rig != null:
-					z.rig.stagger = minf(1.0, z.rig.stagger + 0.35)
-				if give_points:
-					GameState.add_points(10)
-				if res["headshot"]:
-					out["headshot"] = true
-				if res["killed"]:
-					out["killed"] = true
-					_on_enemy_killed_by_player(z, res["headshot"])
-			if cfg.get("chain", 0) > 0:
-				_chain_lightning(z, int(cfg["chain"]), dmg * 0.6)
+		var hb_info: Dictionary = HitboxRig.resolve_hit(collider)
+		var zone: String = String(hb_info.get("zone", ""))
+
+		if zone != "":
+			var owner_obj: Object = hb_info.get("owner", null)
+			var mult: float = float(hb_info.get("dmg_mult", 1.0))
+			if owner_obj == null or owner_obj in hit_owners:
+				if collider is CollisionObject3D:
+					exclude.append((collider as CollisionObject3D).get_rid())
+				from = pt + dir * 0.01
+				continue
+
+			# Shield ricochet intercept
+			if zone == "shield":
+				out["shield"] = true
+				FX.surface_impact(get_parent(), pt, nrm, "metal")
+				GameState.play_sfx("ricochet", -9.0, randf_range(0.95, 1.2))
+				if owner_obj is ZombieEnemy:
+					(owner_obj as ZombieEnemy).take_damage(dmg_now * 0.12, pt, pap_timer > 0.0, "shield", "shield")
 				break
-			exclude.append(z.get_rid())
-			pierces_left -= 1
-			dmg_now *= 0.72
-			from = pt
+
+			# If ray grazes a reaching arm/leg first, check 0.48m behind for the same enemy's head/torso so dead-center shots aren't robbed
+			if zone.begins_with("arm_") or zone.begins_with("leg_"):
+				var check_ex: Array[RID] = exclude.duplicate()
+				if collider is CollisionObject3D:
+					check_ex.append((collider as CollisionObject3D).get_rid())
+				var q_cont := PhysicsRayQueryParameters3D.create(pt + dir * 0.01, pt + dir * 0.48, HitboxRig.HITBOX_LAYER | HitboxRig.BALLISTIC_WORLD_LAYER)
+				q_cont.collide_with_areas = true
+				q_cont.collide_with_bodies = true
+				q_cont.exclude = check_ex
+				var c_hit := space.intersect_ray(q_cont)
+				if not c_hit.is_empty():
+					var c_info := HitboxRig.resolve_hit(c_hit["collider"])
+					var c_zone := String(c_info.get("zone", ""))
+					if c_zone != "" and c_info.get("owner") == owner_obj:
+						if c_zone in ["head", "weakpoint", "torso"]:
+							zone = c_zone
+							mult = float(c_info.get("dmg_mult", 1.0))
+							pt = c_hit["position"]
+							nrm = c_hit.get("normal", -dir)
+							out["end"] = pt
+
+			hit_owners.append(owner_obj)
+			var owner_hbs: Variant = owner_obj.get("_hurtboxes")
+			if owner_hbs is Array:
+				for ohb in owner_hbs:
+					if is_instance_valid(ohb):
+						exclude.append((ohb as CollisionObject3D).get_rid())
+			if owner_obj is CollisionObject3D:
+				exclude.append((owner_obj as CollisionObject3D).get_rid())
+
+			if is_pvp_mode and owner_obj is Node3D and (owner_obj as Node3D).is_in_group("pvp_combatants") and owner_obj != self:
+				var hit_node := owner_obj as Node3D
+				var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+				if pvp_dir:
+					var tkey: String = pvp_dir.node_to_key(hit_node)
+					if tkey != "" and pvp_dir.roster.has(tkey) and not bool(pvp_dir.roster[tkey]["dead"]):
+						var is_hs := (zone == "head")
+						var wep_id: String = get_current_weapon_id()
+						var zone_mult := 1.6 if is_hs else (0.82 if (zone.begins_with("arm_") or zone.begins_with("leg_")) else 1.0)
+						var pvp_dmg: float = GameState.pvp_weapon_damage(wep_id) * zone_mult
+						if Net.is_online() and _net_game():
+							_net_game().request_pvp_hit(tkey, pvp_dmg, is_hs, wep_id, global_position)
+						else:
+							pvp_dir.apply_pvp_hit("peer_%d" % Net.my_id(), tkey, pvp_dmg, is_hs, wep_id, global_position)
+						var killed_now: bool = bool(pvp_dir.roster.get(tkey, {}).get("dead", false))
+						out["hit"] = true
+						out["headshot"] = is_hs
+						out["killed"] = killed_now
+				_spawn_impact_spark(pt, true)
+				break
+			elif owner_obj is ZombieEnemy:
+				var z: ZombieEnemy = owner_obj as ZombieEnemy
+				var is_crit := (zone == "head" or zone == "weakpoint") and not z.is_crawler
+				var final_dmg := dmg_now * (float(cfg["headshot_mult"]) if zone == "head" and not z.is_crawler else mult)
+				if is_crit and GameState.is_overdrive():
+					if _od_has_mutator("headhunter"):
+						final_dmg *= 1.50
+					final_dmg *= 1.0 + 0.30 * float(od_mut_stacks("crit_surge"))
+				var res := z.take_damage(final_dmg, pt, pap_timer > 0.0, "bullet", zone)
+				if res["dealt"] > 0.0:
+					out["hit"] = true
+					if float(cfg.get("stagger_mult", 1.0)) > 1.0 and not z.is_dead and not z.is_boss and z.rig != null:
+						z.rig.stagger = minf(1.0, z.rig.stagger + 0.35)
+					if give_points:
+						GameState.add_points(10)
+					if res["headshot"]:
+						out["headshot"] = true
+					if GameState.is_overdrive():
+						if z.is_boss and od_combo > 0:
+							od_combo_t = od_combo_max_t
+						if res["headshot"] and (od_rank_index() >= 4 or _od_has_mutator("headhunter")):
+							_volt_burst(pt, dmg * 0.45)
+						var exp_stacks := od_mut_stacks("explosive_rounds")
+						if exp_stacks > 0:
+							_od_hit_count += 1
+							if _od_hit_count % 4 == 0:
+								_trigger_explosive_payload(pt, 65.0 * float(exp_stacks) * dmg_mult())
+					if res["killed"]:
+						out["killed"] = true
+						_on_enemy_killed_by_player(z, res["headshot"])
+				var chain_cnt := int(cfg.get("chain", 0))
+				if chain_cnt > 0:
+					var c_stacks := od_mut_stacks("chain_master")
+					_chain_lightning(z, chain_cnt + c_stacks, dmg * 0.6 * (1.0 + 0.35 * float(c_stacks)))
+					break
+				elif GameState.is_overdrive() and (od_rank_index() >= 5 or od_mut_stacks("chain_master") > 0):
+					var od_jumps := (2 if od_rank_index() >= 5 else 0) + od_mut_stacks("chain_master")
+					_chain_lightning(z, od_jumps, dmg * (0.45 + 0.15 * float(od_mut_stacks("chain_master"))))
+				pierces_left -= 1
+				dmg_now *= 0.72
+				from = pt + dir * 0.02
+				continue
+			elif owner_obj != null and owner_obj.has_method("take_bullet_hit"):
+				var hres: Dictionary = owner_obj.take_bullet_hit(dmg_now, pt, self)
+				if bool(hres.get("hit", false)):
+					out["hit"] = true
+					if bool(hres.get("killed", false)):
+						out["killed"] = true
+				if pierces_left > 1 and collider is CollisionObject3D:
+					exclude.append((collider as CollisionObject3D).get_rid())
+					pierces_left -= 1
+					dmg_now *= 0.85
+					from = pt + dir * 0.02
+					continue
+				break
+			else:
+				break
 		else:
+			var surf := String(hb_info.get("surface", "concrete"))
 			_spawn_impact_spark(pt, false)
-			FX.impact(pt, hit["normal"])
-			if randf() < 0.12:
-				GameState.play_sfx("ricochet", -16.0, randf_range(0.8, 1.3))
+			FX.surface_impact(get_parent(), pt, nrm, surf)
+			if surf == "metal" or randf() < 0.12:
+				GameState.play_sfx("ricochet", -14.0 if surf == "metal" else -17.0, randf_range(0.85, 1.3))
 			if collider and collider.has_method("on_shot"):
 				collider.on_shot(self)
 			if cfg.get("chain", 0) > 0:
 				_volt_burst(pt, dmg * 0.4)
+			var penetrable := bool(hb_info.get("penetrable", false))
+			if penetrable and pierces_left > 1 and collider is CollisionObject3D:
+				exclude.append((collider as CollisionObject3D).get_rid())
+				pierces_left -= 1
+				dmg_now *= 0.82
+				from = pt + dir * 0.03
+				continue
 			break
 	return out
 
@@ -1124,12 +1591,23 @@ func _chain_lightning(first: ZombieEnemy, jumps: int, dmg: float) -> void:
 	_spawn_aoe_ring(first.global_position, 2.5, Color(0.4, 0.85, 1.0))
 
 
-func _volt_burst(pt: Vector3, dmg: float) -> void:
-	_spawn_aoe_ring(pt, 3.0, Color(0.4, 0.85, 1.0))
+func _volt_burst(pt: Vector3, dmg: float, radius: float = 3.2) -> void:
+	_spawn_aoe_ring(pt, radius, Color(0.4, 0.85, 1.0))
 	for node in get_tree().get_nodes_in_group("enemies"):
 		var z := node as ZombieEnemy
-		if z and not z.is_dead and z.global_position.distance_to(pt) < 3.2:
+		if z and not z.is_dead and z.global_position.distance_to(pt) < radius:
 			var res := z.take_damage(dmg, z.global_position + Vector3(0, 1.0, 0), true, "electric")
+			if res["killed"]:
+				_on_enemy_killed_by_player(z, false)
+
+
+func _trigger_explosive_payload(pt: Vector3, blast_dmg: float) -> void:
+	_spawn_aoe_ring(pt, 3.2, Color(1.0, 0.52, 0.16))
+	GameState.play_sfx("grenade_explode", -11.0, 1.55)
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var z := node as ZombieEnemy
+		if z and not z.is_dead and z.global_position.distance_to(pt) <= 3.2:
+			var res := z.take_damage(blast_dmg, pt, true, "explosive")
 			if res["killed"]:
 				_on_enemy_killed_by_player(z, false)
 
@@ -1218,7 +1696,54 @@ func _do_knife() -> void:
 	tw.tween_property(knife_rig, "position", Vector3(-0.2, -0.16, -0.42), 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(knife_rig, "rotation", Vector3(deg_to_rad(-20), deg_to_rad(-30), deg_to_rad(-100)), 0.16)
 
+	if GameState.is_pvp():
+		var best_c: Node3D = null
+		var best_cd: float = 2.75
+		var fwd_dir: Vector3 = -camera.global_transform.basis.z
+		var eye_pos: Vector3 = camera.global_position
+		for c in get_tree().get_nodes_in_group("pvp_combatants"):
+			var n := c as Node3D
+			if n == null or n == self or not is_instance_valid(n):
+				continue
+			if ("is_dead" in n and n.is_dead) or ("team_id" in n and int(n.team_id) == team_id):
+				continue
+			var center: Vector3 = n.global_position + Vector3(0.0, 1.25, 0.0)
+			var delta_v: Vector3 = center - eye_pos
+			var dist_v: float = delta_v.length()
+			if dist_v <= best_cd and (dist_v < 0.8 or fwd_dir.dot(delta_v / dist_v) > 0.35):
+				best_cd = dist_v
+				best_c = n
+		if best_c:
+			var pvp_dir := get_tree().get_first_node_in_group("pvp_director")
+			if pvp_dir:
+				var tkey: String = pvp_dir.node_to_key(best_c)
+				if tkey != "":
+					var knife_dmg: float = 110.0 if GameState.pvp_mode == "gungame" else GameState.pvp_weapon_damage("knife")
+					if Net.is_online() and _net_game():
+						_net_game().request_pvp_hit(tkey, knife_dmg, false, "knife", global_position)
+					else:
+						pvp_dir.apply_pvp_hit("peer_%d" % Net.my_id(), tkey, knife_dmg, false, "knife", global_position)
+					var killed_k: bool = bool(pvp_dir.roster.get(tkey, {}).get("dead", false))
+					GameState.play_sfx("knife_hit", -1.0, randf_range(0.9, 1.1))
+					add_camera_shake(0.12)
+					hitmarker_triggered.emit(false, killed_k, false)
+		return
+	if GameState.is_horror_mode() and is_inside_tree():
+		ZombieEnemy.broadcast_sound(get_tree(), global_position, 5.0, false, "knife")
 	var target := _find_single_melee_target(2.6, 0.55)
+	if target == null and is_inside_tree():
+		# Allow knife to pop CarrionCrows or CarrionSporeSacs in HORROR mode
+		var cam_pos := camera.global_position if camera else global_position + Vector3(0, 1.5, 0)
+		var cam_fwd := -camera.global_transform.basis.z if camera else -global_transform.basis.z
+		for hnode in get_tree().get_nodes_in_group("shootable_horror"):
+			if hnode is Node3D and is_instance_valid(hnode) and hnode.has_method("take_bullet_hit"):
+				var to_h := (hnode as Node3D).global_position - cam_pos
+				var dist_h := to_h.length()
+				if dist_h <= 2.9 and (dist_h < 0.7 or cam_fwd.dot(to_h / maxf(dist_h, 0.01)) > 0.45):
+					var hres: Dictionary = hnode.take_bullet_hit(KNIFE_DAMAGE * dmg_mult(), (hnode as Node3D).global_position, self)
+					GameState.play_sfx("knife_hit", -2.0, randf_range(0.95, 1.15))
+					hitmarker_triggered.emit(false, bool(hres.get("killed", false)), false)
+					return
 	if target == null:
 		# Lunge at a zombie a bit further away, like a classic knife lunge
 		target = _find_single_melee_target(4.2, 0.8)
@@ -1252,13 +1777,69 @@ func _throw_grenade() -> void:
 
 func _release_grenade() -> void:
 	var g: RigidBody3D = FragGrenadeScript.new()
-	g.thrower = self
+	if g.has_method("setup"):
+		g.setup(equipped_lethal, self)
+	else:
+		g.thrower = self
 	get_tree().current_scene.add_child(g)
 	var fwd := -camera.global_transform.basis.z
 	g.global_position = camera.global_position + fwd * 0.5 + camera.global_transform.basis.x * 0.15
 	g.linear_velocity = fwd * 15.0 + Vector3.UP * 3.5 + Vector3(velocity.x, 0, velocity.z) * 0.5
 	g.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
 	recoil_kick.z += 0.05
+
+
+func _use_tactical() -> void:
+	tactical_count = maxi(0, tactical_count - 1)
+	tactical_cd = 0.8
+	if equipped_tactical == "stim":
+		hp = minf(max_hp, hp + 55.0)
+		flashbang_t = 0.0
+		concuss_t = 0.0
+		stamina = 1.0
+		stim_timer = maxf(stim_timer, 3.0)
+		hp_changed.emit(hp, max_hp, overshield)
+		GameState.play_sfx("perk_drink", -2.0, 1.15)
+		status_banner_requested.emit("STIM INJECTED  +55 HP · STATUS CLEARED", Color(0.32, 0.92, 0.58))
+		return
+	GameState.play_sfx("grenade_pin", -3.0, 1.15)
+	grenade_anim_t = 0.0
+	is_reloading = false
+	var tg := TacticalGrenade.new()
+	tg.setup(equipped_tactical, self, team_id if GameState.is_pvp() else -1)
+	get_tree().current_scene.add_child(tg)
+	var fwd := -camera.global_transform.basis.z
+	tg.global_position = camera.global_position + fwd * 0.55 + camera.global_transform.basis.x * 0.14
+	tg.linear_velocity = fwd * 16.0 + Vector3.UP * 3.0 + Vector3(velocity.x, 0, velocity.z) * 0.45
+	tg.angular_velocity = Vector3(randf_range(-9, 9), randf_range(-9, 9), randf_range(-9, 9))
+	recoil_kick.z += 0.04
+
+
+func apply_flashbang(dur: float) -> void:
+	var k := 0.35 if equipped_perk == "tactical_mask" else 1.0
+	flashbang_t = maxf(flashbang_t, dur * k)
+
+
+func apply_concussion(dur: float) -> void:
+	var k := 0.35 if equipped_perk == "tactical_mask" else 1.0
+	concuss_t = maxf(concuss_t, dur * k)
+
+
+func has_flak_jacket() -> bool:
+	return equipped_perk == "flak_jacket"
+
+
+func on_scavenger_resupply() -> void:
+	if equipped_perk != "scavenger":
+		return
+	var w_id := get_current_weapon_id()
+	var cfg := get_weapon_cfg(w_id)
+	reserve_ammo[w_id] = mini(int(cfg["reserve_max"]), int(reserve_ammo.get(w_id, 0)) + maxi(1, ceili(float(cfg["mag_size"]) * 0.5)))
+	_scav_kills += 1
+	if _scav_kills % 2 == 0:
+		grenades = mini(MAX_GRENADES, grenades + 1)
+		tactical_count = mini(2, tactical_count + 1)
+	_emit_ammo()
 
 
 func add_grenades(n: int) -> void:
@@ -1534,6 +2115,8 @@ func _fire_tesla_charge() -> void:
 # ---------------------------------------------------------------------------
 func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 	var pts := z.point_reward + ((120 if GameState.round_event == "dead_fog" else 40) if was_headshot else 0)
+	if GameState.is_overdrive():
+		pts = int(round(float(pts) * (1.0 + 0.10 * float(od_rank_index()) + 0.25 * float(od_mut_stacks("magnet_core")))))
 	GameState.add_points(pts)
 	enemy_killed.emit(z, was_headshot)
 	GameState.total_kills += 1
@@ -1543,6 +2126,28 @@ func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 	if _streak >= 2:
 		GameState.add_points(25 * (_streak - 1))
 		kill_streak.emit(_streak)
+	if GameState.is_overdrive():
+		od_combo += 1
+		od_combo_max_t = GameState.diff("combo_window") + 1.0 * float(od_mut_stacks("magnet_core"))
+		od_combo_t = od_combo_max_t
+		if od_combo >= 25:
+			if od_overdrive_t <= 0.0:
+				GameState.play_sfx("level_up", -1.5, 1.18)
+				status_banner_requested.emit("★ OVERDRIVE ENGAGED — BOTTOMLESS MAG & ARC ROUNDS! ★", Color(1.0, 0.86, 0.22))
+			od_overdrive_t = 10.0
+		var heal_amt := (4.0 if _od_has_mutator("vamp_surge") else 0.0) + 5.0 * float(od_mut_stacks("vampiric"))
+		var sh_amt := 3.0 if _od_has_mutator("vamp_surge") else 0.0
+		if heal_amt > 0.0 or sh_amt > 0.0:
+			hp = minf(max_hp, hp + heal_amt)
+			overshield = minf(100.0, overshield + sh_amt)
+			hp_changed.emit(hp, max_hp, overshield)
+		if _od_has_mutator("pinata") and not _in_pinata and z != null and is_instance_valid(z):
+			_in_pinata = true
+			_volt_burst(z.global_position + Vector3(0.0, 0.9, 0.0), 55.0 * dmg_mult())
+			_in_pinata = false
+		var od_dir := _od()
+		if od_dir != null and od_dir.has_method("notify_enemy_killed") and z != null and is_instance_valid(z):
+			od_dir.notify_enemy_killed(z.global_position, self)
 	if z.is_boss:
 		hit_stop(0.14, 0.1)
 	elif was_headshot and _last_shot_heavy and now - _last_hit_stop > 2.0:
@@ -1557,6 +2162,7 @@ func _on_enemy_killed_by_player(z: ZombieEnemy, was_headshot: bool) -> void:
 		GameState.play_sfx("skull_shatter", -5.0, randf_range(0.90, 1.10))
 	if char_id == "alchemist" and pain_drug_charges < pain_drug_max:
 		pain_drug_synth_progress += 1.6
+	on_scavenger_resupply()
 
 
 func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
@@ -1569,12 +2175,13 @@ func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
 		dmg *= 0.65
 	if has_perk("kevlar"):
 		dmg *= 0.85
+	if _od_has_mutator("glass_cannon"):
+		dmg *= 1.25
 
 	regen_delay_timer = maxf(1.2, 3.8 - 0.22 * stat_eff("vitality"))
-	add_camera_shake(0.32)
-	hurt_roll = randf_range(-1.0, 1.0) * deg_to_rad(7.5)
+	add_camera_shake(0.20)
+	hurt_roll = randf_range(-1.0, 1.0) * deg_to_rad(4.5)
 	_flash_hit_flicker = 0.32
-	sensor_flash = minf(1.0, sensor_flash + 0.35)
 	damaged.emit(_from_pos)
 	if _hurt_sfx_cd <= 0.0:
 		_hurt_sfx_cd = 0.6
@@ -1586,6 +2193,14 @@ func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
 		dmg -= absorbed
 
 	hp = maxf(0.0, hp - dmg)
+	var ph_stacks := od_mut_stacks("phoenix_core")
+	if ph_stacks > 0 and _phoenix_cd <= 0.0 and hp <= max_hp * 0.40:
+		_phoenix_cd = 18.0
+		hp = maxf(hp, max_hp * 0.28)
+		overshield = minf(100.0, overshield + 40.0 * float(ph_stacks))
+		_volt_burst(global_position + Vector3(0.0, 0.8, 0.0), 140.0 * dmg_mult(), 5.5)
+		GameState.play_sfx("electrocute", -2.0, 1.15)
+		status_banner_requested.emit("PHOENIX CORE ERUPTED — EMERGENCY SHIELD!", Color(1.0, 0.62, 0.18))
 	if hp <= 0.0 and has_perk("laststand") and last_stand_cd <= 0.0:
 		hp = 1.0
 		revive_invuln = 3.0
@@ -1595,12 +2210,31 @@ func take_damage(amount: float, _from_pos: Vector3 = Vector3.ZERO) -> void:
 	hp_changed.emit(hp, max_hp, overshield)
 
 	if hp <= 0.0:
-		if revives > 0:
+		if GameState.is_pvp():
+			die()
+		elif revives > 0:
 			_go_down(true)
 		elif Net.is_online() and _net_game() and _net_game().any_teammate_standing():
 			_go_down(false)
 		else:
 			die()
+
+
+func apply_pvp_damage(amount: float, from_pos: Vector3, fatal: bool) -> void:
+	if is_dead:
+		return
+	regen_delay_timer = 3.2
+	add_camera_shake(0.18)
+	hurt_roll = randf_range(-1.0, 1.0) * deg_to_rad(4.0)
+	_flash_hit_flicker = 0.28
+	damaged.emit(from_pos)
+	if _hurt_sfx_cd <= 0.0:
+		_hurt_sfx_cd = 0.5
+		GameState.play_sfx("player_hurt", -3.0, randf_range(0.9, 1.1))
+	hp = 0.0 if fatal else maxf(1.0, hp - amount)
+	hp_changed.emit(hp, max_hp, overshield)
+	if fatal or hp <= 0.0:
+		die()
 
 
 # Climb the ladder into the chopper and ride out with it.
@@ -1629,11 +2263,19 @@ func die() -> void:
 	is_downed = false
 	self_reviving = false
 	_head_rest_y = head_pivot.position.y
-	var ng := _net_game()
-	if Net.is_online() and ng and not ng.game_over:
-		collision_layer = 0 # spectating: zombies and bullets ignore the body
+	if GameState.is_pvp():
+		collision_layer = 0
+		HitboxRig.set_enabled(_hurtboxes, false)
+		gun_rig.visible = false
+		knife_rig.visible = false
+		GameState.pvp_kills_life = 0
 	else:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		var ng := _net_game()
+		if Net.is_online() and ng and not ng.game_over:
+			collision_layer = 0 # spectating: zombies and bullets ignore the body
+			HitboxRig.set_enabled(_hurtboxes, false)
+		else:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_play_death_camera()
 	player_died.emit()
 
@@ -1736,11 +2378,48 @@ func refill_all_ammo() -> void:
 	status_banner_requested.emit("MAX AMMO! ALL WEAPONS & GRENADES REFILLED!", Color(1.0, 0.85, 0.25))
 
 
+func grant_blitz_weapon_boost() -> String:
+	var w_id := get_current_weapon_id()
+	var cur_mods: Array = (weapon_mods.get(w_id, []) as Array).duplicate()
+	var pool: Array[String] = []
+	var w_cls: String = String(GameState.WEAPONS.get(w_id, {}).get("class", ""))
+	for k in GameState.WEAPON_ATTACHMENTS.keys():
+		var ks := String(k)
+		if cur_mods.has(ks):
+			continue
+		if (w_cls == "wonder" or w_id == "volt") and (ks == "suppressor" or ks == "overpressured"):
+			continue
+		if w_id == "revolver" and ks == "suppressor":
+			continue
+		pool.append(ks)
+	if cur_mods.size() < 3 and not pool.is_empty():
+		var picked: String = pool[randi() % pool.size()]
+		cur_mods.append(picked)
+		weapon_mods[w_id] = cur_mods
+		var cfg := get_weapon_cfg(w_id)
+		mag_ammo[w_id] = cfg["mag_size"]
+		reserve_ammo[w_id] = cfg["reserve_max"]
+		_emit_ammo()
+		return "+%s MOD" % String(GameState.WEAPON_ATTACHMENTS[picked]["tag"])
+	if not upgraded.has(w_id):
+		upgraded[w_id] = true
+		var cfg2 := get_weapon_cfg(w_id)
+		mag_ammo[w_id] = cfg2["mag_size"]
+		reserve_ammo[w_id] = cfg2["reserve_max"]
+		_equip_weapon_model(w_id)
+		_emit_ammo()
+		return "%s FORGED MK-II" % String(GameState.WEAPONS.get(w_id, {}).get("name", w_id)).to_upper()
+	GameState.points += 500
+	GameState.points_changed.emit(GameState.points, 500)
+	return "+500 BONUS PTS"
+
+
 # Returns the weapon's stats with Mystery Crate attachments and any forge upgrade applied.
 func get_weapon_cfg(w_id: String) -> Dictionary:
 	var base: Dictionary = GameState.WEAPONS[w_id]
 	var mods: Array = weapon_mods.get(w_id, [])
-	if not upgraded.has(w_id) and mag_lv == 0 and reserve_lv == 0 and mods.is_empty():
+	var is_cur := (w_id == get_current_weapon_id())
+	if not upgraded.has(w_id) and mag_lv == 0 and reserve_lv == 0 and mods.is_empty() and not (is_cur and _computed_ads_valid):
 		return base
 	var cfg := base.duplicate()
 	var dmg_k := 1.0
@@ -1752,6 +2431,7 @@ func get_weapon_cfg(w_id: String) -> Dictionary:
 	var mod_mag_k := 1.0
 	var muz_k := 1.0
 	var stag_k := 1.0
+	var ads_sp_k := 1.0
 	for m in mods:
 		var m_id := String(m)
 		var info: Dictionary = GameState.WEAPON_ATTACHMENTS.get(m_id, {})
@@ -1765,11 +2445,16 @@ func get_weapon_cfg(w_id: String) -> Dictionary:
 		rng_k *= float(info.get("range", 1.0))
 		mod_mag_k *= float(info.get("mag", 1.0))
 		muz_k *= float(info.get("muzzle", 1.0))
+		ads_sp_k *= float(info.get("ads_speed", 1.0))
 		stag_k = maxf(stag_k, float(info.get("stagger", 1.0)))
 		if info.has("sfx"):
 			cfg["sfx"] = info["sfx"]
 		if bool(info.get("laser", false)):
 			cfg["has_laser"] = true
+	cfg["attachments"] = mods
+	cfg["camo"] = String(weapon_camos.get(w_id, "factory"))
+	if bool(base.get("suppressed", false)) or ("suppressor" in mods):
+		cfg["suppressed"] = true
 	if muz_k < 0.99:
 		cfg["muzzle_scale"] = muz_k
 	if stag_k > 1.01:
@@ -1780,7 +2465,18 @@ func get_weapon_cfg(w_id: String) -> Dictionary:
 	cfg["recoil_pitch"] = float(base["recoil_pitch"]) * rec_k
 	cfg["recoil_yaw"] = float(base["recoil_yaw"]) * rec_k
 	cfg["reload_time"] = float(base["reload_time"]) * rel_k
+	cfg["ads_time"] = float(base.get("ads_time", 0.2)) / maxf(0.5, ads_sp_k)
 	cfg["range"] = float(base["range"]) * rng_k
+	if is_cur and _computed_ads_valid:
+		cfg["ads_pos"] = _computed_ads_pos
+	var style_d: Dictionary = base.get("style", {})
+	var opt_id := String(style_d.get("optic", ""))
+	if "red_dot" in mods and opt_id == "":
+		opt_id = "red_dot"
+	if opt_id == "acog":
+		cfg["ads_fov"] = minf(float(base.get("ads_fov", 56.0)), 40.0)
+	elif opt_id in ["red_dot", "holo", "volt_holo"]:
+		cfg["ads_fov"] = minf(float(base.get("ads_fov", 60.0)), 56.0)
 
 	var mk := 1.5 if upgraded.has(w_id) else 1.0
 	var rk := 2.0 if upgraded.has(w_id) else 1.0
@@ -1819,6 +2515,8 @@ func upgrade_current_weapon() -> void:
 
 
 func get_current_weapon_id() -> String:
+	if pvp_knife_only:
+		return "knife"
 	return weapons_owned[clampi(active_slot, 0, weapons_owned.size() - 1)]
 
 
@@ -1827,6 +2525,7 @@ func _equip_weapon_model(w_id: String) -> void:
 		gun_rig.remove_child(gun_model)
 		gun_model.queue_free()
 		gun_model = null
+	_computed_ads_valid = false
 	var cfg := get_weapon_cfg(w_id)
 	var path: String = cfg["model"]
 	if ResourceLoader.exists(path):
@@ -1838,7 +2537,18 @@ func _equip_weapon_model(w_id: String) -> void:
 			var n := gun_model.find_child(pn, true, false) as Node3D
 			if n:
 				vm_parts[pn] = {"node": n, "pos": n.position, "rot": n.rotation}
+		WeaponRigBuilder.decorate_viewmodel(gun_model, w_id, cfg)
 		_mark_viewmodel(gun_model)
+		var base_ads: Vector3 = cfg.get("ads_pos", Vector3(0.0, -0.075, -0.32))
+		var sight_anchor := gun_model.find_child("SightAnchor", true, false) as Node3D
+		if is_instance_valid(sight_anchor):
+			var anchor_in_rig: Vector3 = gun_model.scale * sight_anchor.position
+			var ads_z: float = base_ads.z
+			if String(gun_model.get_meta("optic_kind", "")) == "acog":
+				ads_z = maxf(ads_z, -0.22)
+			ads_z = minf(ads_z, -0.18 - anchor_in_rig.z)
+			_computed_ads_pos = Vector3(-anchor_in_rig.x, -anchor_in_rig.y, ads_z)
+			_computed_ads_valid = true
 		if upgraded.has(w_id):
 			var sheen := MaterialLib.get_emissive(Color(0.55, 0.25, 1.0), 1.6, 0.28)
 			for m in gun_model.find_children("*", "MeshInstance3D", true, false):
@@ -1850,9 +2560,141 @@ func _equip_weapon_model(w_id: String) -> void:
 
 
 func _emit_ammo() -> void:
+	if pvp_knife_only:
+		ammo_changed.emit("COMBAT KNIFE", 1, 0, false, false)
+		return
 	var w_id := get_current_weapon_id()
 	var cfg := get_weapon_cfg(w_id)
 	ammo_changed.emit(cfg["name"], mag_ammo[w_id], reserve_ammo[w_id], is_reloading, pap_timer > 0.0)
+
+
+func apply_custom_loadout(set_idx: int = -1) -> void:
+	var idx := GameState.active_loadout_index if set_idx < 0 else clampi(set_idx, 0, WeaponCatalog.DEFAULT_LOADOUTS.size() - 1)
+	if set_idx >= 0:
+		GameState.set_active_loadout(idx)
+	var data: Dictionary = GameState.get_loadout(idx)
+	var pri := String(data.get("primary", "m4_carbine"))
+	var sec := String(data.get("secondary", "rpg7"))
+	var atts: Array = data.get("attachments", [])
+	var sec_atts: Array = data.get("sec_attachments", [])
+	equipped_lethal = String(data.get("lethal", "frag"))
+	equipped_tactical = String(data.get("tactical", "flashbang"))
+	equipped_perk = String(data.get("perk", "fast_hands"))
+
+	pvp_knife_only = false
+	if knife_rig:
+		knife_rig.visible = false
+	if gun_rig:
+		gun_rig.visible = not is_dead
+	var owned: Array[String] = [pri]
+	if sec != pri and GameState.WEAPONS.has(sec):
+		owned.append(sec)
+	weapons_owned = owned
+	weapon_mods.clear()
+	weapon_camos.clear()
+	if not atts.is_empty():
+		var arr: Array[String] = []
+		for a in atts:
+			arr.append(String(a))
+		weapon_mods[pri] = arr
+	if sec != pri and not sec_atts.is_empty():
+		var sarr: Array[String] = []
+		for a in sec_atts:
+			sarr.append(String(a))
+		weapon_mods[sec] = sarr
+	weapon_camos[pri] = String(data.get("pri_camo", "factory"))
+	if sec != pri:
+		weapon_camos[sec] = String(data.get("sec_camo", "factory"))
+	active_slot = 0
+	for w_id in GameState.WEAPONS:
+		var c := get_weapon_cfg(w_id)
+		mag_ammo[w_id] = int(c["mag_size"])
+		reserve_ammo[w_id] = int(c["reserve_max"])
+	grenades = 2
+	tactical_count = 2
+	flashbang_t = 0.0
+	concuss_t = 0.0
+	_burst_left = 0
+	is_reloading = false
+	fire_cooldown = 0.0
+	_equip_weapon_model(get_current_weapon_id())
+	_emit_ammo()
+	stats_changed.emit()
+
+
+func set_pvp_loadout(primary_id: String = "") -> void:
+	var active_data := GameState.get_active_loadout()
+	if primary_id == "" or primary_id == String(active_data.get("primary", "")):
+		apply_custom_loadout()
+		return
+	var pid: String = primary_id if GameState.WEAPONS.has(primary_id) else "m4_carbine"
+	pvp_knife_only = false
+	if knife_rig:
+		knife_rig.visible = false
+	if gun_rig:
+		gun_rig.visible = not is_dead
+	var sec := String(active_data.get("secondary", "rpg7"))
+	var owned: Array[String] = [pid]
+	if sec != pid and GameState.WEAPONS.has(sec):
+		owned.append(sec)
+	weapons_owned = owned
+	weapon_mods.clear()
+	weapon_camos.clear()
+	weapon_camos[pid] = String(active_data.get("pri_camo", "factory"))
+	var sec_atts: Array = active_data.get("sec_attachments", [])
+	if sec != pid and not sec_atts.is_empty():
+		var sarr: Array[String] = []
+		for a in sec_atts:
+			sarr.append(String(a))
+		weapon_mods[sec] = sarr
+	if sec != pid:
+		weapon_camos[sec] = String(active_data.get("sec_camo", "factory"))
+	equipped_lethal = String(active_data.get("lethal", "frag"))
+	equipped_tactical = String(active_data.get("tactical", "flashbang"))
+	equipped_perk = String(active_data.get("perk", "fast_hands"))
+	active_slot = 0
+	for w_id in GameState.WEAPONS:
+		var c := get_weapon_cfg(w_id)
+		mag_ammo[w_id] = int(c["mag_size"])
+		reserve_ammo[w_id] = int(c["reserve_max"])
+	grenades = 2
+	tactical_count = 2
+	is_reloading = false
+	fire_cooldown = 0.0
+	_equip_weapon_model(get_current_weapon_id())
+	_emit_ammo()
+	stats_changed.emit()
+
+
+func set_gungame_weapon(wid: String) -> void:
+	is_reloading = false
+	fire_cooldown = 0.0
+	grenades = 0
+	swap_state = 0
+	if wid == "knife":
+		pvp_knife_only = true
+		if gun_rig:
+			gun_rig.visible = false
+		if knife_rig:
+			knife_rig.visible = not is_dead
+			knife_rig.position = Vector3(0.24, -0.22, -0.42)
+			knife_rig.rotation = Vector3(deg_to_rad(-14.0), deg_to_rad(28.0), deg_to_rad(-18.0))
+	else:
+		pvp_knife_only = false
+		var w: String = wid if GameState.WEAPONS.has(wid) else "pistol"
+		var g_owned: Array[String] = [w]
+		weapons_owned = g_owned
+		active_slot = 0
+		var c: Dictionary = GameState.WEAPONS[w]
+		mag_ammo[w] = int(c["mag_size"])
+		reserve_ammo[w] = int(c["mag_size"]) * 4
+		if knife_rig:
+			knife_rig.visible = false
+		if gun_rig:
+			gun_rig.visible = not is_dead
+		_equip_weapon_model(w)
+	_emit_ammo()
+	stats_changed.emit()
 
 
 func _scan_interactables() -> void:
@@ -1885,26 +2727,70 @@ func _animate_viewmodels(delta: float) -> void:
 	var ads_e := _ease_ads()
 	_vm_time += delta
 	recoil_kick = recoil_kick.lerp(Vector3.ZERO, clampf(14.0 * delta, 0.0, 1.0))
-	# View recoil springs back with a slight overshoot
-	recoil_view_vel += (-recoil_view * 95.0 - recoil_view_vel * 12.5) * delta
+	# View recoil settles smoothly back to aim center after burst ends
+	_post_fire_settle = maxf(0.0, _post_fire_settle - delta)
+	var rec_k := 135.0 if _post_fire_settle <= 0.0 else 95.0
+	var rec_d := 18.0 if _post_fire_settle <= 0.0 else 12.5
+	recoil_view_vel += (-recoil_view * rec_k - recoil_view_vel * rec_d) * delta
 	recoil_view += recoil_view_vel * delta
 
 	var move_amt := clampf(Vector2(velocity.x, velocity.z).length() / 6.0, 0.0, 1.4) if is_on_floor() and not is_sliding else 0.0
-	var bob_amp := (1.0 - ads_e * 0.85) * move_amt
+	var bob_scale: float = GameState.viewmodel_bob
+	var bob_amp := (1.0 - ads_e) * move_amt * bob_scale
 	var bob_x := cos(bob_phase * 0.5) * 0.014 * bob_amp
 	var bob_y := absf(sin(bob_phase)) * 0.018 * bob_amp
 
 	var ads_pos: Vector3 = cfg.get("ads_pos", Vector3(0, -0.075, -0.32))
 	var target_pos := HIP_POS.lerp(ads_pos, ads_e) + Vector3(bob_x, -bob_y, 0.0)
 	var target_rot := Vector3.ZERO
+	target_rot.z += sin(ads_e * PI) * -0.11
 
-	# Sprint pose: gun swung low and to the side
-	target_pos += Vector3(-0.05, -0.05, 0.05) * sprint_t
-	target_rot += Vector3(-0.32, 0.75, 0.32) * sprint_t
+	# Sprint pose: standard low sweep vs Tactical Sprint elevated high-port pose
+	var reg_sprint_w: float = maxf(0.0, sprint_t - tac_sprint_t) * (1.0 - ads_e)
+	var tac_w: float = tac_sprint_t * (1.0 - ads_e)
+	target_pos += Vector3(-0.05, -0.05, 0.05) * reg_sprint_w
+	target_rot += Vector3(-0.32, 0.75, 0.32) * reg_sprint_w
+	target_pos += Vector3(-0.07, 0.075 + sin(bob_phase) * 0.010 * bob_scale, 0.03) * tac_w
+	target_rot += Vector3(0.44 + cos(bob_phase * 2.0) * 0.04 * bob_scale, 0.36, -0.34) * tac_w
 
 	# Sliding tilt
 	if is_sliding:
 		target_rot.z += 0.25
+
+	# Wall-proximity barrel tuck (prevents long barrels clipping into nearby walls)
+	var tuck_goal: float = 0.0
+	if is_inside_tree() and get_world_3d() != null and not is_monster_form:
+		var sp := get_world_3d().direct_space_state
+		var cam_fwd := -camera.global_transform.basis.z
+		var wq := PhysicsRayQueryParameters3D.create(camera.global_position, camera.global_position + cam_fwd * 0.92, 1, [get_rid()])
+		var whit: Dictionary = sp.intersect_ray(wq)
+		if not whit.is_empty():
+			var wdist: float = camera.global_position.distance_to(whit["position"] as Vector3)
+			tuck_goal = clampf(1.0 - wdist / 0.92, 0.0, 1.0) * (1.0 - ads_e * 0.75)
+	_wall_tuck_t = lerpf(_wall_tuck_t, tuck_goal, clampf(14.0 * delta, 0.0, 1.0))
+	if _wall_tuck_t > 0.005:
+		target_pos += Vector3(-0.03, -0.045, 0.145) * _wall_tuck_t
+		target_rot += Vector3(0.36, 0.22, -0.14) * _wall_tuck_t
+
+	# Weapon Inspect [I] choreography
+	if _inspect_t >= 0.0:
+		_inspect_t += delta
+		if not _inspect_click2 and _inspect_t >= 1.25:
+			_inspect_click2 = true
+			GameState.play_sfx("flashlight_click", -14.0, 1.15)
+		if _inspect_t >= 2.65:
+			_inspect_t = -1.0
+		else:
+			var w_left: float = smoothstep(0.0, 0.42, _inspect_t) * (1.0 - smoothstep(1.05, 1.40, _inspect_t))
+			var w_right: float = smoothstep(1.15, 1.55, _inspect_t) * (1.0 - smoothstep(2.15, 2.65, _inspect_t))
+			target_pos += Vector3(-0.075, 0.055, -0.04) * w_left + Vector3(0.05, 0.035, -0.02) * w_right
+			target_rot += Vector3(0.08, 0.44, 0.56) * w_left + Vector3(0.16, -0.32, -0.48) * w_right
+
+	# Mantle subtle climb dip
+	if _mantle_active:
+		var m_w: float = sin(_mantle_t * PI)
+		target_pos += Vector3(0.0, -0.14, 0.06) * m_w
+		target_rot += Vector3(-0.42, 0.18, 0.22) * m_w
 
 	# Reload: dip and roll the gun
 	if is_reloading:
@@ -1927,7 +2813,7 @@ func _animate_viewmodels(delta: float) -> void:
 	target_rot += Vector3(-0.9, 0, 0) * lower
 
 	sway = sway.lerp(Vector2.ZERO, clampf(9.0 * delta, 0.0, 1.0)).limit_length(0.12)
-	var sway_scale := 0.3 if ads_e > 0.5 else 1.0
+	var sway_scale := 1.0 - ads_e
 	target_pos += Vector3(-sway.x, sway.y, 0.0) * 0.25 * sway_scale
 	target_rot += Vector3(sway.y, -sway.x * 1.2, -sway.x * 0.8) * sway_scale
 
@@ -1935,13 +2821,10 @@ func _animate_viewmodels(delta: float) -> void:
 		lower = maxf(lower, 0.9)
 		target_pos += Vector3(0, -0.3 * 0.9, 0)
 
-	# Breathing drift, panic hand tremor & strafe tilt
-	var breathe := 1.0 - ads_e * 0.65
-	var tremor := stress * (0.45 if is_ads else 1.0)
-	var reload_jit := (0.011 * stress) if (is_reloading and stress > 0.45) else 0.0
+	# Breathing drift & strafe tilt (zeroed at full ADS so sight stays dead-centered on screen)
+	var breathe := 1.0 - ads_e
 	target_pos += Vector3(sin(_vm_time * 0.9) * 0.0016, sin(_vm_time * 1.8) * 0.0022, 0.0) * breathe
-	target_pos += Vector3(sin(_vm_time * 24.0) * (0.0025 * tremor + reload_jit), cos(_vm_time * 19.3) * (0.0025 * tremor + reload_jit), 0.0)
-	target_rot.z += -strafe_input * 0.07 * (1.0 - ads_e * 0.7) + sin(_vm_time * 17.5) * 0.018 * tremor
+	target_rot.z += -strafe_input * 0.07 * (1.0 - ads_e)
 
 	_animate_gun_parts(delta, cfg)
 	_animate_grenade_hand(delta)
@@ -1954,23 +2837,25 @@ func _animate_viewmodels(delta: float) -> void:
 	gun_rig.position += vm_vel * delta
 	vm_rot_vel += ((want_rot - gun_rig.rotation) * k_spring - vm_rot_vel * d_spring) * delta
 	gun_rig.rotation += vm_rot_vel * delta
+	if pvp_knife_only and not is_dead and knife_timer <= 0.0 and knife_rig:
+		knife_rig.visible = true
+		knife_rig.position = Vector3(0.24 + bob_x * 1.4, -0.22 - bob_y * 1.2, -0.42)
+		knife_rig.rotation = Vector3(deg_to_rad(-14.0), deg_to_rad(28.0), deg_to_rad(-18.0))
 	gun_rig.visible = not is_monster_form and not is_scoped()
 
 	if is_monster_form:
 		monster_claw_rig.position = Vector3(bob_x * 1.4, -0.18 - bob_y * 1.2, -0.36)
 
-	# Camera: recoil, strafe lean, bodycam turn banking, boot roll, hurt roll, head bob, shake
+	# Camera: recoil, strafe lean, hurt roll, subtle step bob, shake
 	hurt_roll = lerpf(hurt_roll, 0.0, clampf(7.0 * delta, 0.0, 1.0))
-	var bcam := 1.0 if GameState.bodycam_mode else 0.0
 	var lean := -strafe_input * deg_to_rad(1.4) + (deg_to_rad(-4.5) if is_sliding else 0.0)
-	lean += _cam_yaw_vel * deg_to_rad(2.6) * bcam
-	lean += sin(bob_phase * 0.5) * deg_to_rad(1.35) * move_amt * (1.0 - ads_e) * bcam
-	# Aim sway while looking down sights (amplified by psychological panic)
-	var aim_sway := ads_e * (2.6 if is_scoped() else 1.0) * (0.6 if is_crouching else 1.0) * (1.0 + stress * 1.15)
-	var sway_x := (sin(_vm_time * 1.1) * 0.0011 + sin(_vm_time * 2.3) * 0.0004) * aim_sway
-	var sway_y := sin(_vm_time * 0.7 + 1.3) * 0.0012 * aim_sway
+	lean += sin(bob_phase * 0.5) * deg_to_rad(0.45) * move_amt * (1.0 - ads_e)
+	# Subtle natural breathing sway only when aiming down sights / scoped (steadied by holding breath)
+	var aim_sway := ads_e * (2.2 if is_scoped() else 0.55) * (0.6 if is_crouching else 1.0) * (0.14 if is_holding_breath else 1.0)
+	var sway_x := (sin(_vm_time * 1.1) * 0.0010 + sin(_vm_time * 2.3) * 0.0003) * aim_sway
+	var sway_y := sin(_vm_time * 0.7 + 1.3) * 0.0010 * aim_sway
 	camera.rotation = Vector3(recoil_view.x + sway_x, recoil_view.y + sway_y, lerpf(camera.rotation.z, lean + hurt_roll + cam_spring.x * 0.5, clampf(10.0 * delta, 0.0, 1.0)))
-	var cam_bob := Vector3(cos(bob_phase * 0.5) * 0.024, absf(sin(bob_phase)) * (0.032 if bcam > 0.5 else 0.025), 0.0) * move_amt * (1.0 - ads_e)
+	var cam_bob := Vector3(cos(bob_phase * 0.5) * 0.022, absf(sin(bob_phase)) * 0.024, 0.0) * move_amt * (1.0 - ads_e) * bob_scale
 
 	if camera_shake > 0.0:
 		camera_shake = maxf(0.0, camera_shake - delta * 1.8)
@@ -2096,6 +2981,10 @@ func _animate_gun_parts(delta: float, cfg: Dictionary) -> void:
 				bolt_off.z = maxf(bolt_off.z, 0.05 * charge)
 	elif empty and w_id == "pistol":
 		slide_off.z = 0.032
+	elif _inspect_t >= 0.0:
+		var iw: float = sin(clampf(_inspect_t / 2.65, 0.0, 1.0) * PI)
+		arm_l_off = Vector3(-0.025, -0.06, 0.05) * iw
+		arm_l_rot = Vector3(0.18, 0.25, 0.14) * iw
 
 	_set_part("SlidePivot", slide_off, Vector3.ZERO)
 	_set_part("BoltPivot", bolt_off, bolt_rot)
@@ -2116,6 +3005,13 @@ func _animate_gun_parts(delta: float, cfg: Dictionary) -> void:
 	var mag: Dictionary = _part("MagPivot")
 	if not mag.is_empty():
 		(mag["node"] as Node3D).visible = mag_off.y > -0.27
+	if is_instance_valid(gun_model):
+		var rocket_node := gun_model.find_child("RocketWarhead", true, false) as Node3D
+		if rocket_node:
+			rocket_node.visible = int(mag_ammo.get(w_id, 0)) > 0 and not is_reloading
+		var rotary_node := gun_model.find_child("RotaryCluster", true, false) as Node3D
+		if rotary_node:
+			rotary_node.rotation.z += delta * (26.0 * k_fire + (8.0 if Input.is_action_pressed("fire") and not is_reloading else 0.0))
 
 
 func _animate_grenade_hand(delta: float) -> void:
@@ -2171,7 +3067,7 @@ func _play_death_camera() -> void:
 
 
 func add_camera_shake(amount: float) -> void:
-	camera_shake = minf(1.0, camera_shake + amount)
+	camera_shake = minf(1.0, camera_shake + amount * GameState.screen_shake)
 
 
 func _spawn_bullet_tracer(from_pt: Vector3, to_pt: Vector3, col: Color, radius: float = 0.012) -> void:
@@ -2285,6 +3181,7 @@ func net_respawn(pos: Vector3) -> void:
 	overshield = 0.0
 	revive_invuln = 3.0
 	collision_layer = 2
+	HitboxRig.set_enabled(_hurtboxes, true)
 	global_position = pos
 	velocity = Vector3.ZERO
 	head_pivot.position.y = _head_rest_y
@@ -2300,8 +3197,31 @@ func net_respawn(pos: Vector3) -> void:
 	hp_changed.emit(hp, max_hp, overshield)
 
 
-# ---------------------------------------------------------------------------
-# BOSS RELICS
+func pvp_respawn(pos: Vector3, yaw: float) -> void:
+	is_dead = false
+	is_downed = false
+	self_reviving = false
+	extracted = false
+	hp = max_hp
+	overshield = 0.0
+	revive_invuln = 1.5
+	collision_layer = 2
+	HitboxRig.set_enabled(_hurtboxes, true)
+	global_position = pos
+	rotation.y = yaw
+	velocity = Vector3.ZERO
+	head_pivot.position.y = STAND_HEAD
+	head_pivot.rotation = Vector3.ZERO
+	camera.rotation = Vector3.ZERO
+	camera.position = Vector3.ZERO
+	if gun_rig:
+		gun_rig.visible = not pvp_knife_only
+	if knife_rig:
+		knife_rig.visible = pvp_knife_only
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	downed_changed.emit(false)
+	hp_changed.emit(hp, max_hp, overshield)
+	_emit_ammo()
 # ---------------------------------------------------------------------------
 # Skills of the other operators a relic can lend you (used with [X]).
 const BORROWED_SKILLS := {
@@ -2420,6 +3340,7 @@ func export_state() -> Dictionary:
 		"reserve": reserve_ammo.duplicate(), "upgraded": upgraded.duplicate(), "mods": weapon_mods.duplicate(true), "stats": stat_burned.duplicate(),
 		"revives": revives, "grenades": grenades, "c4": c4_count, "mines": mines, "perks": perks.duplicate(), "mag_lv": mag_lv, "reserve_lv": reserve_lv,
 		"skill1": borrowed_skill, "skill1_cd": borrowed_cd_max, "skill2": borrowed_skill2, "skill2_cd": borrowed_cd_max2,
+		"od_mutations": od_mutations.duplicate(),
 	}
 
 
@@ -2453,6 +3374,7 @@ func import_state(d: Dictionary) -> void:
 	borrowed_cd_max = float(d.get("skill1_cd", 0.0))
 	borrowed_skill2 = String(d.get("skill2", ""))
 	borrowed_cd_max2 = float(d.get("skill2_cd", 0.0))
+	od_mutations = d.get("od_mutations", {}).duplicate()
 	active_slot = clampi(int(d.get("slot", 0)), 0, weapons_owned.size() - 1)
 	_apply_stats()
 	hp = max_hp
@@ -2480,6 +3402,54 @@ var last_stand_cd: float = 0.0
 
 var _streak: int = 0
 var _streak_t: float = -10.0
+var od_combo: int = 0
+var od_combo_t: float = 0.0
+var od_combo_max_t: float = 5.5
+var od_overdrive_t: float = 0.0
+var od_mutations: Dictionary = {}
+var _in_pinata: bool = false
+var _slide_shock_fired: bool = false
+var _od_hit_count: int = 0
+var _phoenix_cd: float = 0.0
+
+
+func _od() -> Node:
+	var p := get_parent()
+	if p != null:
+		var n := p.get_node_or_null("Overdrive")
+		if n != null:
+			return n
+	return get_tree().get_first_node_in_group("overdrive")
+
+
+func od_mut_stacks(id: String) -> int:
+	return int(od_mutations.get(id, 0)) if GameState.is_overdrive() else 0
+
+
+func _od_has_mutator(id: String) -> bool:
+	var d := _od()
+	return d != null and d.has_method("has_mutator") and bool(d.has_mutator(id))
+
+
+func od_rank_index() -> int:
+	if not GameState.is_overdrive():
+		return 0
+	if od_overdrive_t > 0.0 or od_combo >= 25:
+		return 5
+	if od_combo >= 20:
+		return 4
+	if od_combo >= 13:
+		return 3
+	if od_combo >= 7:
+		return 2
+	if od_combo >= 3:
+		return 1
+	return 0
+
+
+func od_rank_label() -> String:
+	const NAMES := ["", "C", "B", "A", "S", "★ OVERDRIVE ★"]
+	return NAMES[od_rank_index()]
 var _last_shot_heavy: bool = false
 var _hit_stop_on: bool = false
 var _last_hit_stop: float = -10.0
@@ -2504,6 +3474,81 @@ func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 	if is_instance_valid(tac_laser_dot):
 		tac_laser_dot.queue_free()
+
+
+func _can_stand_up() -> bool:
+	if not is_inside_tree() or get_world_3d() == null:
+		return true
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(global_position + Vector3(0.0, 1.10, 0.0), global_position + Vector3(0.0, 1.88, 0.0), 1 | 16, [get_rid()])
+	return space.intersect_ray(q).is_empty()
+
+
+func _try_start_mantle(wish: Vector3) -> bool:
+	if _mantle_active or is_monster_form or is_downed or not is_inside_tree() or get_world_3d() == null:
+		return false
+	var fwd := wish if wish.length_squared() > 0.04 else -global_basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.001:
+		return false
+	fwd = fwd.normalized()
+
+	var space := get_world_3d().direct_space_state
+	var feet := global_position
+	var ex: Array[RID] = [get_rid()]
+	var near: float = 99.0
+	var wall_hit_pos := Vector3.ZERO
+	for h in [0.42, 0.92]:
+		var q := PhysicsRayQueryParameters3D.create(feet + Vector3(0.0, float(h), 0.0), feet + Vector3(0.0, float(h), 0.0) + fwd * 1.42, 1 | 16, ex)
+		var r: Dictionary = space.intersect_ray(q)
+		if not r.is_empty() and absf((r["normal"] as Vector3).y) < 0.55:
+			var d: float = (r["position"] as Vector3 - feet).length()
+			if d < near:
+				near = d
+				wall_hit_pos = r["position"] as Vector3
+	if near > 1.42:
+		return false
+
+	# Reject walls, ceilings, AND layer-16 window blockers!
+	var qh := PhysicsRayQueryParameters3D.create(feet + Vector3(0.0, 2.08, 0.0), feet + Vector3(0.0, 2.08, 0.0) + fwd * (near + 0.65), 1 | 16, ex)
+	if not space.intersect_ray(qh).is_empty():
+		return false
+
+	var flat_hit := Vector3(wall_hit_pos.x, feet.y, wall_hit_pos.z)
+	var land_xz := flat_hit + fwd * 0.45
+	var qd := PhysicsRayQueryParameters3D.create(land_xz + Vector3(0.0, 2.25, 0.0), land_xz + Vector3(0.0, 0.25, 0.0), 1 | 16, ex)
+	var top_hit: Dictionary = space.intersect_ray(qd)
+	if top_hit.is_empty() or (top_hit["normal"] as Vector3).y < 0.72:
+		return false
+
+	var top_y: float = (top_hit["position"] as Vector3).y
+	var rise: float = top_y - feet.y
+	if rise < 0.42 or rise > 1.92:
+		return false
+
+	# Headroom check at landing spot (checks world + window blockers)
+	var qhead := PhysicsRayQueryParameters3D.create(Vector3(land_xz.x, top_y + 0.16, land_xz.z), Vector3(land_xz.x, top_y + 1.88, land_xz.z), 1 | 16, ex)
+	if not space.intersect_ray(qhead).is_empty():
+		return false
+
+	_mantle_active = true
+	_mantle_t = 0.0
+	_mantle_dur = clampf(0.22 + rise * 0.08, 0.24, 0.36)
+	_mantle_start = feet
+	_mantle_end = Vector3(land_xz.x, top_y + 0.04, land_xz.z)
+	_mantle_apex = _mantle_start.lerp(_mantle_end, 0.36) + Vector3(0.0, maxf(0.26, rise * 0.68), 0.0)
+	is_reloading = false
+	_inspect_t = -1.0
+	is_sliding = false
+	is_crouching = false
+	is_sprinting = false
+	is_tac_sprinting = false
+	vm_vel.y -= 0.45
+	cam_spring_vel.y -= 0.35
+	GameState.play_sfx("slide", -9.0, 1.35)
+	if GameState.is_horror_mode() and is_inside_tree():
+		ZombieEnemy.broadcast_sound(get_tree(), global_position, 10.5, true, "mantle")
+	return true
 
 
 # Jumping into a waist/chest-high obstacle vaults over it: enough lift to clear
@@ -2618,6 +3663,10 @@ func flashlight_lit() -> bool:
 func _update_flashlight(delta: float) -> void:
 	if flashlight == null:
 		return
+	if GameState.is_overdrive():
+		flashlight_on = false
+		flashlight.visible = false
+		return
 	if Input.is_action_just_pressed("flashlight") and not _input_blocked() and not is_dead:
 		if flashlight_on:
 			flashlight_on = false
@@ -2663,7 +3712,7 @@ func _update_flashlight(delta: float) -> void:
 
 
 func _update_stress(delta: float) -> void:
-	if is_dead or extracted:
+	if not GameState.is_horror_mode() or is_dead or extracted:
 		stress = move_toward(stress, 0.0, delta * 0.5)
 		return
 	var cam_xf := camera.global_transform
@@ -2694,8 +3743,8 @@ func _update_stress(delta: float) -> void:
 		target += 0.10 * float(mini(close_n - 1, 3))
 	if boss_near:
 		target += 0.14
-	if hp < max_hp * 0.45:
-		target += 0.22 * clampf(1.0 - hp / maxf(1.0, max_hp * 0.45), 0.0, 1.0)
+	if hp < max_hp * 0.35:
+		target += 0.14 * clampf(1.0 - hp / maxf(1.0, max_hp * 0.35), 0.0, 1.0)
 	if not flashlight_lit() and not is_monster_form:
 		target += 0.14
 	var horror_node := get_tree().current_scene.get_node_or_null("Horror") if get_tree().current_scene else null
@@ -2735,12 +3784,19 @@ func _update_tac_laser() -> void:
 		tac_laser_beam.visible = false
 		tac_laser_dot.visible = false
 		return
-	var start_pt: Vector3 = muzzle_light.global_position
+	var lens := gun_model.find_child("LaserLens", true, false) as Node3D if is_instance_valid(gun_model) else null
+	var start_pt: Vector3 = lens.global_position if is_instance_valid(lens) else muzzle_light.global_position
 	var dir: Vector3 = -camera.global_basis.z
 	var end_pt: Vector3 = start_pt + dir * 28.0
 	var space := get_world_3d().direct_space_state
-	var q := PhysicsRayQueryParameters3D.create(camera.global_position, camera.global_position + dir * 28.0, 1 | 4)
-	q.exclude = [get_rid()]
+	var q := PhysicsRayQueryParameters3D.create(camera.global_position, camera.global_position + dir * 28.0, HitboxRig.BULLET_MASK)
+	q.collide_with_areas = true
+	q.collide_with_bodies = true
+	var ex: Array[RID] = [get_rid()]
+	for shb in _hurtboxes:
+		if is_instance_valid(shb):
+			ex.append(shb.get_rid())
+	q.exclude = ex
 	var hit := space.intersect_ray(q)
 	if not hit.is_empty():
 		end_pt = hit["position"]

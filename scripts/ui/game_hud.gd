@@ -40,6 +40,9 @@ var _tick_cd: float = 0.0
 var hitmarker_timer: float = 0.0
 var hitmarker_color: Color = Color.WHITE
 var hitmarker_big: bool = false
+var hitmarker_hs: bool = false
+var hitmarker_shield: bool = false
+var _was_reloading: bool = false
 var interact_box: HBoxContainer
 var interact_key: PanelContainer
 var interact_icon: TextureRect
@@ -56,6 +59,15 @@ var dmg_indicators: Array = []
 # Power-ups (top-right under hostiles)
 var powerups_box: VBoxContainer
 var _power_sig: String = ""
+var od_panel: PanelContainer
+var od_rank_lbl: Label
+var od_combo_lbl: Label
+var od_mult_lbl: Label
+var od_bar: ProgressBar
+var od_mut_lbl: Label
+var od_blitz_box: VBoxContainer
+var od_blitz_lbl: Label
+var od_blitz_bar: ProgressBar
 
 # Bottom-left round / points / vitals
 var tally_marks: Control
@@ -80,8 +92,13 @@ var reload_icon: TextureRect
 var ammo_lbl: Label
 var reserve_lbl: Label
 var grenade_lbl: Label
+var lethal_icon: TextureRect
+var tactical_lbl: Label
+var tactical_icon: TextureRect
 var loadout_box: HBoxContainer
 var _loadout_sig: String = ""
+var flashbang_rect: ColorRect
+var pause_class_box: HBoxContainer
 var tile_q: Dictionary
 var tile_f: Dictionary
 var tile_x: Dictionary
@@ -136,13 +153,6 @@ var _cmd_fill: StyleBoxFlat
 var _cmd_border: StyleBoxFlat
 var _cmd_t: float = 0.0
 
-# Bodycam OSD
-var bodycam_osd: Control
-var bodycam_rec_dot: ColorRect
-var bodycam_time_lbl: Label
-var bodycam_bat_fill: ColorRect
-var _bodycam_clock: float = 0.0
-var _bodycam_last_sec: int = -1
 
 
 func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
@@ -152,6 +162,11 @@ func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	add_to_group("hud")
 	_build_fps()
 	_build_ui()
+	flashbang_rect = ColorRect.new()
+	flashbang_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flashbang_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flashbang_rect.color = Color(0.96, 0.97, 1.0, 0.0)
+	add_child(flashbang_rect)
 	_build_commander_bar()
 	_build_objectives()
 	_build_scoreboard()
@@ -176,6 +191,15 @@ func setup(p_player: PlayerController, p_wave: WaveManager) -> void:
 	_build_exfil_label()
 	_connect_signals()
 	_refresh_all()
+	if GameState.is_pvp():
+		hostiles_panel.visible = false
+		od_panel.visible = false
+		if tally_marks and tally_marks.get_parent():
+			tally_marks.get_parent().visible = false
+		if points_lbl and points_lbl.get_parent():
+			points_lbl.get_parent().visible = false
+		if perks_box:
+			perks_box.visible = false
 
 
 func _build_fps() -> void:
@@ -268,6 +292,9 @@ func _build_exfil_label() -> void:
 
 
 func _update_exfil_label() -> void:
+	if wave_mgr == null:
+		exfil_box.visible = false
+		return
 	var st: int = wave_mgr.exfil_state
 	exfil_box.visible = st == 1 or st == 2
 	if st == 1:
@@ -340,7 +367,6 @@ func _build_ui() -> void:
 	monster_overlay.modulate.a = 0.0
 	root.add_child(monster_overlay)
 
-	_build_bodycam_osd(root)
 	_build_top_right(root)
 	_build_boss_bar(root)
 	_build_center(root)
@@ -349,108 +375,14 @@ func _build_ui() -> void:
 	_build_modal()
 
 
-func _build_bodycam_osd(root: Control) -> void:
-	bodycam_osd = Control.new()
-	bodycam_osd.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bodycam_osd.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bodycam_osd.visible = GameState.bodycam_mode
-	root.add_child(bodycam_osd)
-
-	var frame_col := Color(0.85, 0.86, 0.82, 0.22)
-	var m := 14
-	var arm := 18
-	for c in [
-		[0.0, 0.0, m, m, arm, 1],
-		[0.0, 0.0, m, m, 1, arm],
-		[1.0, 0.0, -m - arm, m, arm, 1],
-		[1.0, 0.0, -m - 1, m, 1, arm],
-		[0.0, 1.0, m, -m - 1, arm, 1],
-		[0.0, 1.0, m, -m - arm, 1, arm],
-		[1.0, 1.0, -m - arm, -m - 1, arm, 1],
-		[1.0, 1.0, -m - 1, -m - arm, 1, arm],
-	]:
-		var b := ColorRect.new()
-		b.color = frame_col
-		b.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		b.anchor_left = float(c[0])
-		b.anchor_right = float(c[0])
-		b.anchor_top = float(c[1])
-		b.anchor_bottom = float(c[1])
-		b.offset_left = int(c[2])
-		b.offset_top = int(c[3])
-		b.offset_right = int(c[2]) + int(c[4])
-		b.offset_bottom = int(c[3]) + int(c[5])
-		bodycam_osd.add_child(b)
-
-	var stamp := VBoxContainer.new()
-	stamp.anchor_left = 1.0
-	stamp.anchor_right = 1.0
-	stamp.offset_left = -290
-	stamp.offset_right = -20
-	stamp.offset_top = 12
-	stamp.offset_bottom = 50
-	stamp.add_theme_constant_override("separation", 2)
-	stamp.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bodycam_osd.add_child(stamp)
-
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 6)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stamp.add_child(row)
-
-	bodycam_rec_dot = ColorRect.new()
-	bodycam_rec_dot.custom_minimum_size = Vector2(8, 8)
-	bodycam_rec_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	bodycam_rec_dot.color = Color(0.88, 0.14, 0.12, 0.95)
-	bodycam_rec_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(bodycam_rec_dot)
-
-	var rec_lbl := HI.label("REC", 12, Color(0.92, 0.88, 0.82, 0.92))
-	rec_lbl.add_theme_constant_override("outline_size", 3)
-	rec_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	row.add_child(rec_lbl)
-
-	bodycam_time_lbl = HI.label("2026-11-12 23:41:00 // AXON BODY-3", 11, Color(0.84, 0.84, 0.80, 0.84))
-	bodycam_time_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	bodycam_time_lbl.add_theme_constant_override("outline_size", 3)
-	bodycam_time_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	row.add_child(bodycam_time_lbl)
-
-	var bat_row := HBoxContainer.new()
-	bat_row.alignment = BoxContainer.ALIGNMENT_END
-	bat_row.add_theme_constant_override("separation", 5)
-	bat_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stamp.add_child(bat_row)
-
-	var cam_id := HI.label("CAM-07 // BAT", 10, Color(0.70, 0.70, 0.66, 0.72))
-	cam_id.add_theme_constant_override("outline_size", 3)
-	cam_id.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	bat_row.add_child(cam_id)
-
-	var bat_bg := ColorRect.new()
-	bat_bg.custom_minimum_size = Vector2(36, 5)
-	bat_bg.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	bat_bg.color = Color(0.14, 0.14, 0.14, 0.85)
-	bat_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bat_row.add_child(bat_bg)
-
-	bodycam_bat_fill = ColorRect.new()
-	bodycam_bat_fill.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	bodycam_bat_fill.anchor_right = 1.0
-	bodycam_bat_fill.color = Color(0.72, 0.78, 0.64, 0.9)
-	bodycam_bat_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bat_bg.add_child(bodycam_bat_fill)
-
-
 func _build_top_right(root: Control) -> void:
 	hostiles_panel = PanelContainer.new()
 	hostiles_panel.anchor_left = 1.0
 	hostiles_panel.anchor_right = 1.0
 	hostiles_panel.offset_left = -150
 	hostiles_panel.offset_right = -20
-	hostiles_panel.offset_top = 54
-	hostiles_panel.offset_bottom = 94
+	hostiles_panel.offset_top = 18
+	hostiles_panel.offset_bottom = 58
 	hostiles_panel.add_theme_stylebox_override("panel", _panel(HI.BG, HI.RED.darkened(0.2), 2, 1, 10))
 	root.add_child(hostiles_panel)
 	var h := HBoxContainer.new()
@@ -465,13 +397,62 @@ func _build_top_right(root: Control) -> void:
 	hostiles_boss.visible = false
 	h.add_child(hostiles_boss)
 
+	od_panel = PanelContainer.new()
+	od_panel.anchor_left = 1.0
+	od_panel.anchor_right = 1.0
+	od_panel.offset_left = -318
+	od_panel.offset_right = -20
+	od_panel.offset_top = 66
+	od_panel.offset_bottom = 152
+	od_panel.add_theme_stylebox_override("panel", _panel(HI.BG, HI.AMBER.darkened(0.15), 2, 1, 10))
+	od_panel.visible = GameState.is_overdrive()
+	root.add_child(od_panel)
+	var od_v := VBoxContainer.new()
+	od_v.add_theme_constant_override("separation", 4)
+	od_panel.add_child(od_v)
+	var od_top := HBoxContainer.new()
+	od_top.add_theme_constant_override("separation", 6)
+	od_v.add_child(od_top)
+	od_top.add_child(HI.icon("star", 16, HI.AMBER))
+	od_rank_lbl = HI.label("OVERDRIVE READY", 15, HI.AMBER)
+	od_rank_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	od_top.add_child(od_rank_lbl)
+	od_mult_lbl = HI.label("x1.0 PTS", 12, HI.GREEN)
+	od_top.add_child(od_mult_lbl)
+	od_combo_lbl = HI.label("0x", 14, HI.CYAN)
+	od_top.add_child(od_combo_lbl)
+	od_bar = ProgressBar.new()
+	od_bar.custom_minimum_size = Vector2(0, 7)
+	od_bar.max_value = 1.0
+	od_bar.show_percentage = false
+	od_bar.add_theme_stylebox_override("background", _bar(Color(0.14, 0.14, 0.18), 2))
+	od_bar.add_theme_stylebox_override("fill", _bar(HI.AMBER, 2))
+	od_v.add_child(od_bar)
+	od_mut_lbl = HI.label("MUTATORS: —", 11, HI.TEXT)
+	od_mut_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	od_mut_lbl.custom_minimum_size = Vector2(274, 0)
+	od_v.add_child(od_mut_lbl)
+	od_blitz_box = VBoxContainer.new()
+	od_blitz_box.add_theme_constant_override("separation", 3)
+	od_blitz_box.visible = false
+	od_v.add_child(od_blitz_box)
+	od_blitz_lbl = HI.label("BLITZ POD  0%  •  28s", 11, Color(1.0, 0.88, 0.28))
+	od_blitz_box.add_child(od_blitz_lbl)
+	od_blitz_bar = ProgressBar.new()
+	od_blitz_bar.custom_minimum_size = Vector2(0, 5)
+	od_blitz_bar.max_value = 1.0
+	od_blitz_bar.show_percentage = false
+	od_blitz_bar.add_theme_stylebox_override("background", _bar(Color(0.12, 0.13, 0.16), 2))
+	od_blitz_bar.add_theme_stylebox_override("fill", _bar(Color(0.35, 1.0, 0.78), 2))
+	od_blitz_box.add_child(od_blitz_bar)
+
 	powerups_box = VBoxContainer.new()
 	powerups_box.anchor_left = 1.0
 	powerups_box.anchor_right = 1.0
 	powerups_box.offset_left = -190
 	powerups_box.offset_right = -20
-	powerups_box.offset_top = 102
-	powerups_box.offset_bottom = 234
+	powerups_box.offset_top = 166 if GameState.is_overdrive() else 66
+	powerups_box.offset_bottom = 298 if GameState.is_overdrive() else 198
 	powerups_box.add_theme_constant_override("separation", 6)
 	powerups_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(powerups_box)
@@ -870,9 +851,19 @@ func _build_bottom_right(root: Control) -> void:
 	var gch := HBoxContainer.new()
 	gch.add_theme_constant_override("separation", 5)
 	gr.add_child(gch)
-	gch.add_child(HI.icon("grenade", 15, HI.GREEN))
-	grenade_lbl = HI.label("3", 14, HI.GREEN)
+	gch.add_child(HI.keycap("G", 10))
+	lethal_icon = HI.icon("grenade", 15, HI.GREEN)
+	gch.add_child(lethal_icon)
+	grenade_lbl = HI.label("2", 14, HI.GREEN)
 	gch.add_child(grenade_lbl)
+	var tch := HBoxContainer.new()
+	tch.add_theme_constant_override("separation", 5)
+	gr.add_child(tch)
+	tch.add_child(HI.keycap("4", 10))
+	tactical_icon = HI.icon("bolt", 15, HI.CYAN)
+	tch.add_child(tactical_icon)
+	tactical_lbl = HI.label("2", 14, HI.CYAN)
+	tch.add_child(tactical_lbl)
 	loadout_box = HBoxContainer.new()
 	loadout_box.add_theme_constant_override("separation", 8)
 	loadout_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -893,10 +884,10 @@ func _build_modal() -> void:
 	m_card.anchor_right = 0.5
 	m_card.anchor_top = 0.5
 	m_card.anchor_bottom = 0.5
-	m_card.offset_left = -300
-	m_card.offset_right = 300
-	m_card.offset_top = -250
-	m_card.offset_bottom = 250
+	m_card.offset_left = -330
+	m_card.offset_right = 330
+	m_card.offset_top = -280
+	m_card.offset_bottom = 280
 	m_card.add_theme_stylebox_override("panel", _panel(HI.BG_SOLID, HI.RED, 8, 1, 22))
 	modal_overlay.add_child(m_card)
 	var mv := VBoxContainer.new()
@@ -919,8 +910,12 @@ func _build_modal() -> void:
 	modal_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	modal_stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	mv.add_child(modal_stats)
+	pause_class_box = HBoxContainer.new()
+	pause_class_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	pause_class_box.add_theme_constant_override("separation", 6)
+	mv.add_child(pause_class_box)
 	var opt_scroll := ScrollContainer.new()
-	opt_scroll.custom_minimum_size = Vector2(560, 260)
+	opt_scroll.custom_minimum_size = Vector2(610, 300)
 	opt_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	opt_scroll.theme = HI.theme()
 	mv.add_child(opt_scroll)
@@ -931,13 +926,15 @@ func _build_modal() -> void:
 	resume_btn = _icon_button("play", "RESUME COMBAT")
 	resume_btn.pressed.connect(_toggle_pause)
 	mv.add_child(resume_btn)
-	var restart_btn := _icon_button("restart", "BACK TO LOBBY (WHOLE SQUAD)" if Net.is_online() else "RESTART OUTBREAK")
+	var restart_btn := _icon_button("restart", "BACK TO LOBBY (WHOLE SQUAD)" if Net.is_online() else ("RESTART MATCH" if GameState.is_pvp() else "RESTART OUTBREAK"))
 	restart_btn.visible = not Net.is_client()
 	restart_btn.pressed.connect(func():
 		if Net.is_online():
 			Net.return_to_lobby()
 			return
 		get_tree().paused = false
+		if GameState.is_pvp():
+			GameState.resolve_pvp_map()
 		GameState.reset_run()
 		get_tree().change_scene_to_file("res://scenes/game.tscn"))
 	mv.add_child(restart_btn)
@@ -1000,6 +997,9 @@ var flash_lbl: Label
 func _update_flash_label() -> void:
 	if flash_lbl == null:
 		return
+	if GameState.is_overdrive() or GameState.is_pvp():
+		flash_lbl.visible = false
+		return
 	var cells := int(ceil(player.flash_battery * 10.0))
 	flash_lbl.text = "FLASHLIGHT %s  %s%s  %s" % [GameState.key_label("flashlight"), "▮".repeat(cells), "▯".repeat(10 - cells), "ON" if player.flashlight_on else "OFF"]
 	var col := Color(1.0, 0.95, 0.8) if player.flashlight_on else Color(0.6, 0.62, 0.68)
@@ -1056,6 +1056,9 @@ func _score_icon_cell(icon_name: String, col: Color) -> void:
 func _update_scoreboard(delta: float) -> void:
 	if score_panel == null:
 		return
+	if GameState.is_pvp():
+		score_panel.visible = false
+		return
 	var want := Input.is_action_pressed("scoreboard") and not modal_overlay.visible
 	if want != score_panel.visible:
 		score_panel.visible = want
@@ -1067,8 +1070,8 @@ func _update_scoreboard(delta: float) -> void:
 		return
 	_score_t = 0.3
 	var secs := int(GameState.run_time)
-	score_title.text = "ROUND %d   •   %s   •   %s   •   %02d:%02d" % [GameState.current_round, GameState.DIFFICULTY_NAMES[GameState.difficulty],
-		"CASUAL" if GameState.game_mode == "casual" else "INFINITE", secs / 60, secs % 60]
+	score_title.text = "ROUND %d   •   %s   •   %s   •   %02d:%02d" % [GameState.current_round, GameState.active_diff_name(),
+		GameState.mode_label(), secs / 60, secs % 60]
 	for c in score_grid.get_children():
 		c.queue_free()
 	var head := Color(0.6, 0.63, 0.7)
@@ -1277,6 +1280,8 @@ func _connect_signals() -> void:
 	player.hp_changed.connect(_on_hp_changed)
 	player.ammo_changed.connect(_on_ammo_changed)
 	player.hitmarker_triggered.connect(_on_hitmarker)
+	if player.has_signal("shield_hitmarker_triggered"):
+		player.shield_hitmarker_triggered.connect(_on_shield_hitmarker)
 	player.kill_streak.connect(_on_kill_streak)
 	player.status_banner_requested.connect(_show_banner)
 	player.interact_prompt_changed.connect(_set_interact)
@@ -1287,13 +1292,14 @@ func _connect_signals() -> void:
 	augment_menu = AugmentMenuScript.new()
 	add_child(augment_menu)
 	GameState.points_changed.connect(_on_points_changed)
-	wave_mgr.round_started.connect(_on_round_started)
-	wave_mgr.wave_status_changed.connect(_on_wave_status)
-	wave_mgr.boss_spawned.connect(_on_boss_spawned)
-	wave_mgr.boss_updated.connect(_update_boss_bar)
-	wave_mgr.boss_defeated.connect(_on_boss_defeated)
-	wave_mgr.exfil_won.connect(_on_exfil_won)
-	wave_mgr.run_won.connect(_on_run_won)
+	if wave_mgr:
+		wave_mgr.round_started.connect(_on_round_started)
+		wave_mgr.wave_status_changed.connect(_on_wave_status)
+		wave_mgr.boss_spawned.connect(_on_boss_spawned)
+		wave_mgr.boss_updated.connect(_update_boss_bar)
+		wave_mgr.boss_defeated.connect(_on_boss_defeated)
+		wave_mgr.exfil_won.connect(_on_exfil_won)
+		wave_mgr.run_won.connect(_on_run_won)
 
 
 func _on_wave_status(txt: String) -> void:
@@ -1320,6 +1326,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("pause") and not player.is_dead and not player.extracted:
 		_toggle_pause()
+	elif event.is_action_pressed("ready_round") and not is_paused and not player.is_dead and not player.extracted and wave_mgr and wave_mgr.in_intermission:
+		wave_mgr.skip_intermission()
 
 
 func open_augment_menu() -> void:
@@ -1366,33 +1374,48 @@ func _toggle_pause() -> void:
 		modal_tiles.add_child(_modal_tile("flag", str(GameState.current_round), HI.TEXT))
 		modal_tiles.add_child(_modal_tile("skull", str(GameState.total_kills), HI.RED))
 		modal_tiles.add_child(_modal_tile("crown", str(GameState.bosses_slain), HI.PURPLE))
-		modal_stats.text = ("CASUAL" if GameState.game_mode == "casual" else "INFINITE") + "  •  " + GameState.DIFFICULTY_NAMES[GameState.difficulty]
+		modal_stats.text = GameState.mode_label() + "  •  " + GameState.active_diff_name()
+		_refresh_pause_classes()
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _refresh_pause_classes() -> void:
+	if pause_class_box == null:
+		return
+	for c in pause_class_box.get_children():
+		c.queue_free()
+	var can_swap := is_instance_valid(player) and not player.is_dead and not (GameState.is_pvp() and GameState.pvp_mode == "gungame")
+	pause_class_box.visible = can_swap
+	if not can_swap:
+		return
+	for i in range(WeaponCatalog.DEFAULT_LOADOUTS.size()):
+		var lset: Dictionary = GameState.get_loadout(i)
+		var is_cur := i == GameState.active_loadout_index
+		var b := Button.new()
+		var p_name := String(GameState.WEAPONS.get(String(lset.get("primary", "")), {}).get("name", "")).split(" ")[0]
+		b.text = "SET %d · %s" % [i + 1, p_name]
+		b.custom_minimum_size = Vector2(102, 30)
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_size_override("font_size", 11)
+		var acc := HI.CYAN if is_cur else HI.DIM
+		b.add_theme_stylebox_override("normal", HI.panel(Color(0.10, 0.16, 0.24, 0.95) if is_cur else Color(0.06, 0.08, 0.11, 0.85), acc, 5, 1, 6))
+		b.add_theme_color_override("font_color", Color.WHITE if is_cur else HI.TEXT)
+		var idx := i
+		b.pressed.connect(func():
+			GameState.set_active_loadout(idx)
+			if is_instance_valid(player) and player.has_method("apply_custom_loadout"):
+				player.apply_custom_loadout(idx)
+			_toggle_pause()
+			_show_banner("LOADOUT DEPLOYED: %s" % String(lset.get("name", "")), HI.CYAN)
+		)
+		pause_class_box.add_child(b)
 
 
 # ---------------------------------------------------------------------------
 # Per-frame
 # ---------------------------------------------------------------------------
 func _process(delta: float) -> void:
-	_bodycam_clock += delta
-	if bodycam_osd:
-		bodycam_osd.visible = GameState.bodycam_mode and not is_paused and not modal_overlay.visible
-		if bodycam_osd.visible:
-			if bodycam_rec_dot:
-				bodycam_rec_dot.modulate.a = 1.0 if fmod(_bodycam_clock, 1.2) < 0.72 else 0.15
-			var cur_sec := int(_bodycam_clock)
-			if cur_sec != _bodycam_last_sec and bodycam_time_lbl:
-				_bodycam_last_sec = cur_sec
-				var tot := 23 * 3600 + 41 * 60 + cur_sec
-				var hh := (tot / 3600) % 24
-				var mm := (tot / 60) % 60
-				var ss := tot % 60
-				bodycam_time_lbl.text = "2026-11-12 %02d:%02d:%02d // AXON BODY-3" % [hh, mm, ss]
-			if bodycam_bat_fill and is_instance_valid(player):
-				var bat := clampf(float(player.get("flash_battery")) if player.get("flash_battery") != null else 1.0, 0.0, 1.0)
-				bodycam_bat_fill.anchor_right = bat
-				bodycam_bat_fill.color = Color(0.84, 0.22, 0.16, 0.95) if bat < 0.22 else Color(0.72, 0.78, 0.64, 0.9)
 	if fps_lbl:
 		fps_lbl.get_parent().visible = GameState.show_fps
 		if GameState.show_fps:
@@ -1401,6 +1424,23 @@ func _process(delta: float) -> void:
 	if hitmarker_timer > 0.0:
 		hitmarker_timer -= delta
 		hit_canvas.queue_redraw()
+	if is_instance_valid(player):
+		if player.is_reloading or _was_reloading:
+			hit_canvas.queue_redraw()
+			_was_reloading = player.is_reloading
+		if is_instance_valid(reload_icon):
+			if player.is_reloading:
+				reload_icon.pivot_offset = Vector2(9, 9)
+				reload_icon.rotation += delta * 6.5
+			else:
+				reload_icon.rotation = 0.0
+	if wave_mgr:
+		if wave_mgr.in_intermission:
+			var sec_left := maxi(1, ceili(wave_mgr.intermission_timer))
+			hostiles_lbl.text = "%ds" % sec_left
+			round_sub_lbl.text = "NEXT IN %ds • [%s] READY" % [sec_left, GameState.key_label("ready_round")]
+		elif round_sub_lbl.text.begins_with("NEXT IN"):
+			round_sub_lbl.text = "ROUND %d" % GameState.current_round
 	if dmg_indicators.size() > 0:
 		for ind in dmg_indicators:
 			ind["life"] -= delta
@@ -1417,8 +1457,7 @@ func _process(delta: float) -> void:
 	if not is_instance_valid(player):
 		return
 	var hp_ratio := clampf(player.hp / maxf(1.0, player.max_hp), 0.0, 1.0)
-	var p_stress := float(player.get("stress")) if player.get("stress") != null else 0.0
-	var target_blood := clampf(maxf((0.82 - hp_ratio) * 1.25, p_stress * 0.34 * (0.65 + 0.35 * sin(_bodycam_clock * 5.2))), 0.0, 0.92)
+	var target_blood := clampf((0.78 - hp_ratio) * 1.15, 0.0, 0.88)
 	blood_overlay.modulate.a = lerp(blood_overlay.modulate.a, target_blood, 8.0 * delta)
 	var target_monster := 0.72 if player.is_monster_form else 0.0
 	monster_overlay.modulate.a = lerp(monster_overlay.modulate.a, target_monster, 8.0 * delta)
@@ -1433,8 +1472,54 @@ func _process(delta: float) -> void:
 	_update_objectives()
 	_update_scoreboard(delta)
 	if minimap:
-		minimap.visible = GameState.show_minimap and not player.is_dead and not modal_overlay.visible and GameState.horror() < 0.92
+		minimap.visible = (GameState.show_minimap or GameState.is_overdrive() or GameState.is_pvp()) and not player.is_dead and not modal_overlay.visible and GameState.horror() < 0.92
 	_update_flash_label()
+	if od_panel != null:
+		var show_od := GameState.is_overdrive() and not player.is_dead and not modal_overlay.visible
+		od_panel.visible = show_od
+		if show_od:
+			var r_idx: int = player.od_rank_index() if player.has_method("od_rank_index") else 0
+			const RANK_TITLES := ["OVERDRIVE READY", "RANK C // KINETIC", "RANK B // SAVAGE", "RANK A // BRUTAL", "RANK S // UNSTOPPABLE", "OVERDRIVE UNLEASHED!"]
+			var rank_cols: Array[Color] = [Color(0.62, 0.72, 0.86), HI.CYAN, HI.GREEN, HI.AMBER, Color(1.0, 0.44, 0.28), Color(1.0, 0.88, 0.24)]
+			var r_col: Color = rank_cols[clampi(r_idx, 0, rank_cols.size() - 1)]
+			od_rank_lbl.text = RANK_TITLES[clampi(r_idx, 0, RANK_TITLES.size() - 1)]
+			od_rank_lbl.add_theme_color_override("font_color", r_col)
+			od_panel.add_theme_stylebox_override("panel", _panel(HI.BG, r_col.darkened(0.15), 2, 1, 10))
+			od_bar.add_theme_stylebox_override("fill", _bar(r_col, 2))
+			var pts_m: float = 1.0 + 0.10 * float(r_idx) + 0.25 * float(player.od_mut_stacks("magnet_core") if player.has_method("od_mut_stacks") else 0)
+			if is_instance_valid(od_mult_lbl):
+				od_mult_lbl.text = "x%.2f PTS" % pts_m
+			od_combo_lbl.text = "%dx" % int(player.od_combo) if "od_combo" in player else ""
+			if "od_overdrive_t" in player and float(player.od_overdrive_t) > 0.0:
+				od_bar.value = clampf(float(player.od_overdrive_t) / 10.0, 0.0, 1.0)
+			elif "od_combo" in player and int(player.od_combo) > 0:
+				od_bar.value = clampf(float(player.od_combo_t) / maxf(0.1, float(player.od_combo_max_t)), 0.0, 1.0)
+			else:
+				od_bar.value = 0.0
+			var od_node := get_tree().get_first_node_in_group("overdrive")
+			var mut_str: String = od_node.mutator_short_label() if od_node and od_node.has_method("mutator_short_label") else "NONE"
+			var mut_cnt := 0
+			if "od_mutations" in player:
+				for k in player.od_mutations:
+					mut_cnt += int(player.od_mutations[k])
+			od_mut_lbl.text = "MUTATORS: %s%s" % [mut_str, ("  •  PERKS x%d" % mut_cnt) if mut_cnt > 0 else ""]
+			var bz := get_tree().get_first_node_in_group("blitz_zones")
+			if is_instance_valid(od_blitz_box):
+				if bz != null and is_instance_valid(bz):
+					od_blitz_box.visible = true
+					var prog: float = float(bz.get("progress"))
+					var tleft: float = float(bz.get("time_left"))
+					var inside_n: int = int(bz.get("players_inside"))
+					od_blitz_bar.value = clampf(prog, 0.0, 1.0)
+					od_blitz_lbl.text = "BLITZ POD %d%% (%s)  •  %.0fs" % [clampi(roundi(prog * 100.0), 0, 100), "CHARGING" if inside_n > 0 else "HOLD RING", tleft]
+				else:
+					od_blitz_box.visible = false
+			if is_instance_valid(powerups_box):
+				powerups_box.offset_top = od_panel.position.y + od_panel.size.y + 8.0
+				powerups_box.offset_bottom = powerups_box.offset_top + 132.0
+		elif is_instance_valid(powerups_box):
+			powerups_box.offset_top = 66.0
+			powerups_box.offset_bottom = 198.0
 	if player.is_downed:
 		if player.self_reviving:
 			downed_bar.value = 1.0 - player.downed_timer / PlayerController.DOWNED_TIME
@@ -1462,19 +1547,33 @@ func _update_crosshair() -> void:
 	var scoped := player.is_scoped()
 	if scope_canvas.visible != scoped:
 		scope_canvas.visible = scoped
+	if scoped:
 		scope_canvas.queue_redraw()
 	stamina_bar.value = player.stamina
-	stamina_bar.modulate.a = 0.35 if player.stamina >= 0.999 else 1.0
-	var hide_ch := player.is_dead or player.is_monster_form or player.is_sprinting or player.ads_t > 0.6
+	stamina_bar.modulate = Color(0.35, 0.95, 1.0, 1.0) if player.is_tac_sprinting else Color(1.0, 1.0, 1.0, 0.35 if player.stamina >= 0.999 else 1.0)
+	var ads_alpha := 1.0 - smoothstep(0.35, 0.82, player.ads_t)
+	var hide_ch := player.is_dead or player.is_monster_form or player.is_sprinting or ads_alpha <= 0.02
+	var allow_ch: bool = GameState.show_crosshair if GameState.is_horror_mode() else GameState.crosshair_enabled
+	var ch_col: Color = GameState.get_crosshair_color()
 	var spread_rad := deg_to_rad(player.current_spread_deg())
 	var half_fov := deg_to_rad(player.camera.fov * 0.5)
 	var vh := get_viewport().get_visible_rect().size.y
 	var gap := clampf(tan(spread_rad) / tan(half_fov) * vh * 0.5, 4.0, 90.0)
 	var offsets := [Vector2(-gap - 8, -1), Vector2(gap, -1), Vector2(-1, -gap - 8), Vector2(-1, gap)]
 	for i in range(cross_ticks.size()):
-		cross_ticks[i].visible = not hide_ch and GameState.show_crosshair
+		cross_ticks[i].visible = not hide_ch and allow_ch
+		cross_ticks[i].color = ch_col
+		cross_ticks[i].modulate.a = ads_alpha
 		cross_ticks[i].position = offsets[i]
 	grenade_lbl.text = str(player.grenades)
+	if lethal_icon:
+		lethal_icon.texture = HI.tex(HI.equipment_icon(player.equipped_lethal))
+	if tactical_lbl:
+		tactical_lbl.text = str(player.tactical_count)
+	if tactical_icon:
+		tactical_icon.texture = HI.tex(HI.equipment_icon(player.equipped_tactical))
+	if flashbang_rect:
+		flashbang_rect.color.a = clampf(player.flashbang_t / 1.8, 0.0, 0.90)
 	var sig := "%d|" % player.active_slot
 	for i in range(player.weapons_owned.size()):
 		if i != player.active_slot:
@@ -1498,22 +1597,73 @@ func _draw_scope() -> void:
 	var r := sz.y * 0.46
 	var outer := c.length() + 4.0
 	scope_canvas.draw_arc(c, (r + outer) * 0.5, 0, TAU, 128, Color.BLACK, outer - r + 2.0)
-	scope_canvas.draw_line(Vector2(c.x - r, c.y), Vector2(c.x + r, c.y), Color(0, 0, 0, 0.85), 2.0)
-	scope_canvas.draw_line(Vector2(c.x, c.y - r), Vector2(c.x, c.y + r), Color(0, 0, 0, 0.85), 2.0)
-	scope_canvas.draw_circle(c, 3.0, Color(1.0, 0.2, 0.15))
+	scope_canvas.draw_arc(c, r, 0, TAU, 128, Color(0.22, 0.26, 0.30, 0.88), 2.5, true)
+	var post_col := Color(0.05, 0.06, 0.07, 0.94)
+	var hair_col := Color(0.08, 0.10, 0.12, 0.90)
+	# Outer thick Duplex posts
+	var post_in := r * 0.42
+	scope_canvas.draw_line(Vector2(c.x - r, c.y), Vector2(c.x - post_in, c.y), post_col, 3.2, true)
+	scope_canvas.draw_line(Vector2(c.x + r, c.y), Vector2(c.x + post_in, c.y), post_col, 3.2, true)
+	scope_canvas.draw_line(Vector2(c.x, c.y - r), Vector2(c.x, c.y - post_in), post_col, 3.2, true)
+	scope_canvas.draw_line(Vector2(c.x, c.y + r), Vector2(c.x, c.y + post_in), post_col, 3.2, true)
+	# Fine inner hairlines leaving a clean center gap around the illuminated dot
+	var gap_c := 8.0
+	scope_canvas.draw_line(Vector2(c.x - post_in, c.y), Vector2(c.x - gap_c, c.y), hair_col, 1.2, true)
+	scope_canvas.draw_line(Vector2(c.x + gap_c, c.y), Vector2(c.x + post_in, c.y), hair_col, 1.2, true)
+	scope_canvas.draw_line(Vector2(c.x, c.y - post_in), Vector2(c.x, c.y - gap_c), hair_col, 1.2, true)
+	scope_canvas.draw_line(Vector2(c.x, c.y + gap_c), Vector2(c.x, c.y + post_in), hair_col, 1.2, true)
+	# Mil-dot stadia ticks along left, right, and lower hairlines
+	var step_px := r * 0.055
+	for step in range(1, 7):
+		var d := float(step) * step_px
+		var tk := 5.0 if step % 2 == 0 else 3.0
+		scope_canvas.draw_line(Vector2(c.x - d, c.y - tk), Vector2(c.x - d, c.y + tk), hair_col, 1.1, true)
+		scope_canvas.draw_line(Vector2(c.x + d, c.y - tk), Vector2(c.x + d, c.y + tk), hair_col, 1.1, true)
+		scope_canvas.draw_line(Vector2(c.x - tk, c.y + d), Vector2(c.x + tk, c.y + d), hair_col, 1.1, true)
+		if step % 2 == 0:
+			scope_canvas.draw_circle(Vector2(c.x - d, c.y), 1.8, post_col)
+			scope_canvas.draw_circle(Vector2(c.x + d, c.y), 1.8, post_col)
+			scope_canvas.draw_circle(Vector2(c.x, c.y + d), 1.8, post_col)
+	# Lower-right BDC rangefinder ladder
+	var rx0 := c.x + r * 0.14
+	var ry0 := c.y + r * 0.18
+	for bi in range(4):
+		var by := ry0 + float(bi) * 14.0
+		var bw := 34.0 - float(bi) * 6.5
+		scope_canvas.draw_line(Vector2(rx0, by), Vector2(rx0 + bw, by), Color(0.18, 0.22, 0.26, 0.72), 1.2, true)
+	# Illuminated center dot
+	scope_canvas.draw_circle(c, 4.5, Color(1.0, 0.2, 0.15, 0.22))
+	scope_canvas.draw_circle(c, 2.4, Color(1.0, 0.18, 0.14, 0.96))
+	# Optic zoom readout & hold-breath indicator
+	if ThemeDB.fallback_font:
+		var fov_val := player.camera.fov if is_instance_valid(player) and player.camera else 22.0
+		var zoom_x := 75.0 / maxf(10.0, fov_val)
+		scope_canvas.draw_string(ThemeDB.fallback_font, c + Vector2(r * 0.46, -r * 0.72), "%.1fX OPTIC" % zoom_x, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.72, 0.92, 0.86, 0.82))
+	if is_instance_valid(player):
+		var bar_pos := Vector2(c.x - 85.0, sz.y - 36.0)
+		var bar_w := 170.0
+		var pct := clampf(player.breath_stamina, 0.0, 1.0)
+		scope_canvas.draw_rect(Rect2(bar_pos, Vector2(bar_w, 6.0)), Color(0.05, 0.07, 0.09, 0.82), true)
+		var bcol := Color(0.26, 0.92, 1.0, 0.95) if player.is_holding_breath else Color(0.95, 0.76, 0.28, 0.82)
+		scope_canvas.draw_rect(Rect2(bar_pos + Vector2(1, 1), Vector2((bar_w - 2.0) * pct, 4.0)), bcol, true)
+		if ThemeDB.fallback_font:
+			var blbl := "[SHIFT] STEADYING" if player.is_holding_breath else "[SHIFT] STEADY AIM"
+			scope_canvas.draw_string(ThemeDB.fallback_font, bar_pos + Vector2(0.0, -5.0), blbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.82, 0.90, 0.96, 0.86))
 
 
 func _update_powerups() -> void:
 	var active: Array = []
 	if GameState.is_powerup_active("insta_kill"):
-		active.append(["insta_kill", ceili(GameState.powerup_timers["insta_kill"])])
-	if GameState.is_powerup_active("double_points"):
-		active.append(["double_points", ceili(GameState.powerup_timers["double_points"])])
+		active.append(["insta_kill", ceili(GameState.powerup_timers["insta_kill"]), "INSTA", HI.RED])
+	if GameState.is_powerup_active("quad_points"):
+		active.append(["quad_points", ceili(GameState.powerup_timers["quad_points"]), "4X", Color(1.0, 0.82, 0.18)])
+	elif GameState.is_powerup_active("double_points"):
+		active.append(["double_points", ceili(GameState.powerup_timers["double_points"]), "2X", HI.GREEN])
 	if GameState.is_powerup_active("fire_sale"):
-		active.append(["fire_sale", ceili(GameState.powerup_timers["fire_sale"])])
+		active.append(["fire_sale", ceili(GameState.powerup_timers["fire_sale"]), "SALE", HI.CYAN])
 	var pl := get_tree().get_first_node_in_group("player")
 	if pl and float(pl.get("adrenaline_timer")) > 0.0:
-		active.append(["adrenaline", ceili(float(pl.get("adrenaline_timer")))])
+		active.append(["adrenaline", ceili(float(pl.get("adrenaline_timer"))), "ADR", HI.AMBER])
 	var sig := ""
 	for a in active:
 		sig += "%s%d," % [a[0], a[1]]
@@ -1523,15 +1673,18 @@ func _update_powerups() -> void:
 			c.queue_free()
 		for a in active:
 			var pc := PanelContainer.new()
-			pc.add_theme_stylebox_override("panel", _panel(HI.BG, HI.EDGE, 4, 1, 6))
+			var col: Color = a[3]
+			pc.add_theme_stylebox_override("panel", _panel(HI.BG, col if a[0] == "quad_points" else HI.EDGE, 4, 1, 6))
 			powerups_box.add_child(pc)
 			var h := HBoxContainer.new()
 			h.add_theme_constant_override("separation", 6)
 			pc.add_child(h)
-			h.add_child(HI.icon(HI.powerup_icon(a[0]), 16, HI.AMBER))
-			h.add_child(HI.label("%ds" % a[1], 14, HI.TEXT))
+			h.add_child(HI.icon(HI.powerup_icon(a[0]), 16, col))
+			var txt := ("4X • %ds" % a[1]) if a[0] == "quad_points" else ("%ds" % a[1])
+			h.add_child(HI.label(txt, 14, col if a[0] == "quad_points" else HI.TEXT))
+	var qp := GameState.is_powerup_active("quad_points")
 	var dp := GameState.is_powerup_active("double_points")
-	points_lbl.add_theme_color_override("font_color", HI.GREEN if dp else HI.AMBER)
+	points_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20) if qp else (HI.GREEN if dp else HI.AMBER))
 
 
 func _update_ammo_hint() -> void:
@@ -1600,6 +1753,12 @@ func _set_interact(txt: String) -> void:
 		icon_name = "chopper"
 	elif up.contains("FURNACE") or up.contains("AUGMENT"):
 		icon_name = "flame"
+	elif up.contains("TURRET"):
+		icon_name = "target"
+	elif up.contains("SHOCK") or up.contains("COIL"):
+		icon_name = "arc"
+	elif up.contains("CLAIM") or up.contains("DRAFT"):
+		icon_name = "star"
 	interact_icon.texture = HI.tex(icon_name)
 	interact_lbl.text = GameState.keyify(rest)
 
@@ -1627,17 +1786,47 @@ func _draw_damage_indicators() -> void:
 
 
 func _draw_hitmarker() -> void:
+	if is_instance_valid(player) and player.is_reloading and not player.is_dead and not player.is_monster_form:
+		var pct := clampf(1.0 - player.reload_timer / maxf(0.05, player.reload_total), 0.0, 1.0)
+		hit_canvas.draw_arc(Vector2.ZERO, 20.0, 0.0, TAU, 32, Color(0.0, 0.0, 0.0, 0.55), 3.0, true)
+		var rcol := HI.PURPLE if player.upgraded.has(player.get_current_weapon_id()) else HI.AMBER
+		hit_canvas.draw_arc(Vector2.ZERO, 20.0, -PI * 0.5, -PI * 0.5 + TAU * pct, 32, rcol, 2.5, true)
 	if hitmarker_timer <= 0.0:
+		return
+	var col := hitmarker_color
+	col.a = clampf(hitmarker_timer / 0.12, 0.0, 1.0)
+	var shadow := Color(0, 0, 0, col.a * 0.6)
+	if hitmarker_shield:
+		var bw := 13.0
+		var bh := 10.0
+		var arm := 6.0
+		for sx in [-1.0, 1.0]:
+			var p0 := Vector2(sx * bw, -bh)
+			var p1 := Vector2(sx * bw, bh)
+			hit_canvas.draw_line(p0, p0 + Vector2(-sx * arm, 0.0), shadow, 4.5, true)
+			hit_canvas.draw_line(p0, p1, shadow, 4.5, true)
+			hit_canvas.draw_line(p1, p1 + Vector2(-sx * arm, 0.0), shadow, 4.5, true)
+			hit_canvas.draw_line(p0, p0 + Vector2(-sx * arm, 0.0), col, 2.5, true)
+			hit_canvas.draw_line(p0, p1, col, 2.5, true)
+			hit_canvas.draw_line(p1, p1 + Vector2(-sx * arm, 0.0), col, 2.5, true)
 		return
 	var inner := 8.0 if hitmarker_big else 7.0
 	var outer := 21.0 if hitmarker_big else 15.0
 	var w := 3.5 if hitmarker_big else 2.5
-	var col := hitmarker_color
-	col.a = clampf(hitmarker_timer / 0.12, 0.0, 1.0)
 	for d in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
 		var dir: Vector2 = d.normalized()
-		hit_canvas.draw_line(dir * inner, dir * outer, Color(0, 0, 0, col.a * 0.6), w + 2.0, true)
+		hit_canvas.draw_line(dir * inner, dir * outer, shadow, w + 2.0, true)
 		hit_canvas.draw_line(dir * inner, dir * outer, col, w, true)
+		if hitmarker_hs:
+			var s_in := outer + 3.0
+			var s_out := outer + 8.0
+			hit_canvas.draw_line(dir * s_in, dir * s_out, shadow, 4.0, true)
+			hit_canvas.draw_line(dir * s_in, dir * s_out, col, 2.2, true)
+	if hitmarker_big:
+		var kcol := Color(1.0, 0.72, 0.22, col.a)
+		for kd in [Vector2(0, -1), Vector2(0, 1), Vector2(-1, 0), Vector2(1, 0)]:
+			hit_canvas.draw_line(kd * 16.0, kd * 24.0, shadow, 3.8, true)
+			hit_canvas.draw_line(kd * 16.0, kd * 24.0, kcol, 2.0, true)
 
 
 # ---------------------------------------------------------------------------
@@ -1725,7 +1914,17 @@ func _on_hp_changed(cur_hp: float, m_hp: float, shield: float) -> void:
 func _on_ammo_changed(w_name: String, mag: int, reserve: int, reloading: bool, pap: bool) -> void:
 	if player.is_monster_form:
 		return
-	weapon_icon.texture = HI.tex(HI.weapon_icon(player.get_weapon_cfg(player.get_current_weapon_id())["class"]))
+	var cur_wid: String = player.get_current_weapon_id()
+	if cur_wid == "knife":
+		weapon_icon.texture = HI.tex("sword")
+		weapon_icon.modulate = HI.AMBER
+		weapon_name_lbl.text = "COMBAT KNIFE"
+		weapon_name_lbl.add_theme_color_override("font_color", HI.AMBER)
+		reload_icon.visible = false
+		ammo_lbl.text = "∞"
+		reserve_lbl.text = "MELEE"
+		return
+	weapon_icon.texture = HI.tex(HI.weapon_icon(player.get_weapon_cfg(cur_wid)["class"]))
 	weapon_icon.modulate = HI.PURPLE if pap else HI.TEXT
 	weapon_name_lbl.text = w_name
 	weapon_name_lbl.add_theme_color_override("font_color", Color(0.95, 0.42, 1.0) if pap else HI.TEXT)
@@ -1804,7 +2003,13 @@ func _update_boss_bar(boss: ZombieEnemy) -> void:
 		return
 	boss_panel.visible = true
 	boss_title_lbl.text = "ROUND %d  %s" % [GameState.current_round, boss.display_name]
-	boss_sub_lbl.text = boss.boss_subtitle
+	var sub_txt := boss.boss_subtitle
+	if wave_mgr and wave_mgr.active_bosses.size() > 1:
+		for other in wave_mgr.active_bosses:
+			if other != boss and is_instance_valid(other) and not other.is_dead:
+				sub_txt += "   •   TWIN: %s (%.0f%%)" % [other.display_name, 100.0 * other.hp / maxf(1.0, other.max_hp)]
+				break
+	boss_sub_lbl.text = sub_txt
 	boss_hp_bar.max_value = boss.max_hp
 	boss_hp_bar.value = boss.hp
 	boss_hp_lbl.text = "%.0f / %.0f" % [boss.hp, boss.max_hp]
@@ -1833,20 +2038,32 @@ func _on_boss_defeated(b_name: String) -> void:
 
 
 func _on_hitmarker(is_hs: bool, is_kill: bool, is_ability: bool) -> void:
-	hitmarker_timer = 0.22 if is_kill else 0.14
+	hitmarker_hs = is_hs
+	hitmarker_shield = false
+	hitmarker_timer = 0.24 if is_kill else (0.18 if is_hs else 0.14)
 	hitmarker_big = is_kill
 	if is_kill or is_hs:
-		hitmarker_color = Color(1.0, 0.18, 0.14)
+		hitmarker_color = Color(1.0, 0.16, 0.14)
 	elif is_ability:
 		hitmarker_color = Color(0.20, 0.98, 0.84)
 	else:
 		hitmarker_color = Color.WHITE
 	hit_canvas.queue_redraw()
-	if is_kill:
-		GameState.play_sfx("kill_confirm", -5.0 if is_hs else -7.0, randf_range(0.95, 1.05))
-	elif _tick_cd <= 0.0:
-		_tick_cd = 0.04
-		GameState.play_sfx("hit_tick", -10.0, randf_range(0.95, 1.08) * (1.2 if is_hs else 1.0))
+	if GameState.hitmarker_sfx:
+		if is_kill:
+			GameState.play_sfx("kill_confirm", -5.0 if is_hs else -7.0, randf_range(0.95, 1.05))
+		elif _tick_cd <= 0.0:
+			_tick_cd = 0.04
+			GameState.play_sfx("hit_tick", -10.0, randf_range(0.95, 1.08) * (1.2 if is_hs else 1.0))
+
+
+func _on_shield_hitmarker() -> void:
+	hitmarker_hs = false
+	hitmarker_big = false
+	hitmarker_shield = true
+	hitmarker_timer = 0.18
+	hitmarker_color = Color(0.38, 0.82, 1.0)
+	hit_canvas.queue_redraw()
 
 
 const STREAK_NAMES := {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUAD KILL", 5: "RAMPAGE"}
@@ -1865,8 +2082,6 @@ func _on_kill_streak(count: int) -> void:
 	tw.tween_property(streak_lbl, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.tween_interval(0.95)
 	tw.tween_property(streak_lbl.get_parent(), "modulate:a", 0.0, 0.45)
-	if count == 3 or count == 5 or count % 5 == 0:
-		GameState.play_sfx("streak_sting", -13.0, 0.96 + 0.03 * float(mini(count, 10)))
 
 
 func _show_banner(txt: String, col: Color) -> void:
@@ -1877,6 +2092,8 @@ func _show_banner(txt: String, col: Color) -> void:
 
 
 func _on_player_died() -> void:
+	if GameState.is_pvp():
+		return
 	if augment_menu:
 		augment_menu.close()
 	var ng := get_tree().get_first_node_in_group("net_game")
@@ -1888,8 +2105,32 @@ func _on_player_died() -> void:
 	ammo_hint_box.visible = false
 	dmg_indicators.clear()
 	await get_tree().create_timer(1.1).timeout
-	var mode_best := GameState.best_round_infinite if GameState.game_mode == "infinite" else GameState.best_round
+	var mode_best := GameState.best_round_overdrive if GameState.is_overdrive() else (GameState.best_round_horror if GameState.is_horror_mode() else (GameState.best_round_infinite if GameState.game_mode == "infinite" else GameState.best_round))
 	var record_line := "NEW BEST ROUND!" if is_record else "BEST: ROUND %d" % mode_best
 	_show_modal("skull", "YOUR SQUAD WAS OVERRUN" if Net.is_online() else "YOU WERE OVERRUN", HI.RED,
 		[GameState.current_round, GameState.total_kills, GameState.headshots, GameState.bosses_slain],
 		"%s\n\n%s" % [record_line, GameState.finish_run("death")])
+
+
+func show_pvp_match_end(win_team: int, reason: String, xp_gain: int, roster: Dictionary, team_scores: Array) -> void:
+	if augment_menu:
+		augment_menu.close()
+	scope_canvas.visible = false
+	_set_interact("")
+	ammo_hint_box.visible = false
+	var my_e: Dictionary = roster.get("peer_%d" % Net.my_id(), {})
+	var my_team: int = int(my_e.get("team", Net.my_team))
+	var won: bool = (my_team == win_team)
+	var title: String = ("VICTORY — %s" if won else "DEFEAT — %s WON") % GameState.pvp_team_name(win_team)
+	var score_line: String = ""
+	for i in range(team_scores.size()):
+		if i > 0:
+			score_line += "   |   "
+		score_line += "%s: %d" % [GameState.pvp_team_code(i), int(team_scores[i])]
+	var k: int = int(my_e.get("kills", 0))
+	var d: int = int(my_e.get("deaths", 0))
+	var a: int = int(my_e.get("assists", 0))
+	var sc: int = int(my_e.get("score", 0))
+	_show_modal("crown" if won else "skull", title, GameState.pvp_team_color(win_team),
+		[k, d, sc, xp_gain],
+		"%s\n\n%s\nYOUR LINE: %d KILLS · %d DEATHS · %d ASSISTS · +%d CAREER XP" % [reason, score_line, k, d, a, xp_gain])
