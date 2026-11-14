@@ -8,6 +8,7 @@ const ACCENT_BLUE := Color(0.45, 0.85, 1.0)
 const MAPS := {
 	"classic": {"name": "NACHT  —  CLASSIC", "desc": "The closed town. Buy doors, board windows, hold the line room by room."},
 	"junction": {"name": "KESSLER JUNCTION  —  CLASSIC", "desc": "A walled truck-stop motel on a dead highway. Open the garage, the diner and the warehouse; get the power on."},
+	"mill": {"name": "HALLOWAY MILL  —  CLASSIC", "desc": "A riverside sawmill gone dark. Open the mill, the kiln and the boarding house; get the hydro power on. (GREYBOX)"},
 	"outbreak": {"name": "THE COUNTY  —  OUTBREAK", "desc": "Open-world survival. Drive between towns, farms and the plant while the dead roam the land."},
 }
 var _map_cards: Dictionary = {}
@@ -342,7 +343,7 @@ func _build_play_page() -> Control:
 	var maprow := HBoxContainer.new()
 	maprow.add_theme_constant_override("separation", 8)
 	v.add_child(maprow)
-	for map_id in ["classic", "junction", "outbreak"]:
+	for map_id in ["classic", "mill", "outbreak"]:
 		var mb := Button.new()
 		mb.text = "%s
 %s" % [MAPS[map_id]["name"], MAPS[map_id]["desc"]]

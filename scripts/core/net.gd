@@ -364,7 +364,7 @@ func _c_start_game(diff: int, rid: int = 0, resume: bool = false, late: bool = f
 	# "casual|outbreak": the run mode, then the host's map (classic / outbreak)
 	var parts := mode.split("|")
 	GameState.game_mode = parts[0] if parts[0] in ["casual", "infinite"] else "casual"
-	GameState.map_mode = parts[1] if parts.size() > 1 and parts[1] in ["classic", "outbreak", "junction"] else "classic"
+	GameState.map_mode = parts[1] if parts.size() > 1 and parts[1] in ["classic", "outbreak", "junction", "mill"] else "classic"
 	in_game = true
 	GameState.reset_run()
 	GameState.run_id = rid

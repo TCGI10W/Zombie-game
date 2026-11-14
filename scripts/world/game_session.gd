@@ -18,6 +18,8 @@ func _ready() -> void:
 	match GameState.map_mode:
 		"outbreak":
 			arena = OpenWorld.new()
+		"mill":
+			arena = MillMap.new()
 		"junction":
 			arena = JunctionMap.new()
 		_:
