@@ -52,22 +52,23 @@ func _ready() -> void:
 	player_spawn = Vector3(0, 0.2, 22)
 	lz_pos = Vector3(37, 0, 24)
 
-	# Brutalist/metal set (art/blender/build_brut_textures.py): 128 px = 2 m -> uv 0.5
-	var W := func(n: String, metal: float = 0.0) -> Material:
-		return MaterialLib.get_world("brut_" + n, 0.5, Color.WHITE, metal, 1.0, 0.0, 0.3)
-	m_conc = W.call("conc_floor")
-	m_dark_conc = W.call("roof")
-	m_brick = W.call("panel_conc")
-	m_plaster = W.call("block")
-	m_siding = W.call("cast_conc")
-	m_metal = W.call("steel_panel", 0.4)
-	m_fence = W.call("rust", 0.2)
-	m_wood = W.call("cladding", 0.3)
-	m_stone = m_conc
-	m_wood_floor = W.call("conc_floor")
-	m_lumber = W.call("primer", 0.2)
-	m_bark = W.call("rust", 0.2)
-	m_corr = W.call("cladding", 0.3)
+	# METRO 9 scan set (scrapshift_style, CC0 ambientCG scans graded to one brightness): one
+	# texture per material, tile size in metres like Metro9Kit.MATS.
+	var W := func(n: String, tile: float, metal: float = 0.0, tint: Color = Color.WHITE) -> Material:
+		return MaterialLib.get_world("ms_" + n, 1.0 / tile, tint, metal, 1.0, 0.0, 0.3)
+	m_conc = W.call("screed", 3.0)
+	m_dark_conc = W.call("corrugated", 1.5, 0.1, Color(0.8, 0.8, 0.8))
+	m_brick = W.call("brick", 1.5)
+	m_plaster = W.call("plaster", 2.0)
+	m_siding = m_brick
+	m_metal = W.call("steel", 1.0, 0.15)
+	m_fence = W.call("rust", 2.0, 0.08)
+	m_wood = W.call("wood", 1.5)
+	m_stone = W.call("concrete", 3.0)
+	m_wood_floor = m_wood
+	m_lumber = m_wood
+	m_bark = W.call("bark", 1.0)
+	m_corr = W.call("corrugated", 1.5, 0.1)
 
 	_build_environment()
 	_ground()
@@ -94,7 +95,7 @@ func _ground() -> void:
 	nav_region.name = "NavRegion"
 	add_child(nav_region)
 	_add_static_box(Vector3(6, -0.25, -2), Vector3(130, 0.5, 110),
-		MaterialLib.get_world("brut_ground", 0.5, Color.WHITE, 0.0, 1.0, 0.0, 0.3))
+		MaterialLib.get_world("ms_decay", 1.0 / 3.0, Color.WHITE, 0.0, 1.0, 0.0, 0.3))
 	var conc := m_conc
 	_add_floor_tile(Vector3(0, 0, 20), Vector2(16, 12), m_wood_floor)
 	_add_floor_tile(Vector3(8, 0, -11), Vector2(32, 18), conc)
@@ -103,7 +104,7 @@ func _ground() -> void:
 	_add_floor_tile(Vector3(-21, 0, -29), Vector2(18, 14), m_wood_floor)
 	_add_floor_tile(Vector3(37, 0, 6), Vector2(10, 12), conc)
 	# river beyond the landing (visual band; zombies come up the bank)
-	_add_floor_tile(Vector3(54, 0.02, -2), Vector2(12, 110), MaterialLib.get_world("brut_water", 0.25, Color.WHITE, 0.0, 0.4, 0.0, 0.0))
+	_add_floor_tile(Vector3(54, 0.02, -2), Vector2(12, 110), MaterialLib.get_world("ms_screed", 0.25, Color(0.18, 0.22, 0.24), 0.0, 0.3, 0.0, 0.0))
 
 
 func _walls() -> void:
