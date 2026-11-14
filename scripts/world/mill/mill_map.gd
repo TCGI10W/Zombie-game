@@ -26,6 +26,9 @@ var roofs: Array[Node3D] = []
 var m_plaster: Material
 var m_siding: Material
 var m_wood_floor: Material
+var m_lumber: Material
+var m_bark: Material
+var m_corr: Material
 
 
 func _ready() -> void:
@@ -49,16 +52,22 @@ func _ready() -> void:
 	player_spawn = Vector3(0, 0.2, 22)
 	lz_pos = Vector3(37, 0, 24)
 
-	m_conc = MaterialLib.get_world("concrete", 0.5, Color(0.8, 0.8, 0.82), 0.0, 1.0, 0.0, 0.5)
-	m_dark_conc = MaterialLib.get_world("concrete", 0.5, Color(0.5, 0.51, 0.55), 0.0, 1.0, 0.0, 0.4)
-	m_brick = MaterialLib.get_world("brick", 0.6, Color(0.95, 0.92, 0.9), 0.0, 1.0, 0.0, 0.5)
-	m_plaster = MaterialLib.get_world("plaster", 0.5, Color(0.95, 0.92, 0.88), 0.0, 1.0, 0.0, 0.4)
-	m_siding = MaterialLib.get_world("siding_white", 0.45, Color(0.92, 0.92, 0.9), 0.0, 1.0, 0.0, 0.4)
-	m_metal = MaterialLib.get_world("rusted_metal", 0.5, Color(0.85, 0.82, 0.8), 0.35, 0.9, 0.0, 0.25)
-	m_fence = MaterialLib.get_world("rusted_metal", 0.5, Color(0.6, 0.56, 0.52), 0.4, 0.9, 0.0, 0.2)
-	m_wood = MaterialLib.get_world("wood_planks", 0.5, Color(0.9, 0.85, 0.78), 0.0, 1.0, 0.0, 0.3)
+	# Halloway Mill texture set (art/blender/build_mill_textures.py): 128 px = 2 m -> uv 0.5
+	var W := func(n: String, metal: float = 0.0) -> Material:
+		return MaterialLib.get_world("mill_" + n, 0.5, Color.WHITE, metal, 1.0, 0.0, 0.3)
+	m_conc = W.call("conc_floor")
+	m_dark_conc = W.call("roof_tar")
+	m_brick = W.call("brick_kiln")
+	m_plaster = W.call("plaster_int")
+	m_siding = W.call("clap_cream")
+	m_metal = W.call("machine", 0.3)
+	m_fence = W.call("creosote")
+	m_wood = W.call("board_red")
 	m_stone = m_conc
-	m_wood_floor = MaterialLib.get_world("wood_planks", 0.5, Color(0.85, 0.8, 0.75), 0.0, 1.0, 0.0, 0.0, true)
+	m_wood_floor = W.call("plank_floor")
+	m_lumber = W.call("lumber")
+	m_bark = W.call("bark")
+	m_corr = W.call("corr_metal", 0.3)
 
 	_build_environment()
 	_ground()
@@ -85,8 +94,8 @@ func _ground() -> void:
 	nav_region.name = "NavRegion"
 	add_child(nav_region)
 	_add_static_box(Vector3(6, -0.25, -2), Vector3(130, 0.5, 110),
-		MaterialLib.get_world("gravel", 0.4, Color(0.75, 0.75, 0.72), 0.0, 1.0, 0.0, 0.0, true))
-	var conc := MaterialLib.get_world("concrete_floor", 0.5, Color(0.6, 0.6, 0.62), 0.0, 1.0, 0.0, 0.0, true)
+		MaterialLib.get_world("mill_yard_dirt", 0.5, Color.WHITE, 0.0, 1.0, 0.0, 0.3))
+	var conc := m_conc
 	_add_floor_tile(Vector3(0, 0, 20), Vector2(16, 12), m_wood_floor)
 	_add_floor_tile(Vector3(8, 0, -11), Vector2(32, 18), conc)
 	_add_floor_tile(Vector3(-20, 0, -1), Vector2(16, 14), m_wood_floor)
@@ -94,7 +103,7 @@ func _ground() -> void:
 	_add_floor_tile(Vector3(-21, 0, -29), Vector2(18, 14), m_wood_floor)
 	_add_floor_tile(Vector3(37, 0, 6), Vector2(10, 12), conc)
 	# river beyond the landing (visual band; zombies come up the bank)
-	_add_floor_tile(Vector3(54, 0.02, -2), Vector2(12, 110), MaterialLib.get_world("concrete", 0.3, Color(0.2, 0.28, 0.35), 0.0, 1.0, 0.0, 0.0, true))
+	_add_floor_tile(Vector3(54, 0.02, -2), Vector2(12, 110), MaterialLib.get_world("mill_river", 0.25, Color.WHITE, 0.0, 0.4, 0.0, 0.0))
 
 
 func _walls() -> void:
@@ -140,15 +149,15 @@ func _walls() -> void:
 	_seg(Vector2(-20, -22), Vector2(-20, -8), [], m_wood, 3.2)
 	_r(Vector3(-22, 3.4, -15), Vector2(4.6, 14.6))
 	# STORE: D3 from the yard, D6 north into walk2
-	_edge("store", Vector2(-28, -8), Vector2(-28, 6), [7.0], [], m_plaster, H)
-	_edge("store", Vector2(-28, 6), Vector2(-12, 6), [8.0], [], m_plaster, H)
+	_edge("store", Vector2(-28, -8), Vector2(-28, 6), [7.0], [], m_siding, H)
+	_edge("store", Vector2(-28, 6), Vector2(-12, 6), [8.0], [], m_siding, H)
 	_edge("store", Vector2(-28, -8), Vector2(-12, -8), [], [6.0, "house", 1750], m_plaster, H)
 	_edge("store", Vector2(-12, -8), Vector2(-12, -2), [3.0], [], m_plaster, H)
 	_edge("yard", Vector2(-12, -2), Vector2(-12, 6), [], [4.0, "store", 1250], m_plaster, H)
 	_r(Vector3(-20, H + 0.2, -1), Vector2(16.6, 14.6))
 	# POWER + LANDING fence
-	_edge("power", Vector2(28, -2), Vector2(44, -2), [8.0], [], m_fence, 3.0)
-	_edge("power", Vector2(44, -2), Vector2(44, 34), [10.0, 26.0], [], m_fence, 3.0)
+	_edge("power", Vector2(28, -2), Vector2(44, -2), [8.0], [], m_corr, 3.0)
+	_edge("power", Vector2(44, -2), Vector2(44, 34), [10.0, 26.0], [], m_corr, 3.0)
 	_seg(Vector2(28, 34), Vector2(44, 34), [], m_fence, 3.0)
 	_seg(Vector2(28, 30), Vector2(28, 34), [], m_fence, 3.0)
 	# power house building inside the fence, open doorway on the west
@@ -164,7 +173,7 @@ func _r(c: Vector3, s: Vector2) -> void:
 
 
 func _block(x: float, z: float, sx: float, sy: float, sz: float, mat: Material = null) -> void:
-	_add_static_box(Vector3(x, sy * 0.5, z), Vector3(sx, sy, sz), mat if mat else m_wood)
+	_add_static_box(Vector3(x, sy * 0.5, z), Vector3(sx, sy, sz), mat if mat else m_lumber)
 
 
 func _lamps(points: Array, col: Color = Color(1.0, 0.9, 0.75)) -> void:
@@ -186,8 +195,8 @@ func _office() -> void:
 
 func _yard() -> void:
 	# two log decks = the training loop anchors
-	_block(4, 5, 10, 1.4, 3)
-	_block(18, 12, 3, 1.4, 10)
+	_block(4, 5, 10, 1.4, 3, m_bark)
+	_block(18, 12, 3, 1.4, 10, m_bark)
 	_block(12, 22, 4, 2.6, 2.4, m_metal)  # log loader
 	_wall_buy("yard", Vector2(8, 14), Vector2(8, 26), 6.0, "weapon", "rifle", "COMMANDO M14A", 1200, 600)
 	_wall_buy("yard", Vector2(28, -2), Vector2(28, 30), 6.0, "ammo_box", "", "AMMO CACHE", 450, 0)
@@ -201,7 +210,7 @@ func _yard() -> void:
 func _mill() -> void:
 	_block(8, -12, 20, 1.0, 2.0, m_metal)  # head-saw carriage track
 	_block(14, -12, 1.0, 3.2, 3.2, m_metal) # head saw
-	_block(-4, -16, 3, 1.2, 6)              # log infeed
+	_block(-4, -16, 3, 1.2, 6, m_bark)              # log infeed
 	_spawn_station("weapon", "shotgun", "TRENCH-12 PUMP", 1500, 750, Color(0.25, 0.88, 1.0), Vector3(23.68, 1.55, -6.0), -90.0)
 	_place(CrateScript, Vector3(0, 0, -6), 0.0)
 	_skull(Vector3(14, 3.9, -12), 0.0)
