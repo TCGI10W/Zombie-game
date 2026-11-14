@@ -40,19 +40,16 @@ def streaks(seed, strength=1.0):
     return band(fbm(seed, 16, 1, 3) * 0.7 + fbm(seed + 1, 3) * 0.5, 0.6, 0.85) * strength
 
 
-def board_conc():
-    """Board-formed concrete: 0.125 m plank imprints, form-tie holes on a 0.5 m grid. Main exterior walls."""
-    row = YY // 8
-    grain = fbm(201, 24, 2, 3)
-    tone = np.array([0.0, 0.05, -0.04, 0.02, -0.06, 0.04, -0.02, 0.06, -0.05, 0.03, 0.01, -0.03, 0.05, -0.06, 0.02, -0.01])[row]
-    col = lerp(fill(P["conc"]), fill(P["conc_lt"]), grain * 0.6) * (1 + tone)[..., None]
-    seam = YY % 8 == 0
-    tie = ((XX % 32 - 16) ** 2 + (YY % 32 - 12) ** 2) <= 2
-    col = lerp(col, fill(P["conc_stain"]), streaks(202, 0.6))
-    col[seam] = P["conc_dk"]
-    col[tie] = P["steel_dk"]
-    h = 0.55 + 0.08 * grain - seam * 0.2 - tie * 0.4
-    tex("brut_board_conc", col, h)
+def cast_conc():
+    """Plain cast-in-place concrete: one pour line per 2 m, fine aggregate, soft run-off stains. Main exterior walls."""
+    m = fbm(201, 5)
+    agg = white(203)
+    col = lerp(fill(P["conc_lt"]), fill(P["conc"]), m * 0.7 + blur(agg, 1) * 0.25)
+    col = lerp(col, fill(P["conc_dk"]), (agg > 0.97) * 0.6)
+    col = lerp(col, fill(P["conc_stain"]), streaks(202, 0.45))
+    pour = YY % 128 == 0
+    col[pour] = P["conc_dk"]
+    tex("brut_cast_conc", col, 0.55 + 0.06 * m - pour * 0.25, relief=1.0)
 
 
 def panel_conc():
@@ -209,7 +206,7 @@ def water():
     tex("brut_water", col, r * 0.3, relief=0.6)
 
 
-BUILD = [board_conc, panel_conc, conc_floor, block, tread, grate, steel_panel, primer, cladding,
+BUILD = [cast_conc, panel_conc, conc_floor, block, tread, grate, steel_panel, primer, cladding,
          hazard, roof, ground, rust, water]
 
 

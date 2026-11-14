@@ -59,7 +59,7 @@ func _ready() -> void:
 	m_dark_conc = W.call("roof")
 	m_brick = W.call("panel_conc")
 	m_plaster = W.call("block")
-	m_siding = W.call("board_conc")
+	m_siding = W.call("cast_conc")
 	m_metal = W.call("steel_panel", 0.4)
 	m_fence = W.call("rust", 0.2)
 	m_wood = W.call("cladding", 0.3)
