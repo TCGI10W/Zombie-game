@@ -52,22 +52,22 @@ func _ready() -> void:
 	player_spawn = Vector3(0, 0.2, 22)
 	lz_pos = Vector3(37, 0, 24)
 
-	# Halloway Mill texture set (art/blender/build_mill_textures.py): 128 px = 2 m -> uv 0.5
+	# Brutalist/metal set (art/blender/build_brut_textures.py): 128 px = 2 m -> uv 0.5
 	var W := func(n: String, metal: float = 0.0) -> Material:
-		return MaterialLib.get_world("mill_" + n, 0.5, Color.WHITE, metal, 1.0, 0.0, 0.3)
+		return MaterialLib.get_world("brut_" + n, 0.5, Color.WHITE, metal, 1.0, 0.0, 0.3)
 	m_conc = W.call("conc_floor")
-	m_dark_conc = W.call("roof_tar")
-	m_brick = W.call("brick_kiln")
-	m_plaster = W.call("plaster_int")
-	m_siding = W.call("clap_cream")
-	m_metal = W.call("machine", 0.3)
-	m_fence = W.call("creosote")
-	m_wood = W.call("board_red")
+	m_dark_conc = W.call("roof")
+	m_brick = W.call("panel_conc")
+	m_plaster = W.call("block")
+	m_siding = W.call("board_conc")
+	m_metal = W.call("steel_panel", 0.4)
+	m_fence = W.call("rust", 0.2)
+	m_wood = W.call("cladding", 0.3)
 	m_stone = m_conc
-	m_wood_floor = W.call("plank_floor")
-	m_lumber = W.call("lumber")
-	m_bark = W.call("bark")
-	m_corr = W.call("corr_metal", 0.3)
+	m_wood_floor = W.call("conc_floor")
+	m_lumber = W.call("primer", 0.2)
+	m_bark = W.call("rust", 0.2)
+	m_corr = W.call("cladding", 0.3)
 
 	_build_environment()
 	_ground()
@@ -94,7 +94,7 @@ func _ground() -> void:
 	nav_region.name = "NavRegion"
 	add_child(nav_region)
 	_add_static_box(Vector3(6, -0.25, -2), Vector3(130, 0.5, 110),
-		MaterialLib.get_world("mill_yard_dirt", 0.5, Color.WHITE, 0.0, 1.0, 0.0, 0.3))
+		MaterialLib.get_world("brut_ground", 0.5, Color.WHITE, 0.0, 1.0, 0.0, 0.3))
 	var conc := m_conc
 	_add_floor_tile(Vector3(0, 0, 20), Vector2(16, 12), m_wood_floor)
 	_add_floor_tile(Vector3(8, 0, -11), Vector2(32, 18), conc)
@@ -103,7 +103,7 @@ func _ground() -> void:
 	_add_floor_tile(Vector3(-21, 0, -29), Vector2(18, 14), m_wood_floor)
 	_add_floor_tile(Vector3(37, 0, 6), Vector2(10, 12), conc)
 	# river beyond the landing (visual band; zombies come up the bank)
-	_add_floor_tile(Vector3(54, 0.02, -2), Vector2(12, 110), MaterialLib.get_world("mill_river", 0.25, Color.WHITE, 0.0, 0.4, 0.0, 0.0))
+	_add_floor_tile(Vector3(54, 0.02, -2), Vector2(12, 110), MaterialLib.get_world("brut_water", 0.25, Color.WHITE, 0.0, 0.4, 0.0, 0.0))
 
 
 func _walls() -> void:
