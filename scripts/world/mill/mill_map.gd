@@ -23,6 +23,7 @@ var outdoor_zones := ["yard", "power"]
 var fire_spots := [[Vector3(2, 0.5, 8), 0.5], [Vector3(20, 0.6, 26), 0.6], [Vector3(36, 0.6, 30), 0.7]]
 
 var roofs: Array[Node3D] = []
+var _wall_log: Array = []  # [a, b, gaps, mat, h] for every wall, for the kit dressing
 var m_plaster: Material
 var m_siding: Material
 var m_wood_floor: Material
@@ -82,6 +83,7 @@ func _ready() -> void:
 	_power()
 	_labels()
 	_window_lights()
+	_dress_kit()
 	_fill_lights([Vector3(0, 3.2, 20), Vector3(0, 3.4, -11), Vector3(16, 3.4, -11), Vector3(-20, 3.2, -1),
 		Vector3(2, 3.4, -28), Vector3(16, 3.4, -28), Vector3(-21, 3.2, -29), Vector3(37, 3.2, 6)],
 		Color(0.75, 0.8, 0.95), 0.55, 12.0)
@@ -167,6 +169,94 @@ func _walls() -> void:
 	_seg(Vector2(32, 12), Vector2(42, 12), [], m_brick, H)
 	_seg(Vector2(32, 0), Vector2(32, 12), [[6.0, DOOR_W, DOOR_H]], m_brick, H)
 	_r(Vector3(37, H + 0.2, 6), Vector2(10.6, 12.6))
+
+
+
+# ---------------------------------------------------------------- kit dressing
+# Building footprints [x0, z0, x1, z1]: a wall's outside is the side not inside one.
+const BUILDINGS := [[-8, 14, 8, 26], [-8, -20, 24, -2], [-28, -8, -12, 6], [-6, -36, 24, -20],
+	[-30, -36, -12, -22], [32, 0, 42, 12]]
+
+
+func _seg(a: Vector2, b: Vector2, gaps: Array, mat: Material, h: float = WALL_H) -> void:
+	_wall_log.append([a, b, gaps, mat, h])
+	super(a, b, gaps, mat, h)
+
+
+func _in_building(p: Vector2) -> bool:
+	for r in BUILDINGS:
+		if p.x > r[0] and p.x < r[2] and p.y > r[1] and p.y < r[3]:
+			return true
+	return false
+
+
+## Kit piece at ground point p (x, z), its outside facing `out`, `along` m from p along d.
+func _kit(piece: String, p: Vector2, out: Vector2, sx: float = 1.0, y: float = 0.0) -> void:
+	var n := MillKit.make(piece)
+	add_child(n)
+	n.position = Vector3(p.x, y, p.y)
+	n.rotation.y = atan2(-out.x, -out.y)
+	n.scale.x = sx
+
+
+## Run 4 m pieces (2 m for short leftovers) from t0 to t1 along a wall, stretched to fit.
+func _kit_run(base: String, a: Vector2, d: Vector2, out: Vector2, t0: float, t1: float) -> void:
+	var L := t1 - t0
+	if L < 0.5:
+		return
+	var piece := base + "_4m"
+	var unit := 4.0
+	if L < 3.0:
+		piece = base + "_2m"
+		unit = 2.0
+	var cnt := maxi(1, roundi(L / unit))
+	var w := L / cnt
+	for i in cnt:
+		_kit(piece, a + d * (t0 + w * (i + 0.5)), out, w / unit)
+
+
+func _dress_kit() -> void:
+	for wl in _wall_log:
+		var a: Vector2 = wl[0]
+		var b: Vector2 = wl[1]
+		var mat: Material = wl[3]
+		if float(wl[4]) < WALL_H - 0.01:
+			continue  # fences and covered walks stay greybox
+		var d := (b - a).normalized()
+		var nrm := Vector2(-d.y, d.x)
+		var mid := (a + b) * 0.5
+		var in_l := _in_building(mid + nrm)
+		var in_r := _in_building(mid - nrm)
+		if in_l == in_r:
+			continue  # shared party wall (or no building): nothing outside to dress
+		var out := -nrm if in_l else nrm
+		var steel := mat == m_wood
+		var L := a.distance_to(b)
+		# solid stretches between the openings
+		var gs: Array = wl[2].duplicate()
+		gs.sort_custom(func(x, y): return x[0] < y[0])
+		var cur := 0.0
+		for g in gs:
+			var g0: float = float(g[0]) - float(g[1]) * 0.5
+			_kit_run("mk_clad" if steel else "mk_plinth", a, d, out, cur, g0)
+			cur = g0 + float(g[1])
+			var gp: Vector2 = a + d * float(g[0])
+			if is_equal_approx(float(g[1]), WINDOW_W):
+				_kit("mk_win_metal" if steel else "mk_win_brick", gp, out)
+			elif is_equal_approx(float(g[1]), DOOR_W):
+				_kit("mk_door_metal" if steel else "mk_door_brick", gp, out)
+		_kit_run("mk_clad" if steel else "mk_plinth", a, d, out, cur, L)
+		if steel:
+			for t in [0.0, L]:
+				_kit("mk_column_steel", a + d * t, out)
+		else:
+			_kit_run("mk_coping", a, d, out, 0.0, L)
+			for t in [0.0, L]:
+				_kit("mk_pier_brick", a + d * t, out)
+	# set pieces
+	_kit("mk_chimney", Vector2(26, -32), Vector2(1, 0))    # kiln stack, free-standing east of the sheds
+	_kit("mk_porch_6m", Vector2(-24, -22), Vector2(0, 1))  # boarding house front
+	_kit("mk_dock_6m", Vector2(42, 6), Vector2(1, 0))      # power house, river side
 
 
 func _r(c: Vector3, s: Vector2) -> void:
